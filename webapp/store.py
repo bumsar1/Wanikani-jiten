@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS shared_lists (
   media_type INTEGER,
   chars INTEGER,
   coverage REAL,
+  kanji_cov REAL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, deck_id)
 );
@@ -157,6 +158,12 @@ def init() -> None:
                         " WHERE share_lists = 1")
         if "share_token" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN share_token TEXT")
+        if "share_stats" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN share_stats"
+                        " INTEGER NOT NULL DEFAULT 0")
+        scols = {r["name"] for r in con.execute("PRAGMA table_info(shared_lists)")}
+        if "kanji_cov" not in scols:
+            con.execute("ALTER TABLE shared_lists ADD COLUMN kanji_cov REAL")
         ccols = {r["name"] for r in con.execute("PRAGMA table_info(creds)")}
         if "jimaku_key" not in ccols:
             con.execute("ALTER TABLE creds ADD COLUMN jimaku_key BLOB")
@@ -247,6 +254,19 @@ def is_sharing(user_id: int) -> bool:
     return get_visibility(user_id) != "private"
 
 
+def set_share_stats(user_id: int, on: bool) -> None:
+    with db() as con:
+        con.execute("UPDATE users SET share_stats = ? WHERE id = ?",
+                    (1 if on else 0, user_id))
+
+
+def shares_stats(user_id: int) -> bool:
+    with db() as con:
+        row = con.execute("SELECT share_stats FROM users WHERE id = ?",
+                          (user_id,)).fetchone()
+    return bool(row and row["share_stats"])
+
+
 def share_token(user_id: int, regenerate: bool = False) -> str:
     """The unguessable half of a share link. Regenerating breaks old links,
     which is the only way to take one back."""
@@ -296,10 +316,11 @@ def put_shared_lists(user_id: int, rows: list[dict]) -> None:
         for r in rows:
             con.execute(
                 "INSERT OR REPLACE INTO shared_lists (user_id, deck_id, status,"
-                " title, media_type, chars, coverage, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?)",
+                " title, media_type, chars, coverage, kanji_cov, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
                 (user_id, r["deck_id"], r["status"], r.get("title"),
-                 r.get("media_type"), r.get("chars"), r.get("coverage"), now()))
+                 r.get("media_type"), r.get("chars"), r.get("coverage"),
+                 r.get("kanji_cov"), now()))
 
 
 def everyones_lists() -> list[dict]:

@@ -187,8 +187,14 @@ TOGETHER_CSS = """
 .titlelist li { display:flex; justify-content:space-between; gap:12px; padding:5px 0;
   border-bottom:1px solid var(--line-soft); font-size:14.5px; }
 .titlelist li:last-child { border-bottom:0; }
+.titlelist .covs { display:flex; gap:10px; white-space:nowrap; }
 .titlelist .cov { color:var(--muted); font-variant-numeric:tabular-nums;
-  white-space:nowrap; }
+  font-size:13px; }
+.titlelist .cov b { color:var(--fg); font-weight:600; }
+.titlelist .kanjicov { color:var(--faint); }
+.statsbox { display:flex; align-items:center; gap:7px; font-size:14px;
+  color:var(--muted); cursor:pointer; }
+.statsbox input { width:16px; height:16px; accent-color:var(--accent); }
 .titlelist .both { color:var(--accent); font-weight:600; }
 .overlap { background:var(--accent-soft); border:1px solid var(--line);
   border-radius:14px; padding:4px 18px 14px; margin-bottom:8px; }
@@ -231,8 +237,10 @@ document.querySelectorAll('[data-copy]').forEach(function (btn) {
 """
 
 
-def share_panel(visibility: str, token: str, base_url: str, username: str) -> str:
+def share_panel(visibility: str, token: str, base_url: str, username: str,
+                share_stats: bool = False) -> str:
     """One control, four levels, each containing the one before it."""
+    checked = "checked" if share_stats else ""
     opts = "".join(
         f'<option value="{v}"{" selected" if v == visibility else ""}>'
         f'{esc(w_labels[v])}</option>' for v in w_levels)
@@ -268,6 +276,9 @@ def share_panel(visibility: str, token: str, base_url: str, username: str) -> st
         <form method="post" action="/together/share" class="row">
           <label for="vis"><b>Who can see my lists</b></label>
           <select id="vis" name="visibility" onchange="this.form.submit()">{opts}</select>
+          <label class="statsbox"><input type="checkbox" name="stats" value="1"
+            {checked} onchange="this.form.submit()">
+            Include my WaniKani stats</label>
           <noscript><button>Save</button></noscript>
         </form>
         <p class="sub" style="margin:10px 0 0">Shared: the title, whether you are
@@ -287,8 +298,8 @@ w_labels = {
 
 
 def together_page(user, visibility, token, base_url, people, by_user, overlap,
-                  absent) -> str:
-    head = share_panel(visibility, token, base_url, user["username"])
+                  absent, share_stats=False) -> str:
+    head = share_panel(visibility, token, base_url, user["username"], share_stats)
 
     cards = []
     for p in people:
@@ -303,9 +314,8 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
                 f'<li><span class="{"both" if it["deck_id"] in overlap else ""}">'
                 f'<a href="https://jiten.moe/decks/media/{it["deck_id"]}/detail"'
                 f' target="_blank" rel="noopener">{esc(it["title"])}</a></span>'
-                f'<span class="cov">'
-                f'{f"{it['coverage']:.0f}%" if it.get("coverage") else "&mdash;"}'
-                f'</span></li>' for it in items[:30])
+                f'<span class="covs">{cov_cells(it)}</span></li>'
+                for it in items[:30])
             more = (f'<li class="who-has">and {len(items) - 30} more</li>'
                     if len(items) > 30 else "")
             groups.append(f'<div class="group"><h4>{label} &middot; {len(items)}</h4>'
@@ -344,7 +354,19 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
                  scripts=SHARE_JS)
 
 
-def public_profile(username: str, level, lists, base_url: str) -> str:
+def cov_cells(it) -> str:
+    """Words as jiten measures them, kanji as WaniKani reaches them.
+
+    Finished titles are listed but never analysed, so they carry no kanji
+    figure and say so rather than showing a zero.
+    """
+    word = f'{it["coverage"]:.0f}%' if it.get("coverage") else "&mdash;"
+    kanji = f'{it["kanji_cov"]:.0f}%' if it.get("kanji_cov") else "&mdash;"
+    return (f'<span class="cov"><b>{word}</b> words</span>'
+            f'<span class="cov kanjicov">{kanji} kanji</span>')
+
+
+def public_profile(username: str, stats, lists, base_url: str) -> str:
     """The read-only view behind a share link. No login, no navigation."""
     groups = []
     total = 0
@@ -358,25 +380,46 @@ def public_profile(username: str, level, lists, base_url: str) -> str:
         lis = "".join(
             f'<li><span><a href="https://jiten.moe/decks/media/{it["deck_id"]}/detail"'
             f' target="_blank" rel="noopener">{esc(it["title"])}</a></span>'
-            f'<span class="cov">'
-            f'{f"{it['coverage']:.0f}%" if it.get("coverage") else "&mdash;"}</span>'
-            f'</li>' for it in items)
+            f'<span class="covs">{cov_cells(it)}</span></li>' for it in items)
         groups.append(f'<div class="group"><h4>{label} &middot; {len(items)}</h4>'
                       f'<ul class="titlelist">{lis}</ul></div>')
 
     inner = "".join(groups) or '<div class="group"><p class="empty">Nothing here yet.</p></div>'
+
+    cards = ""
+    if stats:
+        pace = ""
+        if stats.get("pace"):
+            pace = (f'<div class="card"><div class="n">{stats["pace"]:.0f}</div>'
+                    f'<div class="l">days per level</div></div>')
+        cards = f"""
+      <div class="cards" style="max-width:620px;margin-bottom:20px">
+        <div class="card"><div class="n">{stats["level"]}</div>
+          <div class="l">WaniKani level</div></div>
+        <div class="card"><div class="n">{stats["kanji"]:,}</div>
+          <div class="l">kanji known</div></div>
+        <div class="card"><div class="n">{stats["words"]:,}</div>
+          <div class="l">words known</div></div>
+        {pace}
+      </div>"""
+
+    asof = ""
+    if stats and stats.get("as_of"):
+        asof = f' &middot; as of {esc(stats["as_of"])}'
     body = f"""
       <div class="hero" style="padding:48px 0 22px">
         <h1>{esc(username)}</h1>
         <p class="sub">What {esc(username)} is watching and reading on
-        jiten.moe{f" &middot; WaniKani level {level}" if level else ""}
-        &middot; {total} titles</p>
+        jiten.moe &middot; {total} titles{asof}</p>
       </div>
+      {cards}
       <div class="person" style="max-width:620px">{inner}</div>
-      <footer style="max-width:620px">Percentages are how much of each title's
+      <footer style="max-width:620px">Word coverage is how much of each title's
       vocabulary {esc(username)} already knows, measured by
       <a href="https://jiten.moe" target="_blank" rel="noopener">jiten.moe</a>.
-      This page is shared deliberately and can be withdrawn at any time.</footer>"""
+      Kanji coverage is how many of its kanji WaniKani has taught them, weighted
+      by how often each one appears. This page is shared deliberately and can be
+      withdrawn at any time.</footer>"""
     return shell(f"{username} on jiten.moe", body, extra_css=TOGETHER_CSS)
 
 

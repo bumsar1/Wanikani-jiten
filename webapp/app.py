@@ -272,8 +272,6 @@ def dashboard():
     known = w.wk_known(cache)
     key = creds.get("jiten_key")
     ids, status, everything = user_decks(key)
-    if store.is_sharing(user["id"]) and everything:
-        store.put_shared_lists(user["id"], everything)
 
     decks = []
     for deck_id in ids[:40]:
@@ -283,6 +281,15 @@ def dashboard():
         except SystemExit:
             continue
         decks.append((deck, w.analyse_deck(words, known)))
+
+    if store.is_sharing(user["id"]) and everything:
+        # Attach the kanji figure to the titles that have one; finished titles
+        # are listed but never analysed, so they simply do not get one.
+        kanji_by_id = {d.get("deckId"): round(r["kanji_cov_occ"], 1)
+                       for d, r in decks}
+        for row in everything:
+            row["kanji_cov"] = kanji_by_id.get(row["deck_id"])
+        store.put_shared_lists(user["id"], everything)
 
     day = time.strftime("%Y-%m-%d")
     store.log_history(user["id"], day, [
@@ -344,7 +351,8 @@ def together():
     vis = store.get_visibility(user["id"])
     token = store.share_token(user["id"]) if vis in ("link", "public") else ""
     return render.together_page(user, vis, token, request.url_root.rstrip("/"),
-                                people, by_user, overlap, absent)
+                                people, by_user, overlap, absent,
+                                store.shares_stats(user["id"]))
 
 
 @app.post("/together/share")
@@ -352,6 +360,7 @@ def set_sharing():
     user = require_login()
     level = request.form.get("visibility", "private")
     store.set_visibility(user["id"], level)
+    store.set_share_stats(user["id"], request.form.get("stats") == "1")
     # Publish straight away rather than making them reload the dashboard first.
     if level != "private":
         key = creds_of(user).get("jiten_key")
@@ -370,9 +379,17 @@ def new_share_link():
 
 
 def _public_view(owner):
-    snap = store.get_snapshot(owner["id"])
-    return render.public_profile(owner["username"],
-                                 (snap or {}).get("level"),
+    stats = None
+    if store.shares_stats(owner["id"]):
+        snap = store.get_snapshot(owner["id"])
+        if snap:
+            known = w.wk_known(snap)
+            stats = {"level": snap.get("level"),
+                     "kanji": len(known["kanji_known"]),
+                     "words": len(known["words_known_set"]),
+                     "pace": round(w.wk_pace(snap) or 0, 1),
+                     "as_of": (snap.get("fetched_at") or "")[:10]}
+    return render.public_profile(owner["username"], stats,
                                  store.lists_of(owner["id"]),
                                  request.url_root.rstrip("/"))
 
