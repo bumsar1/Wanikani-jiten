@@ -435,8 +435,9 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             h.append(
                 f'<tr><td><a href="https://jiten.moe/decks/media/{did}/detail"'
                 f' target="_blank" rel="noopener">{esc(w.deck_title(deck))}</a>'
-                + (f' <a class="subs" href="{subs}" target="_blank"'
-                   f' rel="noopener" title="Japanese subtitles on jimaku.cc">subs</a>'
+                + (f' <button class="subs" data-entry="{subs.rsplit("/", 1)[-1]}"'
+                   f' data-title="{esc(w.deck_title(deck))}"'
+                   f' title="Japanese subtitles on jimaku.cc">subs</button>'
                    if subs else "")
                 + f'</td>'
                 f'<td>{esc(STATUS_LABELS.get(extras["status"].get(did), "—"))}</td>'
@@ -448,6 +449,7 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                 f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
                 f'<td class="num">{trend}</td></tr>')
         h.append("</table></div>")
+        h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
         h.append(h2("What each level would buy you"))
         h.append(w.CHART_HTML)
@@ -539,11 +541,12 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         f"const REACH_TARGET={min(60, lvl + 5)};</script>"
         f"<script>{w.SORT_JS}</script><script>{w.SLIDER_JS}</script>"
         f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
-        f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script>")
+        f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script>"
+        f"<script>{w.SUBS_JS}</script>")
 
     return shell(f'{user["username"]} - coverage', body, user=user,
                  extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS
-                 + w.BROWSE_CSS, scripts=scripts)
+                 + w.BROWSE_CSS + w.SUBS_CSS, scripts=scripts)
 
 
 def _trend(rows) -> str:

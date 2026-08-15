@@ -7,11 +7,13 @@ versions share one definition of what coverage means.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import threading
 import time
+import zipfile
 from collections import Counter
 
 from flask import (Flask, abort, redirect, request, session, url_for,
@@ -406,6 +408,45 @@ def words(deck_id):
     except SystemExit as e:
         return Response(str(e), status=502, mimetype="text/plain")
     return jsonify(dict(counts))
+
+
+@app.get("/subs/<int:entry_id>")
+def subs_list(entry_id):
+    """That title's subtitle files, Chinese-only ones left out."""
+    user = require_login()
+    key = creds_of(user).get("jimaku_key")
+    if not key:
+        return Response("no jimaku key on this account", status=403,
+                        mimetype="text/plain")
+    dual = request.args.get("dual") == "1"
+    rows = w.jimaku_files(entry_id, key)
+    keep = w.wanted_subtitles(rows, allow_dual=dual)
+    return jsonify({
+        "files": [{"name": r["name"], "url": r["url"], "size": r.get("size"),
+                   "lang": r["lang"]} for r in keep],
+        "skipped": sum(1 for r in rows if r not in keep),
+        "total": len(rows),
+        "onlyDual": bool(keep) and all(r["lang"] == "dual" for r in keep),
+    })
+
+
+@app.get("/subs/<int:entry_id>/zip")
+def subs_zip(entry_id):
+    user = require_login()
+    key = creds_of(user).get("jimaku_key")
+    if not key:
+        return Response("no jimaku key on this account", status=403,
+                        mimetype="text/plain")
+    dual = request.args.get("dual") == "1"
+    keep = w.wanted_subtitles(w.jimaku_files(entry_id, key), allow_dual=dual)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for r in keep:
+            status, data, _ = w.http(r["url"], timeout=120)
+            if status < 400:
+                z.writestr(r["name"], data)
+    return Response(buf.getvalue(), mimetype="application/zip", headers={
+        "Content-Disposition": f"attachment; filename=jimaku-{entry_id}.zip"})
 
 
 @app.route("/api/<path:rest>", methods=["GET", "POST"])
