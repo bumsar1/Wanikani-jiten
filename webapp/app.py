@@ -55,7 +55,11 @@ def creds_of(user) -> dict:
 
 
 def refresh_wanikani(user_id: int, token: str) -> None:
-    """Pull the account's subjects and assignments and store the snapshot."""
+    """Pull the account's subjects and assignments and store the snapshot.
+
+    A refresh already in flight wins; the caller should wait for it rather
+    than start a second one against the same rate limit.
+    """
     with _lock:
         if user_id in _refreshing:
             return
@@ -68,6 +72,26 @@ def refresh_wanikani(user_id: int, token: str) -> None:
     finally:
         with _lock:
             _refreshing.discard(user_id)
+
+
+def await_snapshot(user_id: int, timeout: float = 120.0):
+    """Wait out a refresh that is already running.
+
+    Saving your keys kicks off a fetch in the background; opening the
+    dashboard a moment later used to step aside for it, find nothing, and
+    blame the token. A first fetch is ~9,000 subjects, so it takes a while.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with _lock:
+            running = user_id in _refreshing
+        if not running:
+            break
+        time.sleep(1.0)
+        snap = store.get_snapshot(user_id)
+        if snap:
+            return snap
+    return store.get_snapshot(user_id)
 
 
 def deck_words_shared(deck_id: int, key: str | None, deck: dict | None):
@@ -211,12 +235,15 @@ def dashboard():
 
     cache = store.get_snapshot(user["id"])
     if not cache:
-        # First visit: fetch inline so there is something to show.
+        # First visit: fetch inline, or wait out the one already running.
         refresh_wanikani(user["id"], creds["wk_token"])
-        cache = store.get_snapshot(user["id"])
+        cache = store.get_snapshot(user["id"]) or await_snapshot(user["id"])
         if not cache:
             return redirect(url_for(
-                "settings", note="WaniKani would not answer - check the token."))
+                "settings",
+                note="WaniKani did not answer in time. If the terminal is still "
+                     "listing pages, give it a moment and reload; otherwise "
+                     "check the token."))
     age = store.snapshot_age_hours(user["id"]) or 0
     if age > STALE_HOURS:
         threading.Thread(target=refresh_wanikani,
