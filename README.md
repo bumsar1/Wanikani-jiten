@@ -357,9 +357,19 @@ to flip one. Each curve carries two markers at your level — filled for what
 finishing the level would give you, hollow for what you have right now — with the
 figure on hover.
 
-**Nearly within reach** defaults to your own lists, and an *others* tab searches
-the catalogue by media type and tag (252 of them, from Jiten) sorted by your
-coverage, with a button to drop anything straight onto your plan-to-read list.
+**Nearly within reach** defaults to your own lists, with a level box at the top —
+set it to whatever you are aiming at and every figure re-reads against that level
+instead of an arbitrary default. The *others* tab searches the catalogue by media
+type and tag (252 of them, from Jiten), filtered to a percentage you choose, and
+you pick which percentage: jiten word coverage, or WaniKani kanji coverage at your
+target level. Anything it finds can go straight onto your plan-to-read list.
+
+The two metrics behave differently and the page says so. Word coverage filters
+server-side and is instant, but it cannot be projected forward — WaniKani teaches
+~6,500 words, so the rest of that number comes from reading rather than levelling.
+Kanji coverage *can* be projected, but every title has to be read once to do it,
+and Jiten allows ten of those a minute; the first sweep is slow, and cached
+afterwards.
 
 Both also carry a **level slider** — drag it and every tracked title's coverage
 updates to what it would be at that level, with how far off that is at your pace —

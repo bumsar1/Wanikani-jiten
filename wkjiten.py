@@ -1677,6 +1677,10 @@ SLIDER_JS = """
 """
 
 REACH_HTML = """
+<div class="controls levelbar">
+  <label for="rlevel">Judge everything as if I were level</label>
+  <input id="rlevel" type="number" min="1" max="60">
+</div>
 <div class="modes reachtabs">
   <button data-reach="mine" class="on">your list</button>
   <button data-reach="others">others</button>
@@ -1692,6 +1696,12 @@ REACH_HTML = """
       <option value="3">movie</option><option value="8">web novel</option>
     </select>
     <select id="rtag"></select>
+    <select id="rmetric">
+      <option value="jiten">jiten word coverage</option>
+      <option value="kanji">WaniKani kanji coverage</option>
+    </select>
+    <input id="rpct" type="number" min="0" max="100" step="1" value="70"
+           title="Only show titles at or above this percentage">
     <input id="rmin" type="number" placeholder="min chars" min="0" step="10000"
            value="20000" title="Without this the list fills up with one-page entries">
     <button id="rgo" class="go">Find</button>
@@ -1704,9 +1714,13 @@ REACH_JS = """
 (function(){
   const mine = document.getElementById('reach-mine');
   if (!mine || typeof TRACK === 'undefined') return;
-  const target = REACH_TARGET;
+  const lvlInput = document.getElementById('rlevel');
+  lvlInput.min = TRACK.level;
+  lvlInput.value = REACH_TARGET;
+  const target = () => Math.max(TRACK.level, Math.min(60, +lvlInput.value || TRACK.level));
 
   function drawMine(){
+    const lv = target();
     if (!TRACK.titles.length){
       mine.innerHTML = '<p class="empty">Nothing on your jiten.moe lists yet. ' +
         'Mark something as watching/reading or plan to watch/read, or look ' +
@@ -1714,14 +1728,15 @@ REACH_JS = """
       return;
     }
     const rows = TRACK.titles.map(t => {
-      const then = t.c[target - 1];
+      const then = t.c[lv - 1];
       return `<tr><td>${t.t}</td><td class="num">${t.now.toFixed(1)}%</td>
               <td class="num">${then.toFixed(1)}%</td>
               <td class="num up">+${(then - t.now).toFixed(1)}pp</td></tr>`;
     }).join('');
     mine.innerHTML = `<div class="wrap"><table class="sortable"><tr><th>title</th>
-      <th class="num">now</th><th class="num">at ${target}</th>
+      <th class="num">kanji now</th><th class="num">at ${lv}</th>
       <th class="num">gain</th></tr>${rows}</table></div>`;
+    sortable();
   }
 
   const sel = document.getElementById('rtag');
@@ -1741,36 +1756,112 @@ REACH_JS = """
         <td class="num up">+${o.gain}pp</td></tr>`).join('') + '</table></div>';
   }
 
+  const planCell = id => `<td class="acts"><button data-track="${id}"
+    data-status="1">plan to watch/read</button></td>`;
+  const titleCell = r => `<td><a href="https://jiten.moe/decks/media/${r.deckId}/detail"
+    target="_blank" rel="noopener">${r.originalTitle || r.englishTitle || '?'}</a></td>`;
+
+  function wire(box){
+    box.querySelectorAll('[data-track]').forEach(b =>
+      b.onclick = () => track(+b.dataset.track, +b.dataset.status, b));
+    sortable();
+  }
+
   async function find(){
     const box = document.getElementById('reach-results');
     if (!LIVE){ box.innerHTML = othersFallback(); return; }
     const type = document.getElementById('rtype').value;
     const tag = document.getElementById('rtag').value;
     const min = document.getElementById('rmin').value;
-    box.innerHTML = '<p class="empty">Looking&hellip;</p>';
+    const metric = document.getElementById('rmetric').value;
+    const pct = +document.getElementById('rpct').value || 0;
+    const lv = target();
+
     let url = '/api/media-deck/get-media-decks?sortBy=coverage&sortOrder=1';
     if (type) url += '&mediaType=' + type;
     if (tag) url += '&tags=' + tag;
     if (min) url += '&charCountMin=' + min;
-    try {
-      const d = await (await fetch(url)).json();
-      const rows = (d.data || []).slice(0, 25);
-      if (!rows.length){ box.innerHTML = '<p class="empty">Nothing matched.</p>'; return; }
-      box.innerHTML = `<p class="sub">${d.totalItems.toLocaleString()} titles match;
-        the 25 you are closest to reading:</p>
+    // For the kanji metric, jiten coverage is only a pre-filter: cast wider,
+    // because the two measures diverge by ten points or more either way.
+    const floor = metric === 'jiten' ? pct : Math.max(0, pct - 20);
+    if (floor) url += '&coverageMin=' + floor;
+
+    box.innerHTML = '<p class="empty">Looking&hellip;</p>';
+    let d;
+    try { d = await (await fetch(url)).json(); }
+    catch (e){ box.innerHTML = '<p class="empty">Lookup failed.</p>'; return; }
+    const rows = d.data || [];
+    if (!rows.length){
+      box.innerHTML = `<p class="empty">Nothing reaches ${pct}%. Lower the bar,
+        widen the filters, or come back a few levels from now.</p>`;
+      return;
+    }
+
+    if (metric === 'jiten'){
+      box.innerHTML = `<p class="sub">${d.totalItems.toLocaleString()} titles are at
+        ${pct}% word coverage or better. Word coverage cannot be projected forward:
+        WaniKani teaches ~6,500 words, so the rest comes from reading, not levelling.
+        Switch to kanji coverage to see level ${lv}.</p>
         <div class="wrap"><table class="sortable"><tr><th>title</th><th>type</th>
-        <th class="num">chars</th><th class="num">your coverage</th><th></th></tr>` +
-        rows.map(r => `<tr><td><a href="https://jiten.moe/decks/media/${r.deckId}/detail"
-          target="_blank" rel="noopener">${r.originalTitle || r.englishTitle || '?'}</a></td>
+        <th class="num">chars</th><th class="num">word coverage</th><th></th></tr>` +
+        rows.slice(0, 25).map(r => `<tr>${titleCell(r)}
           <td>${WK.types[r.mediaType] || '?'}</td>
           <td class="num">${(r.characterCount||0).toLocaleString()}</td>
           <td class="num">${r.coverage != null ? r.coverage + '%' : '—'}</td>
-          <td class="acts"><button data-track="${r.deckId}" data-status="1"
-            >plan to watch/read</button></td></tr>`).join('') + '</table></div>';
-      box.querySelectorAll('[data-track]').forEach(b =>
-        b.onclick = () => track(+b.dataset.track, +b.dataset.status, b));
-      sortable();
-    } catch (e){ box.innerHTML = '<p class="empty">Lookup failed.</p>'; }
+          ${planCell(r.deckId)}</tr>`).join('') + '</table></div>';
+      wire(box);
+      return;
+    }
+
+    // Kanji coverage has to be computed per title, one word list each, so this
+    // walks a bounded number of candidates and reports as it goes.
+    const budget = Math.min(rows.length, 14);
+    const found = [];
+    for (let i = 0; i < budget; i++){
+      const r = rows[i];
+      box.innerHTML = `<p class="empty">Reading ${i + 1} of ${budget}
+        &mdash; ${found.length} over ${pct}% so far&hellip;<br>
+        <small>Each title has to be read once. Jiten allows ten of those a
+        minute, so the first pass over unfamiliar titles is slow; they are
+        cached afterwards and come back instantly.</small></p>`;
+      let occ;
+      try { occ = await kanjiCounts(r.deckId); }
+      catch (e){ continue; }
+      let total = 0, now = 0;
+      const byLevel = new Array(61).fill(0);
+      for (const [ch, n] of occ){
+        total += n;
+        if (known.has(ch)) now += n;
+        const kl = WK.levels[ch];
+        if (kl) byLevel[kl] += n;
+      }
+      if (!total) continue;
+      let run = 0;
+      for (let l = 1; l <= lv; l++) run += byLevel[l];
+      const then = run / total * 100;
+      if (then >= pct) found.push({r, now: now / total * 100, then});
+    }
+
+    if (!found.length){
+      box.innerHTML = `<p class="empty">None of the ${budget} closest candidates
+        reach ${pct}% kanji coverage at level ${lv}. Lower the bar or aim at a
+        higher level.</p>`;
+      return;
+    }
+    found.sort((a, b) => b.then - a.then);
+    box.innerHTML = `<p class="sub">Checked the ${budget} titles you are closest to;
+      ${found.length} clear ${pct}% kanji coverage once you reach level ${lv}.</p>
+      <div class="wrap"><table class="sortable"><tr><th>title</th><th>type</th>
+      <th class="num">chars</th><th class="num">kanji now</th>
+      <th class="num">at ${lv}</th><th class="num">word cov</th><th></th></tr>` +
+      found.map(f => `<tr>${titleCell(f.r)}
+        <td>${WK.types[f.r.mediaType] || '?'}</td>
+        <td class="num">${(f.r.characterCount||0).toLocaleString()}</td>
+        <td class="num">${f.now.toFixed(1)}%</td>
+        <td class="num up">${f.then.toFixed(1)}%</td>
+        <td class="num">${f.r.coverage != null ? f.r.coverage + '%' : '—'}</td>
+        ${planCell(f.r.deckId)}</tr>`).join('') + '</table></div>';
+    wire(box);
   }
 
   document.querySelectorAll('[data-reach]').forEach(b => b.onclick = () => {
@@ -1783,6 +1874,11 @@ REACH_JS = """
       find();
   });
   document.getElementById('rgo').onclick = find;
+  lvlInput.addEventListener('change', () => {
+    drawMine();
+    document.getElementById('reach-results').innerHTML = '';
+    if (!document.getElementById('reach-others').hidden) find();
+  });
   drawMine(); sortable();
 })();
 """
@@ -1826,6 +1922,10 @@ function sortable(){
 
 REACH_CSS = """
 .reachtabs { margin-bottom:12px; }
+.levelbar { align-items:center; margin-bottom:12px; }
+.levelbar label { font-size:14px; color:var(--muted); }
+.levelbar input { width:82px; }
+#rpct { width:86px; }
 .sortcol { cursor:pointer; user-select:none; }
 .sortcol:hover { color:var(--accent); }
 .sorted::after { content:" \\2193"; color:var(--accent); }
@@ -2268,42 +2368,30 @@ function when(levels){
   return `${span}, around ${when.toLocaleString('en', {month:'short', year:'numeric'})}`;
 }
 
-function countKanji(text, btn){
-  return new Promise(resolve => {
-    const occ = new Map();
-    const CHUNK = 120000;
-    let i = 0;
-    (function slice(){
-      const end = Math.min(text.length, i + CHUNK);
-      for (; i < end; i++){
-        const c = text.charCodeAt(i);
-        if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3400 && c <= 0x4dbf) ||
-            (c >= 0xf900 && c <= 0xfaff)){
-          const ch = text[i];
-          occ.set(ch, (occ.get(ch) || 0) + 1);
-        }
+// word -> occurrences, straight from the server's cache, tallied into
+// kanji -> occurrences.
+async function kanjiCounts(deckId){
+  const words = await (await fetch('/words/' + deckId)).json();
+  const occ = new Map();
+  for (const w in words){
+    const n = words[w];
+    for (let i = 0; i < w.length; i++){
+      const c = w.charCodeAt(i);
+      if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3400 && c <= 0x4dbf) ||
+          (c >= 0xf900 && c <= 0xfaff)){
+        const ch = w[i];
+        occ.set(ch, (occ.get(ch) || 0) + n);
       }
-      if (i < text.length){
-        if (btn) btn.textContent = Math.round(i / text.length * 100) + '%';
-        setTimeout(slice, 0);
-      } else resolve(occ);
-    })();
-  });
+    }
+  }
+  return occ;
 }
 
 async function analyse(id, btn){
   btn.disabled = true; btn.textContent = 'reading…';
   const d = lastRows.find(r => r.deckId === id) || {};
   try {
-    const r = await fetch(`/api/media-deck/${id}/download`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({format: 4, downloadType: 1, order: 3})});
-    const text = await r.text();
-    // Half a megabyte of repeated words, and megabytes for a long series.
-    // Scanned in one go this blocks the main thread long enough for the whole
-    // page - cursor included - to stutter, so walk it in slices and hand
-    // control back between them. charCodeAt beats a regex test per character.
-    const occ = await countKanji(text, btn);
+    const occ = await kanjiCounts(id);
 
     let total = 0, mine = 0, outside = 0;
     const byLevel = new Array(61).fill(0);
@@ -2604,7 +2692,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                    "then": round(later, 1), "gain": round(gain, 1)}
                   for gain, now, later, d in data["gains"]]
 
-    h.append(h2(f"Nearly within reach at level {target_level}"))
+    h.append(h2("Nearly within reach"))
     h.append(REACH_HTML)
 
     h.append('<footer>Kanji figures computed locally from Jiten word lists; '
@@ -2736,6 +2824,24 @@ def cmd_serve(args) -> None:
         def do_GET(self):
             if self.path in ("/", "/index.html"):
                 return self._send(200, page, "text/html; charset=utf-8")
+            # Word lists come from the on-disk cache, not straight through the
+            # proxy. Jiten allows ten of these heavy downloads a minute, and a
+            # page that analyses a dozen titles would stall on the eleventh.
+            # It is also far less for the browser to chew on: a few thousand
+            # word counts instead of half a megabyte of repeated lines.
+            if self.path.startswith("/words/"):
+                try:
+                    deck_id = int(self.path.rsplit("/", 1)[-1])
+                except ValueError:
+                    return self._send(400, b"bad id", "text/plain")
+                try:
+                    deck = jiten_deck_detail(deck_id, key)
+                    counts = deck_words(deck_id, key, deck)
+                except SystemExit as e:
+                    return self._send(502, str(e).encode(), "text/plain")
+                body = json.dumps(dict(counts), ensure_ascii=False,
+                                  separators=(",", ":")).encode()
+                return self._send(200, body, "application/json")
             self._proxy(None)
 
         def do_POST(self):
