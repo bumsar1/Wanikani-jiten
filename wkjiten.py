@@ -1676,6 +1676,163 @@ SLIDER_JS = """
 })();
 """
 
+REACH_HTML = """
+<div class="modes reachtabs">
+  <button data-reach="mine" class="on">your list</button>
+  <button data-reach="others">others</button>
+</div>
+<div id="reach-mine"></div>
+<div id="reach-others" hidden>
+  <div class="controls">
+    <select id="rtype">
+      <option value="">any type</option>
+      <option value="1">anime</option><option value="9">manga</option>
+      <option value="4">novel</option><option value="7">visual novel</option>
+      <option value="6">game</option><option value="2">drama</option>
+      <option value="3">movie</option><option value="8">web novel</option>
+    </select>
+    <select id="rtag"></select>
+    <input id="rmin" type="number" placeholder="min chars" min="0" step="10000"
+           value="20000" title="Without this the list fills up with one-page entries">
+    <button id="rgo" class="go">Find</button>
+  </div>
+  <div id="reach-results"></div>
+</div>
+"""
+
+REACH_JS = """
+(function(){
+  const mine = document.getElementById('reach-mine');
+  if (!mine || typeof TRACK === 'undefined') return;
+  const target = REACH_TARGET;
+
+  function drawMine(){
+    if (!TRACK.titles.length){
+      mine.innerHTML = '<p class="empty">Nothing on your jiten.moe lists yet. ' +
+        'Mark something as watching/reading or plan to watch/read, or look ' +
+        'under <b>others</b>.</p>';
+      return;
+    }
+    const rows = TRACK.titles.map(t => {
+      const then = t.c[target - 1];
+      return `<tr><td>${t.t}</td><td class="num">${t.now.toFixed(1)}%</td>
+              <td class="num">${then.toFixed(1)}%</td>
+              <td class="num up">+${(then - t.now).toFixed(1)}pp</td></tr>`;
+    }).join('');
+    mine.innerHTML = `<div class="wrap"><table class="sortable"><tr><th>title</th>
+      <th class="num">now</th><th class="num">at ${target}</th>
+      <th class="num">gain</th></tr>${rows}</table></div>`;
+  }
+
+  const sel = document.getElementById('rtag');
+  if (sel && typeof TAGS !== 'undefined'){
+    sel.innerHTML = '<option value="">any tag</option>' +
+      TAGS.map(t => `<option value="${t.tagId}">${t.name}</option>`).join('');
+  }
+
+  function othersFallback(){
+    if (!OTHERS.length) return '<p class="empty">Nothing precomputed here.</p>';
+    return `<div class="wrap"><table class="sortable"><tr><th>title</th>
+      <th class="num">now</th><th class="num">at ${target}</th>
+      <th class="num">gain</th></tr>` + OTHERS.map(o =>
+      `<tr><td><a href="https://jiten.moe/decks/media/${o.id}/detail"
+        target="_blank" rel="noopener">${o.t}</a></td>
+        <td class="num">${o.now}%</td><td class="num">${o.then}%</td>
+        <td class="num up">+${o.gain}pp</td></tr>`).join('') + '</table></div>';
+  }
+
+  async function find(){
+    const box = document.getElementById('reach-results');
+    if (!LIVE){ box.innerHTML = othersFallback(); return; }
+    const type = document.getElementById('rtype').value;
+    const tag = document.getElementById('rtag').value;
+    const min = document.getElementById('rmin').value;
+    box.innerHTML = '<p class="empty">Looking&hellip;</p>';
+    let url = '/api/media-deck/get-media-decks?sortBy=coverage&sortOrder=1';
+    if (type) url += '&mediaType=' + type;
+    if (tag) url += '&tags=' + tag;
+    if (min) url += '&charCountMin=' + min;
+    try {
+      const d = await (await fetch(url)).json();
+      const rows = (d.data || []).slice(0, 25);
+      if (!rows.length){ box.innerHTML = '<p class="empty">Nothing matched.</p>'; return; }
+      box.innerHTML = `<p class="sub">${d.totalItems.toLocaleString()} titles match;
+        the 25 you are closest to reading:</p>
+        <div class="wrap"><table class="sortable"><tr><th>title</th><th>type</th>
+        <th class="num">chars</th><th class="num">your coverage</th><th></th></tr>` +
+        rows.map(r => `<tr><td><a href="https://jiten.moe/decks/media/${r.deckId}/detail"
+          target="_blank" rel="noopener">${r.originalTitle || r.englishTitle || '?'}</a></td>
+          <td>${WK.types[r.mediaType] || '?'}</td>
+          <td class="num">${(r.characterCount||0).toLocaleString()}</td>
+          <td class="num">${r.coverage != null ? r.coverage + '%' : '—'}</td>
+          <td class="acts"><button data-track="${r.deckId}" data-status="1"
+            >plan to watch/read</button></td></tr>`).join('') + '</table></div>';
+      box.querySelectorAll('[data-track]').forEach(b =>
+        b.onclick = () => track(+b.dataset.track, +b.dataset.status, b));
+      sortable();
+    } catch (e){ box.innerHTML = '<p class="empty">Lookup failed.</p>'; }
+  }
+
+  document.querySelectorAll('[data-reach]').forEach(b => b.onclick = () => {
+    const which = b.dataset.reach;
+    document.querySelectorAll('[data-reach]').forEach(x =>
+      x.classList.toggle('on', x === b));
+    document.getElementById('reach-mine').hidden = which !== 'mine';
+    document.getElementById('reach-others').hidden = which !== 'others';
+    if (which === 'others' && !document.getElementById('reach-results').innerHTML)
+      find();
+  });
+  document.getElementById('rgo').onclick = find;
+  drawMine(); sortable();
+})();
+"""
+
+# Any table marked sortable gets clickable headers. Cheaper than threading a
+# sort order through every server-rendered table.
+SORT_JS = """
+function sortable(){
+  document.querySelectorAll('table.sortable').forEach(tbl => {
+    if (tbl.dataset.wired) return;
+    tbl.dataset.wired = '1';
+    const head = tbl.rows[0];
+    [...head.cells].forEach((th, i) => {
+      if (!th.textContent.trim()) return;
+      th.classList.add('sortcol');
+      th.onclick = () => {
+        const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+        [...head.cells].forEach(c => { delete c.dataset.dir;
+          c.classList.remove('sorted'); });
+        th.dataset.dir = dir; th.classList.add('sorted');
+        const rows = [...tbl.rows].slice(1);
+        const val = r => {
+          const t = (r.cells[i]?.textContent || '').trim();
+          const n = parseFloat(t.replace(/[^0-9.+-]/g, ''));
+          return isNaN(n) ? null : n;
+        };
+        rows.sort((a, b) => {
+          const x = val(a), y = val(b);
+          if (x === null || y === null)
+            return (a.cells[i]?.textContent || '').localeCompare(
+                    b.cells[i]?.textContent || '', 'ja');
+          return x - y;
+        });
+        if (dir === 'desc') rows.reverse();
+        rows.forEach(r => tbl.appendChild(r));
+      };
+    });
+  });
+}
+"""
+
+REACH_CSS = """
+.reachtabs { margin-bottom:12px; }
+.sortcol { cursor:pointer; user-select:none; }
+.sortcol:hover { color:var(--accent); }
+.sorted::after { content:" \\2193"; color:var(--accent); }
+th.sorted[data-dir=asc]::after { content:" \\2191"; }
+.hit { cursor:help; }
+"""
+
 CHART_HTML = """
 <div class="chartbar">
   <div id="series" class="series"></div>
@@ -1715,9 +1872,22 @@ CHART_JS = """
       const pts = t.c.map((p, j) => `${x(j+1).toFixed(1)},${y(p).toFixed(1)}`).join(' ');
       s += `<polyline points="${pts}" fill="none" stroke="${PAL[i % PAL.length]}"
             stroke-width="2" stroke-linejoin="round"/>`;
-      const at = t.c[TRACK.level - 1];
-      s += `<circle cx="${x(TRACK.level).toFixed(1)}" cy="${y(at).toFixed(1)}" r="3.5"
-            fill="${PAL[i % PAL.length]}"/>`;
+      // Two markers at your level: the filled one is where the curve says you
+      // would be with everything up to here at Guru, the hollow one is what you
+      // actually have. The gap between them is the reviews you owe.
+      const cx = x(TRACK.level).toFixed(1);
+      const at = t.c[TRACK.level - 1], col = PAL[i % PAL.length];
+      s += `<circle cx="${cx}" cy="${y(at).toFixed(1)}" r="3.5" fill="${col}"/>
+            <circle cx="${cx}" cy="${y(at).toFixed(1)}" r="11" fill="transparent"
+              class="hit"><title>${t.t}
+${at.toFixed(1)}% with all of level ${TRACK.level} at Guru</title></circle>`;
+      if (Math.abs(at - t.now) > 0.3){
+        s += `<circle cx="${cx}" cy="${y(t.now).toFixed(1)}" r="3.5" fill="var(--raise)"
+                stroke="${col}" stroke-width="1.8"/>
+              <circle cx="${cx}" cy="${y(t.now).toFixed(1)}" r="11" fill="transparent"
+                class="hit"><title>${t.t}
+${t.now.toFixed(1)}% right now</title></circle>`;
+      }
     });
     s += `<text x="${L+pw/2}" y="${H-1}" class="tick" text-anchor="middle">WaniKani level</text></svg>`;
     box.innerHTML = s;
@@ -2292,7 +2462,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     h.append(BROWSE_SLOT)
 
     h.append(h2("Your tracked titles"))
-    h.append(f'<div class="wrap"><table><tr><th>title</th><th>list</th>'
+    h.append(f'<div class="wrap"><table class="sortable"><tr><th>title</th><th>list</th>'
              f'<th class="num">kanji</th>'
              f'<th></th><th class="num">finish L{lvl}</th>'
              f'<th class="num">jiten</th><th class="num">lvl for 95%</th>'
@@ -2389,7 +2559,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     if leeches:
         h.append('<p class="sub">Apprentice kanji, ranked by how often they appear '
                  'in the titles above. Already in your review queue.</p>')
-        h.append('<div class="wrap"><table><tr><th>kanji</th><th>reading</th>'
+        h.append('<div class="wrap"><table class="sortable"><tr><th>kanji</th><th>reading</th>'
                  '<th>meaning</th><th class="num">occurrences</th><th>stage</th>'
                  '<th class="num">wk level</th></tr>')
         for n, ch, stage, klvl, readings, meaning in leeches:
@@ -2405,10 +2575,19 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         h.append('<p class="empty">Nothing in Apprentice shows up in your tracked '
                  'titles.</p>')
 
+    others: list[dict] = []
+    tags: list[dict] = []
+    target_level = min(60, lvl + getattr(args, "soon_levels", 5))
     if key and not args.no_recommend:
         data = collect_status(args, key, cache, known)
+        target_level = data["target_level"]
+        try:
+            tags = get_json(f"{JITEN_API}/api/media-deck/tags",
+                            headers=jiten_headers(key))
+        except SystemExit:
+            tags = []
         h.append(h2("Best titles for you right now"))
-        h.append('<div class="wrap"><table><tr><th>type</th><th>title</th>'
+        h.append('<div class="wrap"><table class="sortable"><tr><th>type</th><th>title</th>'
                  '<th class="num">coverage</th><th class="num">chars</th></tr>')
         for label, recs in data["recommendations"]:
             for d in recs:
@@ -2420,19 +2599,13 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                     f'<td class="num">{d.get("coverage") or 0}%</td>'
                     f'<td class="num">{d.get("characterCount") or 0:,}</td></tr>')
         h.append("</table></div>")
-        if data["gains"]:
-            h.append(h2(f'Nearly within reach at level {data["target_level"]}'))
-            h.append('<div class="wrap"><table><tr><th>title</th><th class="num">now'
-                     '</th><th class="num">then</th><th class="num">gain</th></tr>')
-            for gain, now, later, d in data["gains"]:
-                h.append(
-                    f'<tr><td><a href="https://jiten.moe/decks/media/'
-                    f'{d.get("deckId")}/detail">'
-                    f'{esc(d.get("originalTitle") or d.get("englishTitle") or "?")}'
-                    f'</a></td><td class="num">{now:.1f}%</td>'
-                    f'<td class="num">{later:.1f}%</td>'
-                    f'<td class="num up">{gain:+.1f}pp</td></tr>')
-            h.append("</table></div>")
+        others = [{"t": d.get("originalTitle") or d.get("englishTitle") or "?",
+                   "id": d.get("deckId"), "now": round(now, 1),
+                   "then": round(later, 1), "gain": round(gain, 1)}
+                  for gain, now, later, d in data["gains"]]
+
+    h.append(h2(f"Nearly within reach at level {target_level}"))
+    h.append(REACH_HTML)
 
     h.append('<footer>Kanji figures computed locally from Jiten word lists; '
              'the jiten column is your account\'s own coverage. '
@@ -2452,16 +2625,21 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                     "c": [round(p, 2) for _lv, p in r["curve"]]}
                    for d, r in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"])],
     }, ensure_ascii=False, separators=(",", ":"))
-    head += f"<style>{SLIDER_CSS}{GRID_CSS}{CHART_CSS}</style>"
+    head += f"<style>{SLIDER_CSS}{GRID_CSS}{CHART_CSS}{REACH_CSS}</style>"
     titles_json = json.dumps(grid_titles, ensure_ascii=False, separators=(",", ":"))
+    others_json = json.dumps(others, ensure_ascii=False, separators=(",", ":"))
+    tags_json = json.dumps(tags, ensure_ascii=False, separators=(",", ":"))
 
     def compose(live: bool) -> str:
         parts, css = list(h), head
         parts.append(f"<script>const TRACK={track};const GRID={grid_json};"
                      f"const GRID_LEVEL={lvl};const GRID_TITLES={titles_json};"
-                     f"const LIVE={'true' if live else 'false'};</script>"
-                     f"<script>{SLIDER_JS}</script><script>{CHART_JS}</script>"
-                     f"<script>{GRID_JS}</script>")
+                     f"const LIVE={'true' if live else 'false'};"
+                     f"const OTHERS={others_json};const TAGS={tags_json};"
+                     f"const REACH_TARGET={target_level};</script>"
+                     f"<script>{SORT_JS}</script><script>{SLIDER_JS}</script>"
+                     f"<script>{CHART_JS}</script><script>{GRID_JS}</script>"
+                     f"<script>{REACH_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.

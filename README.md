@@ -350,6 +350,17 @@ every WaniKani level would give you on each title, coverage over time once you
 have two days of history, the leech table, and the recommendations. No external
 scripts, fonts or trackers, and it follows your system's light/dark setting.
 
+Every table sorts by clicking its headers, so you can rank your list by jiten
+coverage or by WaniKani kanji coverage, whichever you are judging by. The level
+chart's lines toggle: click a title to solo it, click again for all, right-click
+to flip one. Each curve carries two markers at your level — filled for what
+finishing the level would give you, hollow for what you have right now — with the
+figure on hover.
+
+**Nearly within reach** defaults to your own lists, and an *others* tab searches
+the catalogue by media type and tag (252 of them, from Jiten) sorted by your
+coverage, with a button to drop anything straight onto your plan-to-read list.
+
 Both also carry a **level slider** — drag it and every tracked title's coverage
 updates to what it would be at that level, with how far off that is at your pace —
 and a **kanji grid**: all ~2,100 WaniKani kanji laid out by level, coloured either
