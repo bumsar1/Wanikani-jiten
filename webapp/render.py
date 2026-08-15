@@ -218,6 +218,9 @@ TOGETHER_CSS = """
 .addbtn:disabled { opacity:.5; cursor:default; }
 .addbtn.done { color:var(--good); border-color:var(--good); }
 .profilewrap { max-width:620px; margin:0 auto; }
+.backlink { padding-top:18px; margin:0; font-size:13.5px; }
+.backlink a { color:var(--muted); border:0; }
+.backlink a:hover { color:var(--accent); }
 .nowplaying { display:flex; gap:16px; align-items:center; padding:16px 18px;
   border-bottom:1px solid var(--line); background:var(--accent-soft); }
 .nowplaying img { width:64px; height:90px; object-fit:cover; border-radius:6px;
@@ -515,7 +518,7 @@ def cov_cells(it) -> str:
 
 
 def public_profile(owner, profile: dict, stats, lists, base_url: str,
-                   featured=None) -> str:
+                   featured=None, viewer=None) -> str:
     """The read-only view behind a share link. No login, no navigation."""
     username = owner["username"]
     groups = []
@@ -561,9 +564,14 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str,
         banner = (f'<div class="banner" style="margin-top:26px;'
                   f'border-radius:14px;background-image:url(/media/banner/'
                   f'{owner["id"]})"></div>')
+    # A stranger gets no navigation at all; someone signed in should not be
+    # stranded on a page with no way out.
+    back = ('<p class="backlink"><a href="/">&larr; back to your dashboard</a></p>'
+            if viewer else "")
     body = f"""
       <div class="profilewrap">
-      {banner}
+      {back}
+      {banner}""" + f"""
       <div class="hero" style="padding:{"18px" if banner else "48px"} 0 22px">
         <div style="display:flex;gap:14px;align-items:center">
           {avatar_tag(owner["id"], profile.get("has_avatar"), username)}

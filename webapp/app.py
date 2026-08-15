@@ -430,7 +430,8 @@ def _public_view(owner):
     return render.public_profile(owner, profile, stats,
                                  store.lists_of(owner["id"]),
                                  request.url_root.rstrip("/"),
-                                 store.currently_of(owner["id"]))
+                                 store.currently_of(owner["id"]),
+                                 viewer=current_user())
 
 
 @app.get("/s/<token>")

@@ -851,6 +851,21 @@ def jimaku_url(deck: dict, key: str | None = None) -> str | None:
     return f"https://jimaku.cc/entry/{entry}" if entry else None
 
 
+def vocab_overlap(source: Counter, candidate: Counter) -> float:
+    """How much of the candidate's running text the source already covers.
+
+    Weighted on the candidate's side on purpose: the question is what share of
+    the new thing the old one prepared you for, not how much of the old thing
+    reappears. A short source that happens to use very common words should not
+    score well against a long candidate for that reason alone.
+    """
+    total = sum(candidate.values())
+    if not total:
+        return 0.0
+    shared = sum(n for word, n in candidate.items() if word in source)
+    return shared / total * 100
+
+
 def cover_url(deck_id) -> str:
     """Jiten's cover art for a title. The path is predictable from the id, so a
     thumbnail costs no extra request."""
@@ -1429,6 +1444,49 @@ def cmd_when(args) -> None:
     print("sufficient - grammar and the ~30k words WaniKani never teaches decide")
     print("the rest. The word coverage figure from jiten.moe is the honest one,")
     print("and it climbs by reading, not by levelling.")
+
+
+def cmd_like(args) -> None:
+    """Titles built on the vocabulary of one you already know.
+
+    Not "same genre" - what share of the new title's running text is made of
+    words the one you name already taught you.
+    """
+    key = jiten_key(args.jiten_key)
+    if not key:
+        raise SystemExit("`like` needs a Jiten API key.")
+    source_deck = jiten_deck_detail(args.deck_id, key)
+    source = deck_words(args.deck_id, key, source_deck)
+
+    url = (f"{JITEN_API}/api/media-deck/get-media-decks?sortBy=coverage"
+           f"&sortOrder=1&charCountMin={args.min_chars}")
+    if args.type:
+        url += f"&mediaType={media_type_id(args.type)}"
+    rows = [r for r in (get_json(url, headers=jiten_headers(key)).get("data") or [])
+            if r["deckId"] != args.deck_id][:args.limit]
+
+    print(f"\nBecause you know {deck_title(source_deck)}")
+    print(f"Reading {len(rows)} candidates; each is downloaded once and then "
+          f"cached.\n")
+    scored = []
+    for i, r in enumerate(rows):
+        title = r.get("originalTitle") or r.get("englishTitle") or "?"
+        print(f"  [{i+1}/{len(rows)}] {title[:40]}", flush=True)
+        try:
+            words = deck_words(r["deckId"], key, r)
+        except SystemExit:
+            continue
+        scored.append((vocab_overlap(source, words), r))
+        time.sleep(args.sleep)
+
+    scored.sort(key=lambda s: -s[0])
+    print(f"\n{'shared':>7} {'yours':>7} {'chars':>9}  title")
+    for share, r in scored[:args.top_n]:
+        cov = r.get("coverage")
+        print(f"{share:6.1f}% {f'{cov}%' if cov is not None else '-':>7} "
+              f"{r.get('characterCount') or 0:>9,}  "
+              f"{r.get('originalTitle') or r.get('englishTitle') or '?'}")
+        print(f"{'':>26}jiten.moe/decks/media/{r['deckId']}/detail")
 
 
 def cmd_next(args) -> None:
@@ -2174,6 +2232,61 @@ REACH_CSS = """
 .sorted::after { content:" \\2193"; color:var(--accent); }
 th.sorted[data-dir=asc]::after { content:" \\2191"; }
 .hit { cursor:help; }
+"""
+
+LIKE_HTML = """
+<div class="controls">
+  <label for="likesrc">Titles built on the vocabulary of</label>
+  <select id="likesrc"></select>
+  <select id="liketype">
+    <option value="">any type</option>
+    <option value="1">anime</option><option value="9">manga</option>
+    <option value="4">novel</option><option value="7">visual novel</option>
+    <option value="6">game</option><option value="2">drama</option>
+  </select>
+  <button id="likego" class="go">Find</button>
+</div>
+<div id="likeout"></div>
+"""
+
+LIKE_JS = """
+(function(){
+  const out = document.getElementById('likeout');
+  if (!out || typeof TRACK === 'undefined') return;
+  const sel = document.getElementById('likesrc');
+  sel.innerHTML = TRACK.titles.map((t, i) =>
+    `<option value="${TRACK.ids[i]}">${t.t}</option>`).join('');
+
+  document.getElementById('likego').onclick = async () => {
+    const id = sel.value, type = document.getElementById('liketype').value;
+    out.innerHTML = `<p class="empty">Reading candidates &mdash; each title is
+      downloaded once and then cached, so this is slow only the first time.</p>`;
+    let d;
+    try {
+      d = await (await fetch(`/like/${id}?type=${type}`)).json();
+    } catch (e){ out.innerHTML = '<p class="empty">Lookup failed.</p>'; return; }
+    if (!d.results || !d.results.length){
+      out.innerHTML = '<p class="empty">Nothing to compare against.</p>'; return;
+    }
+    out.innerHTML = `<p class="sub">Share of each title's running text made of
+      words ${d.source} already used. Roughly two thirds is the floor for any
+      two Japanese works, so the gap above that is the signal.</p>
+      <div class="wrap"><table class="sortable"><tr><th>title</th>
+      <th class="num">shared vocabulary</th><th class="num">your coverage</th>
+      <th class="num">chars</th></tr>` +
+      d.results.map(r => `<tr><td class="withcover"><span class="ct">
+          <img class="cover" loading="lazy" alt=""
+            src="https://cdn.jiten.moe/${r.id}/cover.jpg"
+            onerror="this.style.visibility='hidden'">
+          <a href="https://jiten.moe/decks/media/${r.id}/detail" target="_blank"
+             rel="noopener">${r.title}</a></span></td>
+        <td class="num"><b>${r.shared.toFixed(1)}%</b></td>
+        <td class="num">${r.coverage != null ? r.coverage + '%' : '—'}</td>
+        <td class="num">${(r.chars||0).toLocaleString()}</td></tr>`).join('') +
+      '</table></div>';
+    sortable();
+  };
+})();
 """
 
 CHART_HTML = """
@@ -3017,6 +3130,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     h.append(h2("Nearly within reach"))
     h.append(REACH_HTML)
 
+    h.append(h2("Because you know these"))
+    h.append(LIKE_HTML)
+
     h.append('<footer>Kanji figures computed locally from Jiten word lists; '
              'the jiten column is your account\'s own coverage. '
              'Built by wkjiten.</footer></main>')
@@ -3028,12 +3144,15 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         "levels": known["kanji_level"],
         "types": MEDIA_TYPES,
     }, ensure_ascii=False, separators=(",", ":"))
+    ranked = sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"])
     track = json.dumps({
         "level": lvl, "pace": pace,
+        # Deck ids in the same order as the titles, so the picker can name one.
+        "ids": [d.get("deckId") for d, _r in ranked],
         "titles": [{"t": deck_title(d),
                     "now": round(r["kanji_cov_occ"], 2),
                     "c": [round(p, 2) for _lv, p in r["curve"]]}
-                   for d, r in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"])],
+                   for d, r in ranked],
     }, ensure_ascii=False, separators=(",", ":"))
     head += f"<style>{SLIDER_CSS}{GRID_CSS}{CHART_CSS}{REACH_CSS}{SUBS_CSS}</style>"
     titles_json = json.dumps(grid_titles, ensure_ascii=False, separators=(",", ":"))
@@ -3049,7 +3168,8 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                      f"const REACH_TARGET={target_level};</script>"
                      f"<script>{SORT_JS}</script><script>{SLIDER_JS}</script>"
                      f"<script>{CHART_JS}</script><script>{GRID_JS}</script>"
-                     f"<script>{REACH_JS}</script><script>{SUBS_JS}</script>")
+                     f"<script>{REACH_JS}</script><script>{SUBS_JS}</script>"
+                     f"<script>{LIKE_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.
@@ -3151,6 +3271,43 @@ def cmd_serve(args) -> None:
             # page that analyses a dozen titles would stall on the eleventh.
             # It is also far less for the browser to chew on: a few thousand
             # word counts instead of half a megabyte of repeated lines.
+            # Titles built on vocabulary you have already met elsewhere.
+            if self.path.startswith("/like/"):
+                parts = self.path.split("?")[0].strip("/").split("/")
+                query = urllib.parse.parse_qs(
+                    self.path.split("?")[1] if "?" in self.path else "")
+                try:
+                    source_id = int(parts[1])
+                except (ValueError, IndexError):
+                    return self._send(400, b"bad deck", "text/plain")
+                src_deck = jiten_deck_detail(source_id, key)
+                source = deck_words(source_id, key, src_deck)
+                url = (f"{JITEN_API}/api/media-deck/get-media-decks"
+                       f"?sortBy=coverage&sortOrder=1&charCountMin=20000")
+                mtype = (query.get("type") or [""])[0]
+                if mtype:
+                    url += f"&mediaType={mtype}"
+                cands = [r for r in
+                         (get_json(url, headers=jiten_headers(key)).get("data") or [])
+                         if r["deckId"] != source_id][:10]
+                results = []
+                for r in cands:
+                    try:
+                        words = deck_words(r["deckId"], key, r)
+                    except SystemExit:
+                        continue
+                    results.append({
+                        "id": r["deckId"],
+                        "title": (r.get("originalTitle") or r.get("englishTitle")
+                                  or "?"),
+                        "shared": round(vocab_overlap(source, words), 1),
+                        "coverage": r.get("coverage"),
+                        "chars": r.get("characterCount")})
+                results.sort(key=lambda x: -x["shared"])
+                return self._send(200, json.dumps(
+                    {"source": deck_title(src_deck), "results": results},
+                    ensure_ascii=False).encode(), "application/json")
+
             # Subtitles: list what is worth having, or hand over a zip of it.
             if self.path.startswith("/subs/"):
                 jkey = jimaku_key(getattr(args, "jimaku_key", None))
@@ -3382,6 +3539,15 @@ def main() -> None:
                    help="leave out example sentences")
     s.add_argument("--out", help="directory to write into (default: here)")
     s.set_defaults(func=cmd_gap)
+
+    s = subparser("like", help="titles built on vocabulary you already met")
+    s.add_argument("deck_id", type=int, help="the title you already know")
+    s.add_argument("--type", help="restrict to anime, manga, novel, ...")
+    s.add_argument("--min-chars", type=int, default=20000)
+    s.add_argument("--limit", type=int, default=12,
+                   help="candidates to read (each is one download, then cached)")
+    s.add_argument("--top-n", type=int, default=10)
+    s.set_defaults(func=cmd_like)
 
     s = subparser("edge", help="titles easier for you than their difficulty says")
     s.add_argument("--sample", type=int, default=100,
