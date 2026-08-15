@@ -44,8 +44,18 @@ Run it whenever you gain a level.
 On macOS the file has to be made executable once: open Terminal, type `chmod +x `
 (with a trailing space), drag the file into the window, press return.
 
-`decks.txt` is your list of titles — one deck id per line, anything after `#` is
-ignored. Find ids with `python wkjiten.py search "title"` and edit it freely.
+**The title list comes from your own Jiten statuses.** Whatever you have marked
+as *watching/reading* or *plan to watch/read* on jiten.moe is what gets tracked —
+set a status on the site and it shows up on the next run, no config needed.
+
+```bash
+python wkjiten.py batch --status ongoing,planning,fav
+python wkjiten.py batch --status ""     # ignore Jiten's lists
+```
+
+`decks.txt` is merged in on top, for titles you want to follow without putting
+them on a list. One deck id per line, anything after `#` is ignored; find ids
+with `python wkjiten.py search "title"`.
 
 ---
 
@@ -137,10 +147,14 @@ teaches — names, rare characters. Even at level 60 you do not get past it.
 Several decks into a CSV you can sort in Excel:
 
 ```bash
+python wkjiten.py batch                      # your Jiten lists + decks.txt
 python wkjiten.py batch 96859 118624 --out coverage.csv
 python wkjiten.py batch --search "one piece" --limit 10
-python wkjiten.py batch                      # everything in decks.txt
 ```
+
+The `list` column shows which Jiten status each title came from, so you can see
+at a glance how far along you are on what you are actually reading versus what
+is still sitting on the plan-to-read pile.
 
 ---
 
@@ -230,6 +244,7 @@ python wkjiten.py text chapter1.txt
 --top-n N            titles per media type in status (default 5)
 --soon-levels N      how many levels ahead status projects (default 5)
 --soon-limit N       candidate titles status analyses (default 6, 0=off)
+--status LIST        Jiten lists to track (default ongoing,planning; "" to disable)
 --max-stage N        highest SRS stage still counted as a leech (default 4)
 --no-open            report: do not launch a browser
 --no-recommend       report: skip the recommendation sections (faster)
@@ -252,7 +267,8 @@ word list, where each word is repeated as many times as it occurs in the work.
 That is one request per deck instead of paging `/vocabulary` 200 at a time, and
 it gives you the occurrence weighting for free.
 `POST /api/user/vocabulary/import-from-anki-txt` takes the txt file, and
-`get-media-decks?sortBy=coverage` ranks the library by your own coverage.
+`get-media-decks?sortBy=coverage` ranks the library by your own coverage, and
+`get-media-decks?status=ongoing` returns your own watching/reading list.
 300 requests/min, 10/min on the heavy endpoints — hence `--sleep`.
 
 Deck word lists are cached in `cache/decks/`, keyed on the deck's own

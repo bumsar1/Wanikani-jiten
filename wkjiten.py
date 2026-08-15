@@ -615,23 +615,77 @@ def deck_title(deck: dict) -> str:
             or deck.get("romajiTitle") or "?")
 
 
+# Jiten's own list names, as the API spells them.
+STATUS_LABELS = {
+    "ongoing": "watching/reading", "planning": "plan to watch/read",
+    "completed": "completed", "fav": "favourite", "dropped": "dropped",
+}
+
+# deckId -> the Jiten list it came from, filled in by tracked_ids.
+DECK_STATUS: dict[int, str] = {}
+
+
+def jiten_status_decks(status: str, key: str) -> list[dict]:
+    """Every deck you have put on one of your Jiten lists, all pages of it."""
+    out, offset = [], 0
+    while True:
+        url = (f"{JITEN_API}/api/media-deck/get-media-decks?status={status}"
+               f"&offset={offset}")
+        data = get_json(url, headers=jiten_headers(key))
+        rows = data.get("data") or []
+        out.extend(rows)
+        offset += data.get("pageSize") or 50
+        if not rows or offset >= (data.get("totalItems") or 0):
+            return out
+
+
 def tracked_ids(args, key: str | None) -> list[int]:
-    """Deck ids from the command line, a --search, or decks.txt."""
+    """Which decks to work on.
+
+    Explicit ids or a --search win outright. Otherwise the list comes from your
+    own Jiten statuses (what you are actually watching or planning), with
+    decks.txt merged in for anything you want to track manually.
+    """
     ids: list[int] = list(getattr(args, "deck_ids", None) or [])
+    if ids:
+        return list(dict.fromkeys(ids))
     if getattr(args, "search", None):
         for row in jiten_search(args.search, key, limit=args.limit):
             ids.append(row["deckId"])
+        return list(dict.fromkeys(ids))
+
+    sources: list[str] = []
+    statuses = [s.strip() for s in (getattr(args, "status", "") or "").split(",")
+                if s.strip()]
+    if statuses and not key:
+        print("  note: --status needs a Jiten API key; falling back to decks.txt")
+        statuses = []
+    for status in statuses:
+        rows = jiten_status_decks(status, key)
+        for row in rows:
+            DECK_STATUS.setdefault(row["deckId"], status)
+            ids.append(row["deckId"])
+        if rows:
+            sources.append(f"{len(rows)} {STATUS_LABELS.get(status, status)}")
+
     deck_file = getattr(args, "deck_file", None) or os.path.join(HERE, "decks.txt")
-    if not ids and os.path.exists(deck_file):
+    if os.path.exists(deck_file):
+        before = len(ids)
         with open(deck_file, encoding="utf-8") as f:
             for line in f:
                 line = line.split("#")[0].strip()
                 if line.isdigit():
                     ids.append(int(line))
+        if len(ids) > before:
+            sources.append(f"{len(ids) - before} from decks.txt")
+
+    ids = list(dict.fromkeys(ids))
     if not ids:
-        raise SystemExit("nothing to do: pass deck ids, --search, or list them in "
-                         f"{deck_file}")
-    return list(dict.fromkeys(ids))
+        raise SystemExit(
+            "No titles to work on. Either set a status on jiten.moe (watching, "
+            "plan to watch), list deck ids in decks.txt, or pass ids directly.")
+    print(f"Tracking {len(ids)} titles: {', '.join(sources)}")
+    return ids
 
 
 def load_decks(ids: list[int], key: str | None, sleep: float,
@@ -707,14 +761,15 @@ def cmd_batch(args) -> None:
 
     print()
     print(f"{'kanji':>7} {'jiten':>7} {'ceiling':>8} {'lvl95':>6} {'trend':>16}  "
-          f"{'type':<12} {'chars':>10}  title")
+          f"{'list':<18} {'type':<12} {'chars':>10}  title")
     for k, live, title, mtype, chars, lvl95, ceiling in sorted(summary, reverse=True):
         j = f"{live:6.2f}%" if live is not None else "     -"
         did = next((h["deckId"] for h in history if h["title"] == title), None)
         trend = history_trend(past.get(did, []))
         t = (f"{trend[1] - trend[0]:+.2f}pp / {trend[2]}d" if trend else "")
+        lst = STATUS_LABELS.get(DECK_STATUS.get(did), "")
         print(f"{k:6.2f}% {j} {ceiling:7.2f}% {lvl95 or '--':>6} {t:>16}  "
-              f"{mtype:<12} {chars:>10,}  {title}")
+              f"{lst:<18} {mtype:<12} {chars:>10,}  {title}")
     print(f"\nwrote {out}")
 
 
@@ -1130,7 +1185,8 @@ def cmd_report(args) -> None:
     h.append("</div>")
 
     h.append("<h2>Your tracked titles</h2>")
-    h.append('<div class="wrap"><table><tr><th>title</th><th class="num">kanji</th>'
+    h.append('<div class="wrap"><table><tr><th>title</th><th>list</th>'
+             '<th class="num">kanji</th>'
              '<th></th><th class="num">jiten</th><th class="num">lvl for 95%</th>'
              '<th class="num">ceiling</th><th class="num">trend</th></tr>')
     for deck, res in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"]):
@@ -1144,6 +1200,7 @@ def cmd_report(args) -> None:
         h.append(
             f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}">'
             f'{esc(deck_title(deck))}</a></td>'
+            f'<td>{esc(STATUS_LABELS.get(DECK_STATUS.get(deck_id), "—"))}</td>'
             f'<td class="num">{k:.1f}%</td>'
             f'<td><span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
             f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
@@ -1323,12 +1380,18 @@ def main() -> None:
     s.add_argument("--limit", type=int, default=25)
     s.add_argument("--deck-file", help="file of deck ids, one per line "
                                        "(default: decks.txt)")
+    s.add_argument("--status", default="ongoing,planning",
+                   help="pull titles from your Jiten lists: ongoing, planning, "
+                        "completed, fav, dropped. Empty string to disable.")
     s.add_argument("--out")
     s.set_defaults(func=cmd_batch)
 
     s = subparser("leeches", help="Apprentice items ranked by what they block")
     s.add_argument("deck_ids", nargs="*", type=int)
     s.add_argument("--deck-file", help="file of deck ids (default: decks.txt)")
+    s.add_argument("--status", default="ongoing,planning",
+                   help="pull titles from your Jiten lists: ongoing, planning, "
+                        "completed, fav, dropped. Empty string to disable.")
     s.add_argument("--search", help="use every deck matching this title filter")
     s.add_argument("--limit", type=int, default=25)
     s.add_argument("--max-stage", type=int, default=4,
@@ -1338,6 +1401,9 @@ def main() -> None:
     s = subparser("report", help="write an HTML dashboard and open it")
     s.add_argument("deck_ids", nargs="*", type=int)
     s.add_argument("--deck-file", help="file of deck ids (default: decks.txt)")
+    s.add_argument("--status", default="ongoing,planning",
+                   help="pull titles from your Jiten lists: ongoing, planning, "
+                        "completed, fav, dropped. Empty string to disable.")
     s.add_argument("--search", help="use every deck matching this title filter")
     s.add_argument("--limit", type=int, default=25)
     s.add_argument("--out", help="output path (default: report.html)")

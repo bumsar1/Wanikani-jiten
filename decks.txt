@@ -1,17 +1,29 @@
-# Titles you are tracking. One deck id per line, anything after # is ignored.
+# Optional extra titles, on top of whatever you have marked on jiten.moe.
+#
+# By default the tools track your own Jiten lists — everything you have set to
+# "watching/reading" or "plan to watch/read" — so you usually do not need this
+# file at all. Set a status on the site and it shows up here automatically.
+#
+# Use this only for titles you want to watch the numbers on without putting
+# them on a list. One deck id per line, anything after # is ignored.
 # Find an id with:  python wkjiten.py search "title"
-# Add and remove freely - this file is read on every run.
+#
+# Pull from other lists instead:
+#   python wkjiten.py batch --status ongoing,planning,fav
+#   python wkjiten.py batch --status ""        # ignore Jiten, use this file only
+#
+# The examples below are commented out. Uncomment any you want to follow.
 
-129969   # 魔女の宅急便 1-6 (novel)
-107616   # クロノ・トリガー (game)
-96748    # からかい上手の高木さん (manga)
-96859    # よつばと！ (manga)
-105475   # コンビニ人間 (novel)
-123720   # しろくまカフェ (manga)
-124785   # 君の名は。(novel)
-123744   # SPY×FAMILY (manga)
-104950   # 葬送のフリーレン (manga)
-101900   # 進撃の巨人 (manga)
-104809   # 鬼滅の刃 (manga)
-114554   # ハリー・ポッターと不死鳥の騎士団 (novel)
-98285    # ONE PIECE (manga)
+# 129969   # 魔女の宅急便 1-6 (novel)
+# 107616   # クロノ・トリガー (game)
+# 96748    # からかい上手の高木さん (manga)
+# 96859    # よつばと！ (manga)
+# 105475   # コンビニ人間 (novel)
+# 123720   # しろくまカフェ (manga)
+# 124785   # 君の名は。(novel)
+# 123744   # SPY×FAMILY (manga)
+# 104950   # 葬送のフリーレン (manga)
+# 101900   # 進撃の巨人 (manga)
+# 104809   # 鬼滅の刃 (manga)
+# 114554   # ハリー・ポッターと不死鳥の騎士団 (novel)
+# 98285    # ONE PIECE (manga)
