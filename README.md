@@ -358,11 +358,12 @@ costing you across the titles you track. Click any tile for its reading, meaning
 stage and occurrence count. Both work offline in the saved file, since the data is
 embedded rather than fetched.
 
-`serve` adds a **search box for the whole jiten.moe catalogue**. Filter by type,
-sort by your own coverage, then hit *when?* on any title and it works out — right
-there — the kanji coverage you have now, what finishing your current level adds,
-and which level and roughly which month each threshold lands on. Same numbers as
-`wkjiten when`, no terminal needed.
+`serve` adds a **search box for the whole jiten.moe catalogue**. Type a title and
+press Enter (it does not search as you type), filter by type, sort by your own
+coverage, then hit *when?* on any title and it works out — right there — the kanji
+coverage you have now, what finishing your current level adds, and which level and
+roughly which month each threshold lands on. Same numbers as `wkjiten when`, no
+terminal needed.
 
 Each result also has **reading** and **plan** buttons that set the status on your
 Jiten account, which is what makes the next run pick the title up. Find something,

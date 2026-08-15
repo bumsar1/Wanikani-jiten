@@ -1878,8 +1878,9 @@ BROWSE_HTML = """
 <p class="sub">Search the whole catalogue. Pick a title to work out, right here,
 what level it stops fighting you at.</p>
 <div class="controls">
-  <input id="q" type="search" placeholder="title, romaji or English&hellip;"
+  <input id="q" type="search" placeholder="title, romaji or English &mdash; press Enter"
          autocomplete="off">
+  <button id="go" class="go">Search</button>
   <select id="type">
     <option value="">any type</option>
     <option value="1">anime</option><option value="9">manga</option>
@@ -1903,7 +1904,7 @@ BROWSE_JS = """
 const KANJI = /[\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff]/;
 const known = new Set(Array.from(WK.known));
 const $ = s => document.querySelector(s);
-let timer, lastRows = [];
+let lastRows = [];
 
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -1915,7 +1916,7 @@ async function search(){
   const type = $('#type').value, sort = $('#sort').value;
   const min = $('#minchars').value;
   if (!q && !type && !min){ $('#results').innerHTML =
-    '<p class="empty">Type something, or pick a filter.</p>'; return; }
+    '<p class="empty">Type a title and press Enter, or pick a filter.</p>'; return; }
   $('#results').innerHTML = '<p class="empty">Searching&hellip;</p>';
   let url = `/api/media-deck/get-media-decks?sortBy=${sort}&sortOrder=1`;
   if (q) url += `&titleFilter=${encodeURIComponent(q)}`;
@@ -2070,10 +2071,16 @@ async function analyse(id, btn){
   btn.disabled = false; btn.textContent = 'when?';
 }
 
-$('#q').addEventListener('input', () => { clearTimeout(timer);
-  timer = setTimeout(search, 350); });
+// Searching on every keystroke meant a request and a re-render while you were
+// still typing. Enter only.
+$('#q').addEventListener('keydown', e => {
+  // Enter also confirms an IME conversion; that one is not a submit.
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); search(); }
+});
+$('#go').addEventListener('click', search);
 for (const id of ['#type', '#sort', '#minchars'])
-  $(id).addEventListener('change', search);
+  $(id).addEventListener('change', () => { if ($('#q').value.trim() ||
+    $('#type').value || $('#minchars').value) search(); });
 """
 
 BROWSE_CSS = """
@@ -2085,6 +2092,9 @@ BROWSE_CSS = """
   outline-offset:-1px; }
 .controls #q { flex:1 1 260px; }
 .controls #minchars { width:130px; }
+button.go { padding:10px 20px; border-radius:11px; font-size:14px;
+  background:var(--accent); border-color:var(--accent); color:#fff; }
+button.go:hover { background:var(--accent); color:#fff; filter:brightness(1.08); }
 button { font:inherit; font-size:12.5px; font-weight:560; padding:5px 12px;
   cursor:pointer; border:1px solid var(--line); border-radius:99px;
   background:var(--bg); color:var(--muted); white-space:nowrap; }
