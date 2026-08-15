@@ -709,6 +709,25 @@ def cmd_deck(args) -> None:
         report(deck, analyse_deck(words, known), known, args)
 
 
+def jimaku_url(deck: dict) -> str | None:
+    """A jimaku.cc lookup for this title, keyed on its AniList entry.
+
+    Jiten stores an AniList link per deck, and jimaku's search box accepts an
+    AniList URL - so the two join on an id rather than on a guessed title,
+    which is the difference between landing on the right show and landing on
+    something with a similar name. Only worth offering for things with
+    subtitles: anime, drama, film.
+    """
+    if deck.get("mediaType") not in (1, 2, 3):
+        return None
+    for link in deck.get("links") or []:
+        url = link.get("url") or ""
+        if "anilist.co/anime/" in url:
+            return ("https://jimaku.cc/?query="
+                    + urllib.parse.quote(url, safe=""))
+    return None
+
+
 def deck_title(deck: dict) -> str:
     return (deck.get("originalTitle") or deck.get("englishTitle")
             or deck.get("romajiTitle") or "?")
@@ -1605,6 +1624,10 @@ a:hover { border-bottom-color:var(--accent); color:var(--accent); }
   border-radius:99px; overflow:hidden; }
 .meter i { display:block; height:100%; border-radius:99px; background:var(--accent); }
 .up { color:var(--good); font-weight:640; }
+.subs { display:inline-block; font-size:10.5px; font-weight:650; padding:1px 7px;
+  border-radius:99px; border:1px solid var(--line); color:var(--faint);
+  vertical-align:2px; margin-left:6px; letter-spacing:.03em; }
+.subs:hover { border-color:var(--accent); color:var(--accent); }
 .pill { display:inline-block; font-size:11px; padding:2px 9px; border-radius:99px;
   background:var(--accent-soft); color:var(--accent); font-weight:620;
   white-space:nowrap; }
@@ -1953,6 +1976,13 @@ CHART_JS = """
   const on = TRACK.titles.map(() => true);
   let tall = false;
 
+  // The slider sits directly under this chart and used to move nothing on it,
+  // which read as if the two were one instrument that had stopped working.
+  // The chart watches the slider itself, so neither script has to know about
+  // the other and load order stops mattering.
+  const slider = document.getElementById('lvl');
+  const markLevel = () => slider ? Math.max(1, Math.min(60, +slider.value || 0)) : 0;
+
   function draw(){
     const W = 760, H = tall ? 460 : 300, L = 46, R = 14, T = 12, B = 34;
     const pw = W - L - R, ph = H - T - B;
@@ -1989,6 +2019,24 @@ ${at.toFixed(1)}% with all of level ${TRACK.level} at Guru</title></circle>`;
 ${t.now.toFixed(1)}% right now</title></circle>`;
       }
     });
+    const mk = markLevel();
+    if (mk > TRACK.level){
+      s += `<line x1="${x(mk)}" y1="${T}" x2="${x(mk)}" y2="${T+ph}" class="mark"/>
+            <rect x="${x(mk) - 13}" y="${T - 2}" width="26" height="16" rx="8"
+              class="markchip"/>
+            <text x="${x(mk)}" y="${T + 10}" class="marktext"
+              text-anchor="middle">${mk}</text>`;
+      TRACK.titles.forEach(function (t, i) {
+        if (!on[i]) return;
+        const v = t.c[mk - 1];
+        s += `<rect x="${(x(mk) - 3.5).toFixed(1)}" y="${(y(v) - 3.5).toFixed(1)}"
+                width="7" height="7" fill="${PAL[i % PAL.length]}"
+                stroke="var(--raise)" stroke-width="1.2"/>
+              <circle cx="${x(mk).toFixed(1)}" cy="${y(v).toFixed(1)}" r="10"
+                fill="transparent" class="hit"><title>${t.t}
+${v.toFixed(1)}% at level ${mk}</title></circle>`;
+      });
+    }
     s += `<text x="${L+pw/2}" y="${H-1}" class="tick" text-anchor="middle">WaniKani level</text></svg>`;
     box.innerHTML = s;
   }
@@ -2010,6 +2058,7 @@ ${t.now.toFixed(1)}% right now</title></circle>`;
     });
   }
 
+  if (slider) slider.addEventListener('input', draw);
   document.getElementById('allon').onclick = () => { on.fill(true); chips(); draw(); };
   document.getElementById('tall').onclick = e => {
     tall = !tall; e.target.textContent = tall ? 'shorter' : 'taller'; draw();
@@ -2028,7 +2077,11 @@ CHART_CSS = """
   display:inline-block; }
 .chip.on { border-color:var(--c); color:var(--fg); }
 .chartbox { background:var(--raise); border:1px solid var(--line);
-  border-radius:14px; box-shadow:var(--shadow); padding:6px 10px; }
+  border-radius:14px 14px 0 0; box-shadow:var(--shadow);
+  padding:6px 10px; border-bottom:0; }
+.mark { stroke:var(--accent); stroke-width:1.5; }
+.markchip { fill:var(--accent); }
+.marktext { fill:#fff; font:700 10px/1 var(--sans, sans-serif); }
 """
 
 GRID_HTML = """
@@ -2241,9 +2294,12 @@ GRID_CSS = """
 """
 
 SLIDER_CSS = """
+/* Joined to the chart above it: it drives the marker on that chart, so it
+   should not look like a separate widget that happens to sit nearby. */
 .slider { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
-  background:var(--raise); border:1px solid var(--line); border-radius:14px;
-  padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow); }
+  background:var(--raise); border:1px solid var(--line); border-radius:0 0 14px 14px;
+  border-top:1px dashed var(--line);
+  padding:14px 18px; margin-bottom:12px; box-shadow:var(--shadow); }
 .slider label { font-size:14px; color:var(--muted); white-space:nowrap; }
 .slider label b { color:var(--accent); font-size:17px;
   font-variant-numeric:tabular-nums; }
@@ -2568,7 +2624,11 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                     f'{fin:.1f}% <span class="up">{fin - k:+.1f}</span>')
         h.append(
             f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}/detail">'
-            f'{esc(deck_title(deck))}</a></td>'
+            f'{esc(deck_title(deck))}</a>'
+            + (f' <a class="subs" href="{jimaku_url(deck)}" target="_blank" '
+               f'rel="noopener" title="Japanese subtitles on jimaku.cc">subs</a>'
+               if jimaku_url(deck) else "")
+            + f'</td>'
             f'<td>{esc(STATUS_LABELS.get(DECK_STATUS.get(deck_id), "—"))}</td>'
             f'<td class="num">{k:.1f}%</td>'
             f'<td><span class="meter"><i style="width:{k:.1f}%"></i></span></td>'

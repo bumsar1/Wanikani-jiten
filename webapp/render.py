@@ -424,7 +424,11 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             trend = _trend(history.get(did, []))
             h.append(
                 f'<tr><td><a href="https://jiten.moe/decks/media/{did}/detail"'
-                f' target="_blank" rel="noopener">{esc(w.deck_title(deck))}</a></td>'
+                f' target="_blank" rel="noopener">{esc(w.deck_title(deck))}</a>'
+                + (f' <a class="subs" href="{w.jimaku_url(deck)}" target="_blank"'
+                   f' rel="noopener" title="Japanese subtitles on jimaku.cc">subs</a>'
+                   if w.jimaku_url(deck) else "")
+                + f'</td>'
                 f'<td>{esc(STATUS_LABELS.get(extras["status"].get(did), "—"))}</td>'
                 f'<td class="num">{k:.1f}%</td>'
                 f'<td><span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
