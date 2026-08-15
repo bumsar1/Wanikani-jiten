@@ -26,5 +26,17 @@ services:
       WKJITEN_HTTPS: "${WKJITEN_HTTPS:-0}"
       WKJITEN_STALE_HOURS: "18"
 
+  # Optional: a public https:// address without opening a single port.
+  # Uncomment, put TUNNEL_TOKEN in webapp/.env, and set WKJITEN_HTTPS=1 above.
+  # The tunnel reaches the app by service name on the compose network, so the
+  # app itself stays unpublished to the host if you want it that way.
+  # cloudflared:
+  #   image: docker.io/cloudflare/cloudflared:latest
+  #   container_name: wkjiten-tunnel
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:?set this in .env}
+  #   depends_on:
+  #     - wkjiten
+
 volumes:
   wkjiten-data:

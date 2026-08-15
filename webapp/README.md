@@ -137,10 +137,55 @@ development server. Set `WKJITEN_HTTPS=1`. Registration is invitation-only, whic
 limits what an anonymous visitor can do, but a login form on the open internet is
 still a login form on the open internet.
 
-### Or Cloudflare Tunnel
+### Cloudflare Tunnel: a real address, no ports opened
 
-A middle road: a public hostname with HTTPS and no ports opened, at the cost of
-routing your traffic through Cloudflare.
+If you want it to be a site with a name rather than something only your tailnet
+can see, this is the least painful route. No port forwarding, no fixed address
+needed, works behind CGNAT, and the certificate is handled for you. Budget half
+an hour; the fiddliest part is choosing a domain name.
+
+**1. A domain on Cloudflare.** Buy one anywhere (Cloudflare Registrar sells them
+at cost, roughly $10 a year) and point its nameservers at Cloudflare. Adding the
+domain in the dashboard walks you through it.
+
+**2. Make the tunnel.** In the Cloudflare dashboard: *Zero Trust → Networks →
+Tunnels → Create a tunnel*, pick **Cloudflared**, name it, and copy the token it
+shows you. Then add a **public hostname** on that tunnel:
+
+| field | value |
+|---|---|
+| subdomain | e.g. `wk` |
+| domain | your domain |
+| service type | `HTTP` |
+| URL | `wkjiten:8080` |
+
+**3. Run it.** Put the token in `webapp/.env`:
+
+```bash
+printf 'TUNNEL_TOKEN=%s\n' 'paste-the-token-here' >> webapp/.env
+```
+
+Uncomment the `cloudflared` service in `compose.yaml`, set `WKJITEN_HTTPS=1` in
+the same `.env`, and bring both up:
+
+```bash
+podman-compose up -d
+```
+
+`https://wk.yourdomain.com` is now live. The app is still only listening inside
+the container network — Cloudflare reaches it through the tunnel, and nothing on
+your router changed.
+
+**Worth doing while you are in there.** Under *Zero Trust → Access* you can put a
+policy in front of the hostname so visitors have to prove an email address before
+they even see the login page. For a two-person tool that turns a public URL back
+into a private one, and costs nothing.
+
+Registration here is invitation-only regardless, but a login form on the open
+internet is still a login form on the open internet — this is worth ten minutes.
+
+**The trade-off:** your traffic passes through Cloudflare, who can see it. For a
+Japanese study dashboard that is a fair trade; decide for yourself.
 
 ---
 
