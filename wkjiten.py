@@ -160,13 +160,44 @@ def wk_fetch(token: str) -> dict:
     for a in wk_paged("assignments?started=true", token):
         assignments[a["data"]["subject_id"]] = a["data"]["srs_stage"]
 
+    progressions = [
+        {"level": p["data"]["level"], "started_at": p["data"].get("started_at"),
+         "passed_at": p["data"].get("passed_at")}
+        for p in wk_paged("level_progressions", token)
+    ]
+
     return {
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "username": user.get("username"),
         "level": user.get("level"),
         "subjects": {str(k): v for k, v in subjects.items()},
         "assignments": {str(k): v for k, v in assignments.items()},
+        "progressions": progressions,
     }
+
+
+def wk_pace(cache: dict, recent: int = 6) -> float | None:
+    """Median days per level over your most recent levels.
+
+    The lifetime average is useless if you ever took a break - one gap drags it
+    into the hundreds. The median of the last few levels is what you are
+    actually doing now.
+    """
+    days = []
+    for p in sorted(cache.get("progressions") or [], key=lambda p: p["level"]):
+        if not (p.get("started_at") and p.get("passed_at")):
+            continue
+        try:
+            s = time.mktime(time.strptime(p["started_at"][:10], "%Y-%m-%d"))
+            e = time.mktime(time.strptime(p["passed_at"][:10], "%Y-%m-%d"))
+        except (ValueError, TypeError):
+            continue
+        days.append((e - s) / 86400)
+    if not days:
+        return None
+    tail = sorted(days[-recent:])
+    mid = len(tail) // 2
+    return tail[mid] if len(tail) % 2 else (tail[mid - 1] + tail[mid]) / 2
 
 
 def wk_load(token_arg: str | None, refresh: bool = False) -> dict:
@@ -316,12 +347,33 @@ def deck_words(deck_id: int, api_key: str | None, deck: dict | None = None,
     return counts
 
 
-def jiten_search(query: str, api_key: str | None, limit: int = 15) -> list[dict]:
+def jiten_search(query: str, api_key: str | None, limit: int = 15, *,
+                 media_type: int | None = None, genres: str | None = None,
+                 min_chars: int | None = None, sort_by: str = "wordCount",
+                 descending: bool = True) -> list[dict]:
     url = (f"{JITEN_API}/api/media-deck/get-media-decks"
-           f"?titleFilter={urllib.parse.quote(query)}&sortBy=wordCount&sortOrder=1")
+           f"?titleFilter={urllib.parse.quote(query)}"
+           f"&sortBy={sort_by}&sortOrder={1 if descending else 0}")
+    if media_type:
+        url += f"&mediaType={media_type}"
+    if genres:
+        url += f"&genres={urllib.parse.quote(genres)}"
+    if min_chars:
+        url += f"&charCountMin={min_chars}"
     data = get_json(url, headers=jiten_headers(api_key))
     rows = data.get("data") if isinstance(data, dict) else data
     return (rows or [])[:limit]
+
+
+def media_type_id(name: str | None) -> int | None:
+    if not name:
+        return None
+    name = name.lower().strip()
+    for num, label in MEDIA_TYPES.items():
+        if label.startswith(name) or name == label:
+            return num
+    raise SystemExit(f"unknown type {name!r}; pick from: "
+                     + ", ".join(sorted(MEDIA_TYPES.values())))
 
 
 MEDIA_TYPES = {
@@ -558,15 +610,26 @@ def cmd_push(args) -> None:
 
 
 def cmd_search(args) -> None:
-    rows = jiten_search(args.query, jiten_key(args.jiten_key), limit=args.limit)
+    key = jiten_key(args.jiten_key)
+    rows = jiten_search(args.query or "", key, limit=args.limit,
+                        media_type=media_type_id(args.type),
+                        genres=args.genre, min_chars=args.min_chars,
+                        sort_by=args.sort, descending=not args.ascending)
     if not rows:
         print("no decks found")
         return
-    print(f"{'id':>8}  {'type':<13} {'chars':>9} {'diff':>5}  title")
+    print(f"{'id':>8}  {'type':<13} {'chars':>9} {'diff':>5} {'cover':>7}  title")
     for d in rows:
-        title = d.get("englishTitle") or d.get("romajiTitle") or d.get("originalTitle") or ""
-        print(f"{d.get('deckId', 0):>8}  {MEDIA_TYPES.get(d.get('mediaType'), '?'):<13} "
-              f"{d.get('characterCount') or 0:>9} {d.get('difficulty') or 0:>5.2f}  {title}")
+        title = (d.get("originalTitle") or d.get("englishTitle")
+                 or d.get("romajiTitle") or "")
+        cov = d.get("coverage")
+        print(f"{d.get('deckId', 0):>8}  "
+              f"{MEDIA_TYPES.get(d.get('mediaType'), '?'):<13} "
+              f"{d.get('characterCount') or 0:>9,} {d.get('difficulty') or 0:>5} "
+              f"{f'{cov}%' if cov is not None else '-':>7}  {title}")
+    if not key:
+        print("\n(no Jiten API key, so no coverage column)")
+    print(f"\nWorth reading? -> python wkjiten.py when {rows[0].get('deckId')}")
 
 
 def report(deck: dict, res: dict, known: dict, args) -> None:
@@ -1110,6 +1173,114 @@ def cmd_parts(args) -> None:
             print(f"\nSpread is {spread:.1f}pp. Easiest entry point: "
                   f"{best.get('originalTitle')} at {best.get('coverage')}%"
                   f", hardest is {min(covs):.2f}%.")
+
+
+def in_months(days: float) -> str:
+    if days <= 0:
+        return "now"
+    if days < 60:
+        return f"~{days / 7:.0f} weeks"
+    if days < 730:
+        return f"~{days / 30.4:.0f} months"
+    return f"~{days / 365:.1f} years"
+
+
+def eta(days: float) -> str:
+    return time.strftime("%b %Y", time.localtime(time.time() + days * 86400))
+
+
+def resolve_deck(target: str, key: str | None) -> dict | None:
+    """A deck id, or the closest title match."""
+    if target.isdigit():
+        return jiten_deck_detail(int(target), key)
+    hits = jiten_search(target, key, limit=8)
+    if not hits:
+        return None
+    if len(hits) > 1:
+        print(f'"{target}" matches {len(hits)} titles; using the first. '
+              f"Others:")
+        for d in hits[1:6]:
+            print(f"    {d['deckId']:>7}  {MEDIA_TYPES.get(d.get('mediaType'), '?'):<12}"
+                  f"  {d.get('originalTitle') or d.get('englishTitle')}")
+    return jiten_deck_detail(hits[0]["deckId"], key)
+
+
+def cmd_when(args) -> None:
+    """Is this title worth starting, and if not yet, when?"""
+    key = jiten_key(args.jiten_key)
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+    lvl = cache.get("level") or 1
+    pace = wk_pace(cache)
+
+    for target in args.targets:
+        deck = resolve_deck(str(target), key)
+        if not deck:
+            print(f'No title matching "{target}".')
+            continue
+        res = analyse_deck(deck_words(deck["deckId"], key, deck), known)
+        curve = res["curve"]
+        live = deck.get("coverage")
+
+        print()
+        print("=" * 72)
+        print(f"  {deck_title(deck)}")
+        print("=" * 72)
+        print(f"{MEDIA_TYPES.get(deck.get('mediaType'), '?')} | "
+              f"{deck.get('characterCount') or 0:,} chars | "
+              f"difficulty {deck.get('difficulty') or 0} | "
+              f"jiten.moe/decks/media/{deck['deckId']}/detail")
+
+        print(f"\nRight now, at level {lvl}")
+        print(f"  kanji coverage   {res['kanji_cov_occ']:6.2f}%  "
+              f"{bar(res['kanji_cov_occ'])}")
+        if live is not None:
+            print(f"  word coverage    {live:6.2f}%  {bar(live)}   (jiten.moe)")
+        fin = finishing_level(res, lvl)
+        if fin is not None:
+            print(f"  finishing level {lvl} takes kanji to {fin:.2f}% "
+                  f"({fin - res['kanji_cov_occ']:+.2f}pp)")
+
+        print(f"\nWhen the kanji stop getting in the way")
+        if pace:
+            print(f"  (at your recent pace of {pace:.0f} days per level)")
+        print(f"\n  {'kanji':>6}  {'level':>5}  {'levels to go':>12}  "
+              f"{'time':>11}  {'around':>9}")
+        for threshold in (80, 90, 95, 98):
+            need = level_for(curve, threshold)
+            if need is None:
+                print(f"  {threshold:>5}%  {'never':>5}  "
+                      f"{'blocked by non-WaniKani kanji':>38}")
+                continue
+            to_go = max(0, need - lvl)
+            if to_go == 0:
+                print(f"  {threshold:>5}%  {need:>5}  {'already there':>12}")
+            elif pace:
+                d = to_go * pace
+                print(f"  {threshold:>5}%  {need:>5}  {to_go:>12}  "
+                      f"{in_months(d):>11}  {eta(d):>9}")
+            else:
+                print(f"  {threshold:>5}%  {need:>5}  {to_go:>12}")
+
+        verdict_level = level_for(curve, args.comfortable) or 61
+        if res["kanji_cov_occ"] >= args.comfortable:
+            v = "Go for it - the kanji are not what is stopping you."
+        elif verdict_level - lvl <= 5:
+            v = (f"Close. {verdict_level - lvl} more levels and the kanji settle "
+                 f"down; worth starting now if you like looking things up.")
+        elif verdict_level > 60:
+            v = ("WaniKani alone never gets you there - this one needs vocabulary "
+                 "and name-reading from outside it.")
+        else:
+            v = (f"Early. Kanji stay in the way until about level {verdict_level}"
+                 + (f", {in_months((verdict_level - lvl) * pace)} off." if pace else "."))
+        print(f"\n{v}")
+
+    print("\nOne caveat worth keeping in mind: this is kanji coverage, which is a")
+    print("floor, not a ceiling. Knowing the characters is necessary but not")
+    print("sufficient - grammar and the ~30k words WaniKani never teaches decide")
+    print("the rest. The word coverage figure from jiten.moe is the honest one,")
+    print("and it climbs by reading, not by levelling.")
 
 
 def cmd_next(args) -> None:
@@ -1682,10 +1853,25 @@ def main() -> None:
     s.add_argument("--overwrite", action="store_true")
     s.set_defaults(func=cmd_push)
 
-    s = subparser("search", help="find deck ids by title")
-    s.add_argument("query")
+    s = subparser("search", help="browse jiten.moe by title, type and genre")
+    s.add_argument("query", nargs="?", default="",
+                   help="title fragment; omit to browse by filter alone")
+    s.add_argument("--type", help="anime, manga, novel, visual novel, game, ...")
+    s.add_argument("--genre", help="comma-separated genres")
+    s.add_argument("--min-chars", type=int, help="skip anything shorter")
+    s.add_argument("--sort", default="wordCount",
+                   help="title, difficulty, charCount, wordCount, coverage, "
+                        "releaseDate, communityVotes (default wordCount)")
+    s.add_argument("--ascending", action="store_true")
     s.add_argument("--limit", type=int, default=15)
     s.set_defaults(func=cmd_search)
+
+    s = subparser("when", help="should you read this yet, and if not, when")
+    s.add_argument("targets", nargs="+",
+                   help="deck ids or title fragments")
+    s.add_argument("--comfortable", type=float, default=95.0,
+                   help="kanji coverage you consider comfortable (default 95)")
+    s.set_defaults(func=cmd_when)
 
     s = subparser("deck", help="coverage report for one or more decks")
     s.add_argument("deck_ids", nargs="+", type=int)

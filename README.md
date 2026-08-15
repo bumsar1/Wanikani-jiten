@@ -11,6 +11,8 @@ different things:
 | `deck` / `batch` | **Kanji** coverage per deck — what wanilog's read-check measures — plus the WaniKani level you need to hit 95% / 98% | in the terminal |
 | `status` | Progress since your last run, the best titles for you right now per media type, and what comes within reach as you level | in the terminal |
 | `leeches` | The Apprentice items you keep failing, ranked by how often they actually block the titles you want to read | in the terminal |
+| `search` | Browse jiten.moe by title, media type and genre, with your coverage | in the terminal |
+| `when` | Whether a title is worth starting yet — and if not, which level and roughly when | in the terminal |
 | `next` | The kanji worth learning next, priced in coverage on your own titles | in the terminal |
 | `parts` | Per-episode / per-volume breakdown, so you know where a series opens up | in the terminal |
 | `edge` | Titles that are easier for you than their difficulty rating suggests | in the terminal |
@@ -124,15 +126,23 @@ Two things worth enabling on Jiten afterwards:
 
 ## 2) Kanji coverage per deck (the wanilog angle)
 
-Find the deck id:
+Find something to read:
 
 ```bash
 python wkjiten.py search "yotsuba"
+python wkjiten.py search --type anime --min-chars 30000 --sort coverage
+python wkjiten.py search --type novel --genre romance --sort difficulty --ascending
 ```
 
+The query is optional — leave it out and browse by filter alone. With an API key
+the `cover` column is your own coverage, and `--sort coverage` puts the titles
+you can most nearly read at the top:
+
 ```
-      id  type              chars  diff  title
-   96859  manga            167600  0.00  Yotsuba&!
+      id  type              chars  diff   cover  title
+   48529  anime            49,922     0  77.63%  一週間フレンズ。
+     614  anime            61,391     2   76.6%  pet
+    9129  anime            30,716     1  75.71%  true tears
 ```
 
 Then run the report:
@@ -221,7 +231,52 @@ which review is worth the most reading.
 
 ---
 
-## 5) What to learn next, and where to start
+## 5) Is this title worth starting yet?
+
+```bash
+python wkjiten.py when 21948
+python wkjiten.py when "kuroko" "yotsuba"     # ids or title fragments
+```
+
+```
+  黒子のバスケ
+anime | 97,477 chars | difficulty 2
+
+Right now, at level 12
+  kanji coverage    64.44%  #####################...........
+  word coverage     64.48%  #####################...........   (jiten.moe)
+  finishing level 12 takes kanji to 70.22% (+5.78pp)
+
+When the kanji stop getting in the way
+  (at your recent pace of 20 days per level)
+
+   kanji  level  levels to go         time     around
+     80%     19             7    ~4 months   Dec 2026
+     90%     30            18   ~12 months   Aug 2027
+     95%     41            29   ~19 months   Mar 2028
+     98%     50            38   ~2.0 years   Aug 2028
+
+Early. Kanji stay in the way until about level 41, ~19 months off.
+```
+
+The dates come from your own `level_progressions`, using the **median of your
+last six levels** rather than a lifetime average — one break in your history
+drags the mean into the hundreds of days while the median stays honest.
+
+Set your own bar with `--comfortable 90` if 95% kanji coverage is stricter than
+you need.
+
+**What this does not say.** Kanji coverage is a floor, not a ceiling. Knowing
+the characters is necessary but nowhere near sufficient — grammar and the tens
+of thousands of words WaniKani never teaches decide the rest. The word coverage
+figure from jiten.moe is the honest one, and it climbs by reading rather than by
+levelling. The two also diverge: 一週間フレンズ。sits at 77.6% word coverage but
+only 60.7% kanji coverage, because dialogue-heavy shows reuse common words while
+still reaching for characters you have not met.
+
+---
+
+## 6) What to learn next, and where to start
 
 ```bash
 python wkjiten.py next
@@ -279,7 +334,7 @@ Set the bar with `--alert-at 85`.
 
 ---
 
-## 6) The HTML dashboard
+## 7) The HTML dashboard
 
 ```bash
 python wkjiten.py report              # writes report.html and opens it
@@ -322,6 +377,9 @@ python wkjiten.py text chapter1.txt
 --flat N             parts: spread below this counts as uniform (default 5pp)
 --sample N           edge: titles sampled per media type (default 100)
 --target N           gap: stop once the list reaches this % coverage
+--comfortable N      when: kanji coverage you consider comfortable (default 95)
+--type / --genre     search: filter by media type and genre
+--sort / --ascending search: ordering, e.g. --sort coverage
 --no-open            report: do not launch a browser
 --no-recommend       report: skip the recommendation sections (faster)
 ```
@@ -333,8 +391,9 @@ Flags work both before and after the subcommand.
 ## How it works
 
 **WaniKani** ([docs](https://docs.api.wanikani.com/)) — `GET /v2/subjects?types=kanji,vocabulary,kana_vocabulary`
-for characters and levels, `GET /v2/assignments?started=true` for your SRS stage
-per subject. Bearer token, 60 requests/min.
+for characters, levels, readings and meanings, `GET /v2/assignments?started=true`
+for your SRS stage per subject, and `GET /v2/level_progressions` for how fast you
+actually move. Bearer token, 60 requests/min.
 
 **Jiten** ([guide](https://jiten.moe/guides/using-the-api), [swagger](https://api.jiten.moe/swagger/v1/swagger.json)) —
 `GET /api/media-deck/{id}/detail` for title data, and
