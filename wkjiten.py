@@ -2014,6 +2014,13 @@ SLIDER_HTML = """
   <label for="lvl">If I were level <b id="lvlout"></b></label>
   <input id="lvl" type="range" min="1" max="60">
   <span id="eta" class="pill"></span>
+  <span class="pace">
+    <label for="pace">at</label>
+    <input id="pace" type="number" min="1" max="365" step="0.5"
+           inputmode="decimal" placeholder="days">
+    <label for="pace">days per level</label>
+    <button id="paceback" type="button" hidden>back to my <b></b></button>
+  </span>
 </div>
 <div class="wrap"><table id="whatif" class="tight"><tr><th>title</th>
   <th class="num">now</th><th class="num">then</th><th class="num">gain</th>
@@ -2027,14 +2034,29 @@ SLIDER_JS = """
   // reachable by name but never a property of window.
   if (!slider || typeof TRACK === 'undefined' || !TRACK.titles.length) return;
   slider.min = TRACK.level; slider.value = Math.min(60, TRACK.level + 8);
+
+  // Your measured pace is only the starting point. A couple of slow levels sit
+  // in the median for six levels after you speed up again, so the field lets
+  // you ask "and if I did one every 9 days?" without waiting for the median to
+  // catch up. Nothing here changes what WaniKani says you actually did.
+  const paceIn = document.getElementById('pace');
+  const paceBack = document.getElementById('paceback');
+  const mine = TRACK.pace ? Math.round(TRACK.pace * 10) / 10 : 0;
+  if (mine){
+    paceIn.value = mine;
+    paceBack.querySelector('b').textContent = mine + ' days';
+  }
   function draw(){
     const lv = +slider.value;
     document.getElementById('lvlout').textContent = lv;
     const away = lv - TRACK.level;
     const eta = document.getElementById('eta');
+    // A blank or nonsense field means "use what I actually do".
+    const pace = +paceIn.value > 0 ? +paceIn.value : mine;
+    paceBack.hidden = !mine || pace === mine;
     if (away <= 0) eta.textContent = 'where you are now';
-    else if (TRACK.pace){
-      const d = away * TRACK.pace;
+    else if (pace){
+      const d = away * pace;
       eta.textContent = (d < 60 ? `~${Math.round(d/7)} weeks`
                        : d < 730 ? `~${Math.round(d/30.4)} months`
                        : `~${(d/365).toFixed(1)} years`) + ' away';
@@ -2051,6 +2073,8 @@ SLIDER_JS = """
        <th class="num">gain</th></tr>` + rows;
   }
   slider.addEventListener('input', draw);
+  paceIn.addEventListener('input', draw);
+  paceBack.addEventListener('click', () => { paceIn.value = mine; draw(); });
   draw();
 })();
 """
@@ -2702,6 +2726,18 @@ SLIDER_CSS = """
   font-variant-numeric:tabular-nums; }
 .slider input[type=range] { flex:1 1 220px; accent-color:var(--accent);
   height:22px; }
+.slider .pace { display:flex; align-items:center; gap:7px; flex:0 0 auto;
+  font-size:14px; color:var(--muted); }
+.slider .pace input[type=number] { width:66px; font:inherit; font-size:14px;
+  padding:5px 8px; border-radius:9px; border:1px solid var(--line);
+  background:var(--bg); color:var(--fg); text-align:center;
+  font-variant-numeric:tabular-nums; }
+.slider .pace input[type=number]:focus { outline:none; border-color:var(--accent); }
+.slider .pace button { font:inherit; font-size:12.5px; color:var(--faint);
+  background:none; border:0; border-bottom:1px solid var(--line);
+  padding:0 0 1px; cursor:pointer; white-space:nowrap; }
+.slider .pace button b { color:inherit; font-weight:600; }
+.slider .pace button:hover { color:var(--accent); border-bottom-color:var(--accent); }
 """
 
 BROWSE_HTML = """
