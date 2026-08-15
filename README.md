@@ -28,11 +28,12 @@ Once your keys are in place (see below), you never have to touch a terminal:
 * **macOS** — `Update coverage.command`
 
 It re-fetches your WaniKani data, sends the word list to jiten.moe, prints
-coverage for every title in `decks.txt`, lists the leeches that are holding you
-back, and opens an HTML dashboard showing:
+coverage for everything you are tracking, lists the leeches that are holding you
+back, and opens both jiten.moe and an HTML dashboard showing:
 
 * **how many new kanji and words** you have learned since the last run, and which
-* **coverage per tracked title**, with the trend since you started measuring
+* **coverage per tracked title**, with the trend since you started measuring and
+  what simply finishing your current level would add
 * **what each WaniKani level would buy you** on those titles, as a curve
 * **top 5 titles per media type** — novels, visual novels, anime, manga, games —
   ranked by your actual coverage
@@ -156,6 +157,12 @@ The `list` column shows which Jiten status each title came from, so you can see
 at a glance how far along you are on what you are actually reading versus what
 is still sitting on the plan-to-read pile.
 
+The `finish Lnn` column is what your current level is still worth: coverage once
+every kanji up to and including the level you are on sits at Guru. It is always
+ahead of your actual figure, because some items on levels you have passed have
+slipped back to Apprentice and the level you are on is only part done. Closing
+that gap needs no new levels at all — just reviews.
+
 ---
 
 ## 3) Status: progress and recommendations
@@ -193,13 +200,16 @@ whether the item matters for the books you want to read. This crosses your SRS
 stage with occurrence counts in your tracked titles:
 
 ```
-These 20 Apprentice kanji account for 35,402 of the 537,994 kanji occurrences
-you cannot read yet - 6.6% of the gap, sitting in items you have already unlocked.
+These 23 Apprentice kanji account for 1,769 of the 18,399 kanji occurrences
+you cannot read yet - 9.6% of the gap, sitting in items you have already unlocked.
 
-  occur  kanji  stage             lvl  appears in
-  11887  言     Apprentice III      5  ONE PIECE, 進撃の巨人 +11
-   3719  持     Apprentice IV       9  ONE PIECE, 魔女の宅急便 +10
+  occur  kanji reading         meaning        stage            lvl
+    575  言    げん、ごん      Say            Apprentice IV      5
+    221  彼    かれ、かの      He             Apprentice III    12
+    181  持    じ              Hold           Apprentice IV      9
 ```
+
+Vocabulary you are struggling with is listed the same way underneath.
 
 Both APIs are needed for this and neither site can do it alone: WaniKani knows
 your SRS stage, Jiten knows the frequencies, and only the two together tell you

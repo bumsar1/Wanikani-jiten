@@ -40,9 +40,12 @@ echo == 5/5  Building the dashboard ==
 %PY% wkjiten.py report
 if errorlevel 1 goto :failed
 
+start "" "https://jiten.moe/decks/media"
+
 echo.
-echo Done. The dashboard should have opened in your browser; it is also
-echo saved as report.html, and the full table is in coverage.csv.
+echo Done. The dashboard and jiten.moe should both have opened in your
+echo browser; the dashboard is also saved as report.html, and the full
+echo table is in coverage.csv.
 goto :done
 
 :failed

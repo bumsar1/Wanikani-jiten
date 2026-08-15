@@ -136,13 +136,24 @@ def wk_fetch(token: str) -> dict:
 
     subjects: dict[int, dict] = {}
     for s in wk_paged("subjects?types=kanji,vocabulary,kana_vocabulary", token):
-        chars = s["data"].get("characters")
+        d = s["data"]
+        chars = d.get("characters")
         if not chars:
             continue  # radicals with image-only characters; none for these types normally
+        # Keep the readings WaniKani actually quizzes you on, primary first,
+        # so a leech list can show what you are supposed to be recalling.
+        readings = [r["reading"] for r in (d.get("readings") or [])
+                    if r.get("primary")]
+        readings += [r["reading"] for r in (d.get("readings") or [])
+                     if r.get("accepted_answer") and not r.get("primary")]
+        meaning = next((m["meaning"] for m in (d.get("meanings") or [])
+                        if m.get("primary")), "")
         subjects[s["id"]] = {
             "type": s["object"],           # kanji | vocabulary | kana_vocabulary
             "characters": chars,
-            "level": s["data"]["level"],
+            "level": d["level"],
+            "readings": readings[:3],
+            "meaning": meaning,
         }
 
     assignments: dict[int, int] = {}       # subject_id -> srs_stage
@@ -438,11 +449,32 @@ def history_trend(rows: list[dict], field: str = "kanjiCoverage"):
     return first[1], last[1], days
 
 
+def finishing_level(res: dict, level: int | None) -> float | None:
+    """Coverage once every kanji up to and including your current level is at
+    Guru — i.e. what finishing the level you are on right now buys you.
+
+    Your actual figure sits below this: some items on levels you have passed
+    have fallen back to Apprentice, and the level you are on is only part done.
+    """
+    if not level:
+        return None
+    return res["curve"][min(60, level) - 1][1]
+
+
 def level_for(curve: list[tuple[int, float]], target: float) -> int | None:
     for lv, pct in curve:
         if pct >= target:
             return lv
     return None
+
+
+def pad(s: str, width: int) -> str:
+    """Left-justify to a terminal width, counting CJK characters as two cells.
+
+    Python pads by codepoint, so a column of Japanese ragged-edges badly.
+    """
+    cells = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in str(s))
+    return str(s) + " " * max(0, width - cells)
 
 
 def bar(pct: float, width: int = 32) -> str:
@@ -555,6 +587,10 @@ def report(deck: dict, res: dict, known: dict, args) -> None:
     print(f"  by occurrence  {res['kanji_cov_occ']:6.2f}%  {bar(res['kanji_cov_occ'])}")
     print(f"  unique kanji   {res['kanji_cov_unique']:6.2f}%  "
           f"({res['unique_kanji_known']}/{res['unique_kanji']})")
+    fin = finishing_level(res, lv)
+    if fin is not None:
+        print(f"  finishing level {lv} takes this to {fin:6.2f}%  "
+              f"({fin - res['kanji_cov_occ']:+.2f}pp, no new levels needed)")
     print(f"  kanji outside WaniKani entirely: {res['not_in_wk_pct']:.2f}% of occurrences "
           f"-> hard ceiling {100 - res['not_in_wk_pct']:.2f}%")
 
@@ -742,7 +778,8 @@ def cmd_batch(args) -> None:
                             MEDIA_TYPES.get(deck.get("mediaType"), "?"),
                             deck.get("characterCount") or 0,
                             level_for(res["curve"], 95),
-                            100 - res["not_in_wk_pct"]))
+                            100 - res["not_in_wk_pct"],
+                            finishing_level(res, cache.get("level"))))
             history.append({
                 "date": today, "deckId": deck_id, "title": title,
                 "wkLevel": cache.get("level"),
@@ -759,17 +796,25 @@ def cmd_batch(args) -> None:
     log_history(history)
     past = read_history()
 
+    lvl = cache.get("level")
     print()
-    print(f"{'kanji':>7} {'jiten':>7} {'ceiling':>8} {'lvl95':>6} {'trend':>16}  "
-          f"{'list':<18} {'type':<12} {'chars':>10}  title")
-    for k, live, title, mtype, chars, lvl95, ceiling in sorted(summary, reverse=True):
+    print(f"{'kanji':>7} {f'finish L{lvl}':>12} {'jiten':>7} {'ceiling':>8} "
+          f"{'lvl95':>6} {'trend':>16}  {'list':<18} {'chars':>10}  title")
+    for k, live, title, mtype, chars, lvl95, ceiling, fin in sorted(summary,
+                                                                   reverse=True):
         j = f"{live:6.2f}%" if live is not None else "     -"
         did = next((h["deckId"] for h in history if h["title"] == title), None)
         trend = history_trend(past.get(did, []))
         t = (f"{trend[1] - trend[0]:+.2f}pp / {trend[2]}d" if trend else "")
         lst = STATUS_LABELS.get(DECK_STATUS.get(did), "")
-        print(f"{k:6.2f}% {j} {ceiling:7.2f}% {lvl95 or '--':>6} {t:>16}  "
-              f"{lst:<18} {mtype:<12} {chars:>10,}  {title}")
+        f_txt = f"{fin:6.2f}% {fin - k:+5.2f}" if fin is not None else " " * 12
+        print(f"{k:6.2f}% {f_txt:>12} {j} {ceiling:7.2f}% {lvl95 or '--':>6} "
+              f"{t:>16}  {lst:<18} {chars:>10,}  {title}")
+    if lvl:
+        gains = [fin - k for k, *_rest, fin in summary if fin is not None]
+        if gains:
+            print(f"\nFinishing level {lvl} alone is worth "
+                  f"{sum(gains) / len(gains):+.2f}pp of kanji coverage on average.")
     print(f"\nwrote {out}")
 
 
@@ -786,23 +831,23 @@ def cmd_leeches(args) -> None:
     ids = tracked_ids(args, key)
 
     subjects, assignments = cache["subjects"], cache["assignments"]
+    if not any("readings" in s for s in subjects.values()):
+        print("  note: your cache predates reading support - run with --refresh "
+              "to show readings")
     # Stage 1-4 is Apprentice: started, repeatedly seen, not yet passed.
-    struggling: dict[str, tuple[int, int, str]] = {}   # chars -> (stage, level, type)
+    struggling: dict[str, tuple] = {}   # chars -> (stage, level, readings, meaning)
     for sid, s in subjects.items():
         stage = assignments.get(sid)
         if stage is not None and 1 <= stage <= args.max_stage:
-            struggling[s["characters"]] = (stage, s["level"], s["type"])
+            struggling[s["characters"]] = (stage, s["level"],
+                                           "、".join(s.get("readings") or []),
+                                           s.get("meaning") or "")
 
     kanji_occ: Counter[str] = Counter()
     word_occ: Counter[str] = Counter()
-    titles: dict[str, set] = {}
-    for deck, words in load_decks(ids, key, args.sleep, progress=True):
-        title = deck_title(deck)
+    for _deck, words in load_decks(ids, key, args.sleep, progress=True):
         for word, n in words.items():
             word_occ[word] += n
-            for ch in set(KANJI_RE.findall(word)):
-                if ch in struggling:
-                    titles.setdefault(ch, set()).add(title)
             for ch in KANJI_RE.findall(word):
                 kanji_occ[ch] += n
 
@@ -824,20 +869,22 @@ def cmd_leeches(args) -> None:
               f"{total_unknown:,} kanji occurrences")
         print(f"you cannot read yet - {blocked / total_unknown * 100:.1f}% of the "
               f"gap, sitting in items you have already unlocked.\n")
-        print(f"{'occur':>7}  {'kanji':<6} {'stage':<16} {'lvl':>4}  appears in")
-        for n, ch, stage, lv, _typ in rows[:args.top]:
-            where = sorted(titles.get(ch, ()))
-            shown = ", ".join(where[:2]) + (f" +{len(where) - 2}" if len(where) > 2 else "")
-            print(f"{n:>7}  {ch:<6} {SRS_STAGE_NAMES.get(stage, '?'):<16} "
-                  f"{lv:>4}  {shown}")
+        print(f"{'occur':>7}  {pad('kanji', 6)}{pad('reading', 16)}"
+              f"{pad('meaning', 15)}{pad('stage', 16)}{'lvl':>4}")
+        for n, ch, stage, lv, readings, meaning in rows[:args.top]:
+            print(f"{n:>7}  {pad(ch, 6)}{pad(readings, 16)}{pad(meaning[:14], 15)}"
+                  f"{pad(SRS_STAGE_NAMES.get(stage, '?'), 16)}{lv:>4}")
 
     vocab_rows = [(word_occ.get(w, 0), w) + struggling[w] for w in struggling
                   if word_occ.get(w, 0) > 0 and w not in known["words_known_set"]]
     vocab_rows.sort(reverse=True)
     if vocab_rows:
-        print(f"\n{'occur':>7}  {'word':<12} {'stage':<16} {'lvl':>4}")
-        for n, word, stage, lv, _typ in vocab_rows[:args.top]:
-            print(f"{n:>7}  {word:<12} {SRS_STAGE_NAMES.get(stage, '?'):<16} {lv:>4}")
+        print("\nVocabulary you are struggling with, same ranking\n")
+        print(f"{'occur':>7}  {pad('word', 12)}{pad('reading', 16)}"
+              f"{pad('meaning', 15)}{pad('stage', 16)}{'lvl':>4}")
+        for n, word, stage, lv, readings, meaning in vocab_rows[:args.top]:
+            print(f"{n:>7}  {pad(word, 12)}{pad(readings, 16)}{pad(meaning[:14], 15)}"
+                  f"{pad(SRS_STAGE_NAMES.get(stage, '?'), 16)}{lv:>4}")
 
     print("\nThese are already in your review queue - getting them to Guru is the")
     print("cheapest coverage you will ever buy.")
@@ -952,7 +999,7 @@ def cmd_status(args) -> None:
         for d in rows:
             print(f"  {d.get('coverage') or 0:>6}%  "
                   f"{d.get('characterCount') or 0:>9,}  "
-                  f"jiten.moe/decks/media/{d.get('deckId')}  "
+                  f"jiten.moe/decks/media/{d.get('deckId')}/detail  "
                   f"{d.get('originalTitle') or d.get('englishTitle') or '?'}")
 
     if not data["gains"]:
@@ -968,7 +1015,7 @@ def cmd_status(args) -> None:
     for gain, now, later, d in data["gains"]:
         print(f"{now:6.2f}% {later:7.2f}% {gain:+7.2f}pp   "
               f"{d.get('originalTitle') or d.get('englishTitle') or '?'}")
-        print(f"{'':29}jiten.moe/decks/media/{d.get('deckId')}")
+        print(f"{'':29}jiten.moe/decks/media/{d.get('deckId')}/detail")
 
 
 def esc(s) -> str:
@@ -1118,6 +1165,8 @@ td { padding:7px 10px 7px 0; border-bottom:1px solid var(--line);
   vertical-align:middle; }
 td.num, th.num { text-align:right; font-variant-numeric:tabular-nums;
   white-space:nowrap; }
+td:first-child { min-width:11em; }
+td.kanji { min-width:auto; }
 a { color:inherit; text-decoration:none; border-bottom:1px solid var(--line); }
 a:hover { border-bottom-color:var(--accent); }
 .meter { display:block; width:110px; height:7px; background:var(--line);
@@ -1185,10 +1234,11 @@ def cmd_report(args) -> None:
     h.append("</div>")
 
     h.append("<h2>Your tracked titles</h2>")
-    h.append('<div class="wrap"><table><tr><th>title</th><th>list</th>'
-             '<th class="num">kanji</th>'
-             '<th></th><th class="num">jiten</th><th class="num">lvl for 95%</th>'
-             '<th class="num">ceiling</th><th class="num">trend</th></tr>')
+    h.append(f'<div class="wrap"><table><tr><th>title</th><th>list</th>'
+             f'<th class="num">kanji</th>'
+             f'<th></th><th class="num">finish L{lvl}</th>'
+             f'<th class="num">jiten</th><th class="num">lvl for 95%</th>'
+             f'<th class="num">ceiling</th><th class="num">trend</th></tr>')
     for deck, res in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"]):
         deck_id = deck.get("deckId")
         live = deck.get("coverage")
@@ -1197,12 +1247,16 @@ def cmd_report(args) -> None:
              if trend and trend[1] > trend[0] else
              (f"{trend[1] - trend[0]:+.1f}pp / {trend[2]}d" if trend else "&mdash;"))
         k = res["kanji_cov_occ"]
+        fin = finishing_level(res, lvl)
+        fin_cell = ("&mdash;" if fin is None else
+                    f'{fin:.1f}% <span class="up">{fin - k:+.1f}</span>')
         h.append(
-            f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}">'
+            f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}/detail">'
             f'{esc(deck_title(deck))}</a></td>'
             f'<td>{esc(STATUS_LABELS.get(DECK_STATUS.get(deck_id), "—"))}</td>'
             f'<td class="num">{k:.1f}%</td>'
             f'<td><span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
+            f'<td class="num">{fin_cell}</td>'
             f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
             f'<td class="num">{level_for(res["curve"], 95) or "&mdash;"}</td>'
             f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
@@ -1217,7 +1271,9 @@ def cmd_report(args) -> None:
 
     # Leeches: Apprentice items weighted by how often they block your titles.
     subjects, assignments = cache["subjects"], cache["assignments"]
-    struggling = {s["characters"]: (assignments[sid], s["level"])
+    struggling = {s["characters"]: (assignments[sid], s["level"],
+                                    "、".join(s.get("readings") or []),
+                                    s.get("meaning") or "")
                   for sid, s in subjects.items()
                   if s["type"] == "kanji" and 1 <= assignments.get(sid, 0) <= 4}
     occ: Counter[str] = Counter()
@@ -1230,10 +1286,12 @@ def cmd_report(args) -> None:
     if leeches:
         h.append('<p class="sub">Apprentice kanji, ranked by how often they appear '
                  'in the titles above. Already in your review queue.</p>')
-        h.append('<div class="wrap"><table><tr><th>kanji</th><th class="num">'
-                 'occurrences</th><th>stage</th><th class="num">wk level</th></tr>')
-        for n, ch, stage, klvl in leeches:
+        h.append('<div class="wrap"><table><tr><th>kanji</th><th>reading</th>'
+                 '<th>meaning</th><th class="num">occurrences</th><th>stage</th>'
+                 '<th class="num">wk level</th></tr>')
+        for n, ch, stage, klvl, readings, meaning in leeches:
             h.append(f'<tr><td class="kanji">{esc(ch)}</td>'
+                     f'<td>{esc(readings)}</td><td>{esc(meaning)}</td>'
                      f'<td class="num">{n:,}</td>'
                      f'<td>{SRS_STAGE_NAMES.get(stage, "?")}</td>'
                      f'<td class="num">{klvl}</td></tr>')
@@ -1251,7 +1309,7 @@ def cmd_report(args) -> None:
             for d in recs:
                 h.append(
                     f'<tr><td>{esc(label)}</td>'
-                    f'<td><a href="https://jiten.moe/decks/media/{d.get("deckId")}">'
+                    f'<td><a href="https://jiten.moe/decks/media/{d.get("deckId")}/detail">'
                     f'{esc(d.get("originalTitle") or d.get("englishTitle") or "?")}'
                     f'</a></td>'
                     f'<td class="num">{d.get("coverage") or 0}%</td>'
@@ -1264,7 +1322,7 @@ def cmd_report(args) -> None:
             for gain, now, later, d in data["gains"]:
                 h.append(
                     f'<tr><td><a href="https://jiten.moe/decks/media/'
-                    f'{d.get("deckId")}">'
+                    f'{d.get("deckId")}/detail">'
                     f'{esc(d.get("originalTitle") or d.get("englishTitle") or "?")}'
                     f'</a></td><td class="num">{now:.1f}%</td>'
                     f'<td class="num">{later:.1f}%</td>'
