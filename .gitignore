@@ -1,0 +1,5 @@
+cache/
+wanikani_token.txt
+jiten_key.txt
+wanikani-known-words.txt
+coverage.csv

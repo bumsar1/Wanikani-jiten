@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+# Mac-launcheren skal have LF, ellers giver bash "bad interpreter: ^M".
+*.command text eol=lf
+*.sh      text eol=lf
+
+# Windows-launcheren har det bedst med CRLF.
+*.bat     text eol=crlf
+*.cmd     text eol=crlf

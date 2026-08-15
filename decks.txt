@@ -1,0 +1,17 @@
+# Titler der følges. Ét deck-id pr. linje, alt efter # ignoreres.
+# Find id'et med:  python wkjiten.py search "titel"
+# Fjern og tilføj frit - filen læses hver gang du kører opdateringen.
+
+129969   # 魔女の宅急便 1-6 (roman)
+107616   # クロノ・トリガー (spil)
+96748    # からかい上手の高木さん (manga)
+96859    # よつばと！ (manga)
+105475   # コンビニ人間 (roman)
+123720   # しろくまカフェ (manga)
+124785   # 君の名は。(roman)
+123744   # SPY×FAMILY (manga)
+104950   # 葬送のフリーレン (manga)
+101900   # 進撃の巨人 (manga)
+104809   # 鬼滅の刃 (manga)
+114554   # ハリー・ポッターと不死鳥の騎士団 (roman)
+98285    # ONE PIECE (manga)
