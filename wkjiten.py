@@ -1641,7 +1641,9 @@ tr:last-child td { border-bottom:0; }
 tbody tr:hover td, table tr:hover td { background:var(--accent-soft); }
 td.num, th.num { text-align:right; font-variant-numeric:tabular-nums;
   white-space:nowrap; }
-td:first-child { min-width:11em; font-weight:520; }
+/* Title columns want room; a column of numbers does not, or it strands the
+   figures miles from their header. */
+td:first-child:not(.num) { min-width:11em; font-weight:520; }
 td.kanji { min-width:auto; font-size:26px; line-height:1; font-weight:400; }
 a { color:inherit; text-decoration:none; border-bottom:1px solid var(--line); }
 a:hover { border-bottom-color:var(--accent); color:var(--accent); }
@@ -1723,15 +1725,23 @@ SLIDER_JS = """
 """
 
 GRID_HTML = """
-<div class="gridbar">
-  <div class="modes">
-    <button data-mode="srs" class="on">by SRS stage</button>
-    <button data-mode="impact">by what it costs you</button>
+<details class="fold" id="gridfold">
+  <summary><span class="tw">Show the grid</span><span class="cnt"></span></summary>
+  <div class="gridbar">
+    <div class="modes">
+      <button data-mode="srs" class="on">by SRS stage</button>
+      <button data-mode="impact">by what it costs you</button>
+    </div>
+    <div class="modes scope">
+      <button data-scope="mine" class="on">levels you have</button>
+      <button data-scope="all">all 60</button>
+    </div>
   </div>
   <div id="legend" class="legend-row"></div>
-</div>
-<div id="gridout" class="gridout"></div>
-<div id="kdetail" class="kdetail"><span class="hint">Pick a kanji.</span></div>
+  <div id="gridout" class="gridout"></div>
+  <div id="kdetail" class="kdetail"><span class="hint">Pick a kanji to see its
+    reading, and to open it on WaniKani.</span></div>
+</details>
 """
 
 GRID_JS = """
@@ -1748,7 +1758,7 @@ GRID_JS = """
   ];
   const band = s => s >= 9 ? 5 : s >= 8 ? 4 : s >= 7 ? 3 : s >= 5 ? 2 : s >= 1 ? 1 : 0;
   const max = Math.max(1, ...GRID.filter(k => !k.k).map(k => k.n));
-  let mode = 'srs';
+  let mode = 'srs', scope = 'mine', drawn = false;
 
   // Resolve the themed colours once and blend numerically. Leaving 2,000-odd
   // color-mix() calls in inline styles makes every style recalculation on the
@@ -1780,6 +1790,9 @@ GRID_JS = """
   function draw(){
     const byLevel = new Map();
     for (const k of GRID){
+      // Levels above yours are all locked and identical to look at; showing
+      // them by default buries the part you can act on.
+      if (scope === 'mine' && k.l > GRID_LEVEL) continue;
       if (!byLevel.has(k.l)) byLevel.set(k.l, []);
       byLevel.get(k.l).push(k);
     }
@@ -1806,10 +1819,13 @@ GRID_JS = """
     if (!k) return;
     const stage = STAGES[band(k.s)][1];
     document.getElementById('kdetail').innerHTML =
-      `<span class="big">${k.c}</span>
+      `<a class="big" href="https://www.wanikani.com/kanji/${encodeURIComponent(k.c)}"
+          target="_blank" rel="noopener" title="Open on WaniKani">${k.c}</a>
        <div><b>${k.m || '—'}</b> &nbsp; <span class="rd">${k.r || ''}</span>
        <div class="sub">WaniKani level ${k.l} &middot; ${k.k ? 'known' : stage}
-       &middot; appears ${k.n.toLocaleString()}&times; in your titles</div></div>`;
+       &middot; appears ${k.n.toLocaleString()}&times; in your titles &middot;
+       <a href="https://www.wanikani.com/kanji/${encodeURIComponent(k.c)}"
+          target="_blank" rel="noopener">open on WaniKani &#8599;</a></div></div>`;
   }
 
   // One delegated listener beats 2,000 closures.
@@ -1817,13 +1833,26 @@ GRID_JS = """
     const tile = e.target.closest('.k');
     if (tile) show(tile.dataset.c);
   });
-  document.querySelectorAll('.modes button').forEach(b => b.onclick = () => {
-    mode = b.dataset.mode;
-    document.querySelectorAll('.modes button').forEach(x =>
-      x.classList.toggle('on', x === b));
-    draw();
+  function pick(sel, set){
+    document.querySelectorAll(sel).forEach(b => b.onclick = () => {
+      set(b);
+      document.querySelectorAll(sel).forEach(x => x.classList.toggle('on', x === b));
+      draw();
+    });
+  }
+  pick('[data-mode]', b => { mode = b.dataset.mode; });
+  pick('[data-scope]', b => { scope = b.dataset.scope; });
+
+  // 2,000-odd tiles are not worth building until the fold is actually opened.
+  const fold = document.getElementById('gridfold');
+  const inTitles = GRID.filter(k => k.n).length;
+  fold.querySelector('.cnt').textContent =
+    `${GRID.length.toLocaleString()} kanji, ${inTitles.toLocaleString()} of them in your titles`;
+  fold.addEventListener('toggle', () => {
+    fold.querySelector('.tw').textContent = fold.open ? 'Hide the grid'
+                                                      : 'Show the grid';
+    if (fold.open && !drawn){ drawn = true; draw(); }
   });
-  draw();
 })();
 """
 
@@ -1832,8 +1861,23 @@ GRID_CSS = """
 @media (prefers-color-scheme: dark) {
   :root { --k0:#2a2622; --k-known:#22c55e; --k-hot:#ef4444; }
 }
+.fold { background:var(--raise); border:1px solid var(--line); border-radius:14px;
+  box-shadow:var(--shadow); padding:2px 18px 4px; }
+.fold summary { cursor:pointer; padding:14px 0; list-style:none; display:flex;
+  flex-wrap:wrap; gap:4px 12px; align-items:baseline; }
+.fold summary::-webkit-details-marker { display:none; }
+.fold summary::before { content:"\\25B8"; color:var(--accent); margin-right:8px;
+  transition:transform .15s; display:inline-block; }
+.fold[open] summary::before { transform:rotate(90deg); }
+.fold summary .tw { font-weight:600; }
+.fold summary .cnt { color:var(--faint); font-size:13px; }
+.fold[open] { padding-bottom:18px; }
 .gridbar { display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center;
-  justify-content:space-between; margin-bottom:14px; }
+  justify-content:space-between; margin-bottom:12px; }
+.scope button.on { background:var(--fg); border-color:var(--fg);
+  color:var(--bg); }
+.scope button.on:hover { background:var(--fg); color:var(--bg); }
+.means { color:var(--faint); font-weight:400; margin-left:8px; font-size:13px; }
 .modes { display:flex; gap:6px; }
 .modes button.on { background:var(--accent); border-color:var(--accent);
   color:#fff; }
@@ -1842,8 +1886,8 @@ GRID_CSS = """
   color:var(--muted); }
 .lg { display:inline-flex; align-items:center; gap:5px; }
 .lg i { width:11px; height:11px; border-radius:3px; display:inline-block; }
-.gridout { background:var(--raise); border:1px solid var(--line);
-  border-radius:14px; padding:12px 14px; box-shadow:var(--shadow); }
+.gridout { border:1px solid var(--line); border-radius:12px; padding:10px 12px;
+  overflow-x:auto; }
 .lvlrow { display:flex; gap:10px; align-items:flex-start; padding:2px 0; }
 .lvlnum { width:2em; text-align:right; font-size:10.5px; color:var(--faint);
   padding-top:7px; font-variant-numeric:tabular-nums; flex:none; }
@@ -1854,9 +1898,10 @@ GRID_CSS = """
   text-shadow:0 1px 2px rgba(0,0,0,.35); }
 .k:hover { outline:2px solid var(--fg); outline-offset:1px; }
 .kdetail { display:flex; align-items:center; gap:16px; margin-top:12px;
-  min-height:62px; background:var(--raise); border:1px solid var(--line);
-  border-radius:14px; padding:12px 16px; box-shadow:var(--shadow); }
-.kdetail .big { font-size:40px; line-height:1; }
+  min-height:62px; border:1px solid var(--line);
+  border-radius:12px; padding:12px 16px; }
+.kdetail .big { font-size:40px; line-height:1; border:0; }
+.kdetail .big:hover { color:var(--accent); }
 .kdetail .rd { color:var(--accent); }
 .kdetail .hint { color:var(--faint); font-style:italic; }
 .kdetail .sub { margin:2px 0 0; font-size:12.5px; }
@@ -1946,8 +1991,9 @@ function render(){
           <td class="num">${d.difficulty ?? '—'}</td>
           <td class="num">${d.coverage != null ? d.coverage + '%' : '—'}</td>
           <td class="acts"><button data-when="${d.deckId}">when?</button>
-            <button data-track="${d.deckId}" data-status="2">reading</button>
-            <button data-track="${d.deckId}" data-status="1">plan</button></td></tr>`;
+            <button data-track="${d.deckId}" data-status="2">watching/reading</button>
+            <button data-track="${d.deckId}" data-status="1">plan to watch/read</button>
+            </td></tr>`;
   }
   $('#results').innerHTML = h + '</table>';
   document.querySelectorAll('#results [data-when]').forEach(b =>
@@ -1966,7 +2012,7 @@ async function track(id, status, btn){
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({status})});
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    btn.textContent = status === 2 ? 'reading ✓' : 'planned ✓';
+    btn.textContent = status === 2 ? 'watching/reading ✓' : 'planned ✓';
     btn.classList.add('done');
   } catch (e){
     btn.textContent = 'failed'; btn.disabled = false;
@@ -2038,12 +2084,22 @@ async function analyse(id, btn){
     for (let lv = 1; lv <= 60; lv++){ run += byLevel[lv]; curve.push(run / total * 100); }
     const now = mine / total * 100;
 
+    const MEANS = {
+      80: 'every few lines needs a lookup',
+      90: 'readable with a dictionary at hand',
+      95: 'comfortable — the usual bar for reading for pleasure',
+      98: 'you stop noticing the kanji',
+    };
     let rows = '';
     for (const t of [80, 90, 95, 98]){
       const need = levelFor(curve, t);
-      rows += `<tr><td class="num">${t}%</td><td class="num">${need ?? 'never'}</td>
-               <td>${need ? when(need - WK.level)
-                          : 'blocked by kanji WaniKani never teaches'}</td></tr>`;
+      const done = now >= t;
+      rows += `<tr><td>${t}% <span class="means">${MEANS[t]}</span></td>
+               <td class="num">${done ? '<span class="up">reached</span>'
+                                      : (need ?? 'never')}</td>
+               <td class="num">${done ? '' : (need
+                    ? when(need - WK.level)
+                    : 'blocked by kanji WaniKani never teaches')}</td></tr>`;
     }
     $('#detail').innerHTML = `
       <h2>${esc(title(d))}</h2>
@@ -2059,8 +2115,9 @@ async function analyse(id, btn){
         <div class="card"><div class="n">${d.coverage != null ? d.coverage+'%' : '—'}</div>
           <div class="l">word coverage (jiten)</div></div>
       </div>
-      <div class="wrap"><table><tr><th class="num">kanji</th>
-        <th class="num">at level</th><th>which is</th></tr>${rows}</table></div>
+      <div class="wrap"><table><tr><th>kanji coverage</th>
+        <th class="num">at level</th><th class="num">which is</th></tr>
+        ${rows}</table></div>
       <p class="sub">Kanji coverage is a floor, not a ceiling — grammar and the
       words WaniKani never teaches decide the rest.</p>`;
     $('#detail').scrollIntoView({behavior: 'smooth', block: 'start'});
@@ -2248,7 +2305,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                  '<th>meaning</th><th class="num">occurrences</th><th>stage</th>'
                  '<th class="num">wk level</th></tr>')
         for n, ch, stage, klvl, readings, meaning in leeches:
-            h.append(f'<tr><td class="kanji">{esc(ch)}</td>'
+            wk = f"https://www.wanikani.com/kanji/{urllib.parse.quote(ch)}"
+            h.append(f'<tr><td class="kanji"><a href="{wk}" target="_blank" '
+                     f'rel="noopener" title="Open on WaniKani">{esc(ch)}</a></td>'
                      f'<td>{esc(readings)}</td><td>{esc(meaning)}</td>'
                      f'<td class="num">{n:,}</td>'
                      f'<td>{SRS_STAGE_NAMES.get(stage, "?")}</td>'
