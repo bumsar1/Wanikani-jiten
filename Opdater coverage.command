@@ -31,16 +31,20 @@ fejl() {
 }
 
 echo
-echo "== 1/3  Henter dine WaniKani-data =="
+echo "== 1/4  Henter dine WaniKani-data =="
 "$PY" wkjiten.py export --refresh || fejl
 
 echo
-echo "== 2/3  Sender ordlisten til jiten.moe =="
+echo "== 2/4  Sender ordlisten til jiten.moe =="
 "$PY" wkjiten.py push || fejl
 
 echo
-echo "== 3/3  Coverage på dine titler =="
+echo "== 3/4  Coverage på dine titler =="
 "$PY" wkjiten.py batch || fejl
+
+echo
+echo "== 4/4  Fremgang og hvad du kan læse nu =="
+"$PY" wkjiten.py status || fejl
 
 echo
 echo "Færdig. Tallene er nu opdateret på jiten.moe, og hele tabellen"

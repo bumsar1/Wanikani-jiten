@@ -23,8 +23,16 @@ Når nøglerne ligger på plads (se nedenfor), behøver du aldrig røre terminal
 * **Windows** — `Opdater coverage.bat`
 * **macOS** — `Opdater coverage.command`
 
-Den henter dine WaniKani-data forfra, sender ordlisten til jiten.moe og printer
-coverage på alle titlerne i `decks.txt`. Kør den når du er steget et level.
+Den henter dine WaniKani-data forfra, sender ordlisten til jiten.moe, printer
+coverage på alle titlerne i `decks.txt` og slutter med et statusoverblik:
+
+* **hvor mange nye kanji og ord** du har lært siden sidste kørsel, og hvilke
+* **top 5 titler pr. medietype** — romaner, visual novels, anime, manga, spil —
+  sorteret efter din faktiske coverage
+* **hvad der snart er inden for rækkevidde**: titler lige under listen, med
+  kanji-coverage nu vs. om fem levels, sorteret efter hvor meget de rykker
+
+Kør den når du er steget et level.
 
 På macOS skal filen gøres kørbar første gang: åbn Terminal, skriv `chmod +x `
 (med mellemrum til sidst), træk filen ind i vinduet og tryk retur.
@@ -124,6 +132,32 @@ python wkjiten.py batch 96859 118624 --out coverage.csv
 python wkjiten.py batch --search "one piece" --limit 10
 ```
 
+---
+
+## 3) Status: fremgang og anbefalinger
+
+```bash
+python wkjiten.py status
+```
+
+Fremgang siden sidst måles mod et snapshot, der gemmes automatisk hver gang du
+kører med `--refresh`. Første kørsel har intet at sammenligne med.
+
+Anbefalingerne kommer fra Jiten selv: med API-key kan `get-media-decks` sortere
+på `coverage`, altså *din* coverage, server-side. Det er én request pr.
+medietype i stedet for at hente tusindvis af decks ned og regne lokalt.
+
+"Snart inden for rækkevidde" er derimod lokalt regnet — kanji-kurven for hver
+kandidat, nu vs. om fem levels. Det koster én request pr. titel, så den er
+sat til 6 kandidater som standard:
+
+```bash
+python wkjiten.py status --soon-limit 15 --soon-levels 10
+python wkjiten.py status --soon-limit 0     # spring projektionen helt over
+```
+
+---
+
 Vilkårlig tekst, som wanilogs read-check:
 
 ```bash
@@ -141,6 +175,9 @@ python wkjiten.py text kapitel1.txt
 --refresh            hent WaniKani-data forfra
 --top N              hvor mange ukendte kanji der listes (default 25)
 --sleep S            pause mellem decks i batch (default 6s)
+--top-n N            titler pr. medietype i status (default 5)
+--soon-levels N      hvor mange levels frem status projicerer (default 5)
+--soon-limit N       antal kandidat-titler status analyserer (default 6, 0=fra)
 ```
 
 Flagene virker både før og efter underkommandoen.

@@ -16,18 +16,23 @@ if not defined PY (
 )
 
 echo.
-echo == 1/3  Henter dine WaniKani-data ==
+echo == 1/4  Henter dine WaniKani-data ==
 %PY% wkjiten.py export --refresh
 if errorlevel 1 goto :fejl
 
 echo.
-echo == 2/3  Sender ordlisten til jiten.moe ==
+echo == 2/4  Sender ordlisten til jiten.moe ==
 %PY% wkjiten.py push
 if errorlevel 1 goto :fejl
 
 echo.
-echo == 3/3  Coverage paa dine titler ==
+echo == 3/4  Coverage paa dine titler ==
 %PY% wkjiten.py batch
+if errorlevel 1 goto :fejl
+
+echo.
+echo == 4/4  Fremgang og hvad du kan laese nu ==
+%PY% wkjiten.py status
 if errorlevel 1 goto :fejl
 
 echo.

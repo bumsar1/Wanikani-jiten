@@ -37,6 +37,7 @@ JITEN_API = "https://api.jiten.moe"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(HERE, "cache")
 WK_CACHE = os.path.join(CACHE_DIR, "wanikani.json")
+WK_CACHE_PREV = os.path.join(CACHE_DIR, "wanikani.prev.json")
 
 # CJK ideographs (BMP + compat). Excludes 々 and other iteration/marks on
 # purpose: they are not kanji you learn on WaniKani.
@@ -161,6 +162,12 @@ def wk_load(token_arg: str | None, refresh: bool = False) -> dict:
             return json.load(f)
     data = wk_fetch(wk_token(token_arg))
     os.makedirs(CACHE_DIR, exist_ok=True)
+    # Keep the previous snapshot so `status` can say what you learned since.
+    if os.path.exists(WK_CACHE):
+        with open(WK_CACHE, encoding="utf-8") as f:
+            old = f.read()
+        with open(WK_CACHE_PREV, "w", encoding="utf-8") as f:
+            f.write(old)
     with open(WK_CACHE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     print(f"  cached -> {WK_CACHE}", file=sys.stderr)
@@ -591,6 +598,124 @@ def cmd_batch(args) -> None:
     print(f"\nwrote {out}")
 
 
+def jiten_top_by_coverage(media_type: int, api_key: str, *, min_chars: int,
+                          limit: int) -> list[dict]:
+    """Titles ranked by *your* coverage. Jiten sorts this server-side once the
+    API key identifies the account, so one request covers a whole media type."""
+    url = (f"{JITEN_API}/api/media-deck/get-media-decks?mediaType={media_type}"
+           f"&sortBy=coverage&sortOrder=1&charCountMin={min_chars}")
+    data = get_json(url, headers=jiten_headers(api_key))
+    return (data.get("data") or [])[:limit]
+
+
+# media type -> minimum character count worth recommending, so the lists are
+# not topped by one-page shorts and single episodes.
+RECOMMEND_TYPES = [
+    (4, "romaner", 30000),
+    (7, "visual novels", 50000),
+    (1, "anime", 20000),
+    (9, "manga", 30000),
+    (6, "spil", 30000),
+]
+
+
+def progress_since_last(args) -> None:
+    if not os.path.exists(WK_CACHE_PREV):
+        print("Fremgang: ingen tidligere måling endnu - den kommer næste gang.")
+        return
+    with open(WK_CACHE_PREV, encoding="utf-8") as f:
+        prev_cache = json.load(f)
+    with open(WK_CACHE, encoding="utf-8") as f:
+        cur_cache = json.load(f)
+
+    opts = dict(min_stage=args.min_stage, mode=args.mode, level=args.level)
+    prev = wk_known(prev_cache, **opts)
+    cur = wk_known(cur_cache, **opts)
+
+    new_kanji = cur["kanji_known"] - prev["kanji_known"]
+    new_words = cur["words_known_set"] - prev["words_known_set"]
+    lvl_before, lvl_now = prev_cache.get("level"), cur_cache.get("level")
+
+    print(f"Fremgang siden {prev_cache.get('fetched_at', '?')[:10]}")
+    print(f"  kanji  {len(prev['kanji_known']):>5} -> {len(cur['kanji_known']):<5} "
+          f"({len(new_kanji):+d})")
+    print(f"  ord    {len(prev['words_known_set']):>5} -> "
+          f"{len(cur['words_known_set']):<5} ({len(new_words):+d})")
+    if lvl_before != lvl_now:
+        print(f"  level  {lvl_before} -> {lvl_now}   nice.")
+    if new_kanji:
+        shown = sorted(new_kanji, key=lambda c: cur["kanji_level"].get(c, 99))
+        print("  nye kanji: " + " ".join(shown[:40])
+              + (f"  (+{len(shown) - 40} mere)" if len(shown) > 40 else ""))
+
+
+def cmd_status(args) -> None:
+    key = jiten_key(args.jiten_key)
+    if not key:
+        raise SystemExit("`status` skal bruge en Jiten API-key - se README.")
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+
+    print()
+    print("=" * 70)
+    print(f"  {cache.get('username')} - WaniKani level {cache.get('level')}, "
+          f"{len(known['kanji_known'])} kanji og "
+          f"{len(known['words_known_set'])} ord")
+    print("=" * 70)
+    print()
+    progress_since_last(args)
+
+    print()
+    print("-" * 70)
+    print(f"  Bedste titler for dig lige nu (coverage fra din Jiten-konto)")
+    print("-" * 70)
+    candidates: list[dict] = []
+    for mtype, label, min_chars in RECOMMEND_TYPES:
+        rows = jiten_top_by_coverage(mtype, key, min_chars=min_chars,
+                                     limit=args.top_n + args.soon_pool)
+        print(f"\n{label}:")
+        for d in rows[:args.top_n]:
+            title = d.get("originalTitle") or d.get("englishTitle") or "?"
+            print(f"  {d.get('coverage') or 0:>6}%  "
+                  f"{d.get('characterCount') or 0:>9,}  "
+                  f"jiten.moe/decks/media/{d.get('deckId')}  {title}")
+        candidates.extend(rows[args.top_n:])
+        time.sleep(0.5)
+
+    if args.soon_limit <= 0 or not candidates:
+        return
+
+    print()
+    print("-" * 70)
+    print(f"  Snart inden for rækkevidde - kanji-coverage nu vs. level "
+          f"{(cache.get('level') or 0) + args.soon_levels}")
+    print("-" * 70)
+    print(f"Undersøger {min(args.soon_limit, len(candidates))} af "
+          f"{len(candidates)} kandidater (hæv med --soon-limit).")
+
+    lvl_now = cache.get("level") or 1
+    target = min(60, lvl_now + args.soon_levels)
+    gains = []
+    for d in candidates[:args.soon_limit]:
+        deck_id = d.get("deckId")
+        try:
+            tokens = jiten_deck_tokens(deck_id, key)
+        except SystemExit as e:
+            print(f"  sprang {deck_id} over: {e}")
+            continue
+        res = analyse_deck(tokens, known)
+        now = res["kanji_cov_occ"]
+        later = res["curve"][target - 1][1]
+        gains.append((later - now, now, later, d))
+        time.sleep(args.sleep)
+
+    print(f"\n{'nu':>7} {'ved lvl':>8} {'gevinst':>8}   titel")
+    for gain, now, later, d in sorted(gains, reverse=True):
+        title = d.get("originalTitle") or d.get("englishTitle") or "?"
+        print(f"{now:6.2f}% {later:7.2f}% {gain:+7.2f}pp   {title}")
+        print(f"{'':29}jiten.moe/decks/media/{d.get('deckId')}")
+
+
 def cmd_text(args) -> None:
     """wanilog-style read-check on arbitrary text you paste in."""
     cache = wk_load(args.wk_token, refresh=args.refresh)
@@ -687,6 +812,17 @@ def main() -> None:
                                        "(default: decks.txt)")
     s.add_argument("--out")
     s.set_defaults(func=cmd_batch)
+
+    s = subparser("status", help="progress since last run + what to read next")
+    s.add_argument("--top-n", type=int, default=5,
+                   help="titles per media type (default 5)")
+    s.add_argument("--soon-levels", type=int, default=5,
+                   help="how many levels ahead to project (default 5)")
+    s.add_argument("--soon-limit", type=int, default=6,
+                   help="how many near-miss titles to analyse; 0 to skip")
+    s.add_argument("--soon-pool", type=int, default=4,
+                   help="candidates to pull past the top N, per media type")
+    s.set_defaults(func=cmd_status)
 
     s = subparser("text", help="read-check arbitrary Japanese text")
     s.add_argument("path", nargs="?", help="file to read (default: stdin)")
