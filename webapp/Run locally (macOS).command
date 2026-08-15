@@ -1,9 +1,11 @@
 #!/bin/bash
 # Try the hosted version on this machine before putting it on a server.
-# Creates its own virtual environment the first time.
+# Double-click it on a Mac; it creates its own virtual environment the first
+# time. If macOS refuses to open it, the folder came from a downloaded zip and
+# is quarantined - see README.md.
 #
-# On Bazzite this works too, and needs nothing installed on the host beyond
-# python3 - but for anything permanent use the container instead, see README.md.
+# Linux runs the same file from a shell, and on Bazzite it needs nothing on the
+# host beyond python3 - but for anything permanent use the container instead.
 
 cd "$(dirname "$0")" || exit 1
 

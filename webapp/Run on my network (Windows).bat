@@ -1,5 +1,5 @@
 @echo off
-rem Like "Run locally.bat", but reachable from other machines on your home
+rem Like "Run locally (Windows).bat", but reachable from other machines on your home
 rem network - a Mac, a laptop, a phone. Same database, same account.
 
 chcp 65001 >nul
@@ -27,7 +27,7 @@ if not exist "data" mkdir data
 set WKJITEN_DB=%cd%\data\wkjiten.sqlite3
 set WKJITEN_SECRET_FILE=%cd%\data\secret.key
 set WKJITEN_PORT=8770
-rem The one difference from Run locally.bat: listen on every interface.
+rem The one difference from Run locally (Windows).bat: listen on every interface.
 set WKJITEN_HOST=0.0.0.0
 
 echo.

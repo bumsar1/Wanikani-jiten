@@ -31,8 +31,14 @@ Python 3.9+ and the standard library. No pip install.
 
 Once your keys are in place (see below), you never have to touch a terminal:
 
-* **Windows** — `Update coverage.bat`
-* **macOS** — `Update coverage.command`
+* **Windows** — `Update coverage (Windows).bat`
+* **macOS** — `Update coverage (macOS).command`
+
+Every launcher in this project is named for the system it runs on, so there is
+only ever one file to click. On a Mac, clone the repository rather than
+downloading the zip — a zip from the browser arrives quarantined and macOS
+refuses to open the launcher. If you already downloaded one, clear it once with
+`xattr -dr com.apple.quarantine .` in the project folder.
 
 It re-fetches your WaniKani data, sends the word list to jiten.moe, prints
 coverage for everything you are tracking, lists the leeches that are holding you

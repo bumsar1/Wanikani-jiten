@@ -2,9 +2,10 @@
 # Double-click this file to push your WaniKani knowledge to jiten.moe
 # and see coverage for the titles listed in decks.txt.
 #
-# The first time on a Mac the file has to be made executable: open Terminal,
-# type "chmod +x " (with a trailing space), drag this file into the window
-# and press return. After that, double-clicking works.
+# If macOS refuses to open it, the folder came from a downloaded zip and is
+# quarantined: open Terminal, type "xattr -dr com.apple.quarantine " (with a
+# trailing space), drag the project folder into the window and press return.
+# Cloning with git instead of downloading the zip avoids this entirely.
 
 cd "$(dirname "$0")" || exit 1
 
