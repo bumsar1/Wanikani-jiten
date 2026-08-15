@@ -654,6 +654,8 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                    f' data-title="{esc(w.deck_title(deck))}"'
                    f' title="Japanese subtitles on jimaku.cc">subs</button>'
                    if subs else "")
+                + f' <button class="subs setst" data-deck="{did}" data-st="3"'
+                  f' title="Mark as finished on jiten.moe">finished</button>'
                 + f'</td>'
                 f'<td>{esc(STATUS_LABELS.get(extras["status"].get(did), "—"))}</td>'
                 f'<td class="num">{k:.1f}%</td>'
@@ -757,7 +759,7 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         f"<script>{w.SORT_JS}</script><script>{w.SLIDER_JS}</script>"
         f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
         f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script>"
-        f"<script>{w.SUBS_JS}</script>")
+        f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>")
 
     return shell(f'{user["username"]} - coverage', body, user=user,
                  extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS

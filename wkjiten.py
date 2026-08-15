@@ -1815,6 +1815,9 @@ a:hover { border-bottom-color:var(--accent); color:var(--accent); }
   border-radius:99px; border:1px solid var(--line); color:var(--faint);
   vertical-align:2px; margin-left:6px; letter-spacing:.03em; }
 .subs:hover { border-color:var(--accent); color:var(--accent); }
+button.subs { font-family:inherit; cursor:pointer; background:var(--bg); }
+button.subs:disabled { opacity:.55; cursor:default; }
+button.subs.done { color:var(--good); border-color:var(--good); }
 .pill { display:inline-block; font-size:11px; padding:2px 9px; border-radius:99px;
   background:var(--accent-soft); color:var(--accent); font-weight:620;
   white-space:nowrap; }
@@ -1898,6 +1901,35 @@ SUBS_JS = """
     dual = false;
     load();
     box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  });
+})();
+"""
+
+STATUS_JS = """
+(function(){
+  // The saved report has no server behind it, so a button that writes to your
+  // jiten.moe account would only ever fail there.
+  if (typeof LIVE === 'undefined' || !LIVE){
+    document.querySelectorAll('.setst').forEach(b => b.remove());
+    return;
+  }
+  document.querySelectorAll('.setst').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      const was = btn.textContent;
+      btn.disabled = true; btn.textContent = 'saving…';
+      try {
+        const r = await fetch('/api/user/deck-preferences/' + btn.dataset.deck +
+                              '/status', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({status: +btn.dataset.st})});
+        if (!r.ok) throw new Error(r.status);
+        btn.textContent = 'finished ✓';
+        btn.classList.add('done');
+      } catch (e){
+        btn.textContent = 'failed'; btn.disabled = false;
+        setTimeout(() => { btn.textContent = was; }, 2000);
+      }
+    });
   });
 })();
 """
@@ -3001,6 +3033,8 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                f' data-title="{esc(deck_title(deck))}"'
                f' title="Japanese subtitles on jimaku.cc">subs</button>'
                if subs else "")
+            + f' <button class="subs setst" data-deck="{deck_id}" data-st="3"'
+              f' title="Mark as finished on jiten.moe">finished</button>'
             + f'</td>'
             f'<td>{esc(STATUS_LABELS.get(DECK_STATUS.get(deck_id), "—"))}</td>'
             f'<td class="num">{k:.1f}%</td>'
@@ -3169,7 +3203,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                      f"<script>{SORT_JS}</script><script>{SLIDER_JS}</script>"
                      f"<script>{CHART_JS}</script><script>{GRID_JS}</script>"
                      f"<script>{REACH_JS}</script><script>{SUBS_JS}</script>"
-                     f"<script>{LIKE_JS}</script>")
+                     f"<script>{LIKE_JS}</script><script>{STATUS_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.
