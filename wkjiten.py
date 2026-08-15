@@ -709,23 +709,82 @@ def cmd_deck(args) -> None:
         report(deck, analyse_deck(words, known), known, args)
 
 
-def jimaku_url(deck: dict) -> str | None:
-    """A jimaku.cc lookup for this title, keyed on its AniList entry.
+JIMAKU_API = "https://jimaku.cc/api"
+JIMAKU_CACHE = os.path.join(CACHE_DIR, "jimaku.json")
 
-    Jiten stores an AniList link per deck, and jimaku's search box accepts an
-    AniList URL - so the two join on an id rather than on a guessed title,
-    which is the difference between landing on the right show and landing on
-    something with a similar name. Only worth offering for things with
-    subtitles: anime, drama, film.
+
+def jimaku_key(cli_key: str | None = None) -> str | None:
+    key = cli_key or os.environ.get("JIMAKU_API_KEY")
+    if not key:
+        path = os.path.join(HERE, "jimaku_key.txt")
+        if os.path.exists(path):
+            key = open(path, encoding="utf-8").read().strip()
+    return key or None
+
+
+def anilist_id(deck: dict) -> int | None:
+    """The AniList id Jiten stores for a title, which is the only reliable way
+    to join it to anything else."""
+    for link in deck.get("links") or []:
+        m = re.search(r"anilist\.co/anime/(\d+)", link.get("url") or "")
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def jimaku_entry(anilist: int, key: str) -> int | None:
+    """jimaku's entry id for an AniList id, remembered once resolved.
+
+    Linking at their front page instead means shipping the browser their whole
+    2 MB index and hoping its search filters to the right show, which it does
+    not. One lookup here gives a direct address to the right page.
+    """
+    cache: dict = {}
+    if os.path.exists(JIMAKU_CACHE):
+        try:
+            with open(JIMAKU_CACHE, encoding="utf-8") as f:
+                cache = json.load(f)
+        except ValueError:
+            cache = {}
+    hit = cache.get(str(anilist), "miss")
+    if hit != "miss":
+        return hit
+
+    status, body, _ = http(f"{JIMAKU_API}/entries/search?anilist_id={anilist}",
+                           headers={"Authorization": key}, timeout=30)
+    entry = None
+    if status < 400:
+        try:
+            rows = json.loads(body.decode("utf-8"))
+            if isinstance(rows, list) and rows:
+                entry = rows[0].get("id")
+        except (ValueError, AttributeError, IndexError):
+            entry = None
+    # Remember misses too: a show with no subtitles will not grow any by being
+    # asked about repeatedly.
+    cache[str(anilist)] = entry
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(JIMAKU_CACHE, "w", encoding="utf-8") as f:
+        json.dump(cache, f)
+    return entry
+
+
+def jimaku_url(deck: dict, key: str | None = None) -> str | None:
+    """Direct link to this title's subtitles, or nothing at all.
+
+    Without a jimaku key there is no honest link to offer, so no button is
+    shown rather than one that lands somewhere unhelpful.
     """
     if deck.get("mediaType") not in (1, 2, 3):
         return None
-    for link in deck.get("links") or []:
-        url = link.get("url") or ""
-        if "anilist.co/anime/" in url:
-            return ("https://jimaku.cc/?query="
-                    + urllib.parse.quote(url, safe=""))
-    return None
+    key = key or jimaku_key()
+    if not key:
+        return None
+    aid = anilist_id(deck)
+    if not aid:
+        return None
+    entry = jimaku_entry(aid, key)
+    return f"https://jimaku.cc/entry/{entry}" if entry else None
 
 
 def deck_title(deck: dict) -> str:
@@ -2553,6 +2612,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     """
     ids = tracked_ids(args, key)
     lvl = cache.get("level") or 0
+    jkey = jimaku_key(getattr(args, "jimaku_key", None))
 
     rows, curves, titles = [], [], {}
     for deck, words in load_decks(ids, key, args.sleep, progress=True):
@@ -2619,15 +2679,16 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
              if trend and trend[1] > trend[0] else
              (f"{trend[1] - trend[0]:+.1f}pp / {trend[2]}d" if trend else "&mdash;"))
         k = res["kanji_cov_occ"]
+        subs = jimaku_url(deck, jkey)
         fin = finishing_level(res, lvl)
         fin_cell = ("&mdash;" if fin is None else
                     f'{fin:.1f}% <span class="up">{fin - k:+.1f}</span>')
         h.append(
             f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}/detail">'
             f'{esc(deck_title(deck))}</a>'
-            + (f' <a class="subs" href="{jimaku_url(deck)}" target="_blank" '
+            + (f' <a class="subs" href="{subs}" target="_blank" '
                f'rel="noopener" title="Japanese subtitles on jimaku.cc">subs</a>'
-               if jimaku_url(deck) else "")
+               if subs else "")
             + f'</td>'
             f'<td>{esc(STATUS_LABELS.get(DECK_STATUS.get(deck_id), "—"))}</td>'
             f'<td class="num">{k:.1f}%</td>'
@@ -2968,6 +3029,8 @@ def main() -> None:
                             help="WaniKani personal access token")
         parser.add_argument("--jiten-key", default=d(None),
                             help="Jiten API key (optional for public reads)")
+        parser.add_argument("--jimaku-key", default=d(None),
+                            help="jimaku.cc API key, for subtitle links")
         parser.add_argument("--refresh", action="store_true",
                             default=d(False), help="re-fetch WaniKani data")
         parser.add_argument("--mode", choices=["srs", "level"], default=d("srs"),

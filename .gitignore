@@ -11,3 +11,4 @@ webapp/data/
 webapp/.env
 webapp/__pycache__/
 __pycache__/
+jimaku_key.txt

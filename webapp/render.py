@@ -105,6 +105,7 @@ def settings_page(user, creds, note: str = "", error: str = "") -> str:
         msg += f'<div class="ok">{esc(note)}</div>'
     has_wk = "stored" if creds.get("wk_token") else "not set"
     has_jt = "stored" if creds.get("jiten_key") else "not set"
+    has_jm = "stored" if creds.get("jimaku_key") else "not set"
     return shell("Settings", f"""
       <h1>Settings</h1>{msg}
       <h2>API keys</h2>
@@ -128,6 +129,14 @@ def settings_page(user, creds, note: str = "", error: str = "") -> str:
             known-words upload and the list buttons. Jiten's own docs say this
             key <b>carries every permission your account has</b> &mdash; treat
             it like a password, and remove it here whenever you like.</div>
+        </div>
+        <div class="field">
+          <label for="jm">jimaku.cc API key &mdash; currently {has_jm}</label>
+          <input id="jm" name="jimaku_key" placeholder="paste to replace"
+                 autocomplete="off">
+          <div class="hint">Optional. Adds a <b>subs</b> link beside anime,
+            drama and film, straight to that title's Japanese subtitles. Found
+            under your account settings on jimaku.cc.</div>
         </div>
         <button class="go" type="submit">Save</button>
       </form>
@@ -420,14 +429,15 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             did = deck.get("deckId")
             live = deck.get("coverage")
             k = res["kanji_cov_occ"]
+            subs = w.jimaku_url(deck, extras.get("jimaku_key"))
             fin = w.finishing_level(res, lvl)
             trend = _trend(history.get(did, []))
             h.append(
                 f'<tr><td><a href="https://jiten.moe/decks/media/{did}/detail"'
                 f' target="_blank" rel="noopener">{esc(w.deck_title(deck))}</a>'
-                + (f' <a class="subs" href="{w.jimaku_url(deck)}" target="_blank"'
+                + (f' <a class="subs" href="{subs}" target="_blank"'
                    f' rel="noopener" title="Japanese subtitles on jimaku.cc">subs</a>'
-                   if w.jimaku_url(deck) else "")
+                   if subs else "")
                 + f'</td>'
                 f'<td>{esc(STATUS_LABELS.get(extras["status"].get(did), "—"))}</td>'
                 f'<td class="num">{k:.1f}%</td>'

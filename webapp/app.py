@@ -208,7 +208,8 @@ def save_settings():
     user = require_login()
     store.set_creds(user["id"],
                     request.form.get("wk_token", "").strip() or None,
-                    request.form.get("jiten_key", "").strip() or None)
+                    request.form.get("jiten_key", "").strip() or None,
+                    request.form.get("jimaku_key", "").strip() or None)
     creds = creds_of(user)
     if creds.get("wk_token") and not store.get_snapshot(user["id"]):
         threading.Thread(target=refresh_wanikani,
@@ -292,7 +293,8 @@ def dashboard():
         for d, r in decks])
 
     prev = store.get_snapshot(user["id"], "previous")
-    extras = {"status": status, "tags": [], "moved_up": set()}
+    extras = {"status": status, "tags": [], "moved_up": set(),
+              "jimaku_key": creds.get("jimaku_key")}
     if prev:
         old = w.wk_known(prev)
         extras["d_kanji"] = len(known["kanji_known"]) - len(old["kanji_known"])
