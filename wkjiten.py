@@ -1715,6 +1715,124 @@ SLIDER_JS = """
 })();
 """
 
+GRID_HTML = """
+<div class="gridbar">
+  <div class="modes">
+    <button data-mode="srs" class="on">by SRS stage</button>
+    <button data-mode="impact">by what it costs you</button>
+  </div>
+  <div id="legend" class="legend-row"></div>
+</div>
+<div id="gridout" class="gridout"></div>
+<div id="kdetail" class="kdetail"><span class="hint">Pick a kanji.</span></div>
+"""
+
+GRID_JS = """
+(function(){
+  const out = document.getElementById('gridout');
+  if (!out || typeof GRID === 'undefined' || !GRID.length) return;
+  const STAGES = [
+    [0, 'locked or unstarted', 'var(--k0)'],
+    [1, 'Apprentice',          '#dd0093'],
+    [5, 'Guru',                '#882d9e'],
+    [7, 'Master',              '#294ddb'],
+    [8, 'Enlightened',         '#0093dd'],
+    [9, 'Burned',              '#8a7355'],
+  ];
+  const band = s => s >= 9 ? 5 : s >= 8 ? 4 : s >= 7 ? 3 : s >= 5 ? 2 : s >= 1 ? 1 : 0;
+  const max = Math.max(1, ...GRID.filter(k => !k.k).map(k => k.n));
+  let mode = 'srs';
+
+  function colour(k){
+    if (mode === 'srs') return STAGES[band(k.s)][2];
+    if (k.k) return 'var(--k-known)';
+    if (!k.n) return 'var(--k0)';
+    // Unknown and common: the darker the red, the more it is costing you.
+    const t = Math.sqrt(k.n / max);
+    return `color-mix(in srgb, var(--k-hot) ${Math.round(18 + t * 82)}%, var(--k0))`;
+  }
+
+  function draw(){
+    const byLevel = new Map();
+    for (const k of GRID){
+      if (!byLevel.has(k.l)) byLevel.set(k.l, []);
+      byLevel.get(k.l).push(k);
+    }
+    let html = '';
+    for (const [lv, list] of [...byLevel].sort((a, b) => a[0] - b[0])){
+      html += `<div class="lvlrow"><span class="lvlnum${lv === GRID_LEVEL ?
+        ' now' : ''}">${lv}</span><div class="kanjis">`;
+      for (const k of list)
+        html += `<button class="k" style="background:${colour(k)}"
+                 data-c="${k.c}" title="${k.c}">${k.c}</button>`;
+      html += '</div></div>';
+    }
+    out.innerHTML = html;
+    out.querySelectorAll('.k').forEach(b => b.onclick = () => show(b.dataset.c));
+
+    document.getElementById('legend').innerHTML = mode === 'srs'
+      ? STAGES.map(s => `<span class="lg"><i style="background:${s[2]}"></i>${s[1]}</span>`).join('')
+      : `<span class="lg"><i style="background:var(--k-known)"></i>known</span>
+         <span class="lg"><i style="background:var(--k0)"></i>never appears</span>
+         <span class="lg"><i style="background:var(--k-hot)"></i>costs you most</span>`;
+  }
+
+  function show(c){
+    const k = GRID.find(x => x.c === c);
+    if (!k) return;
+    const stage = STAGES[band(k.s)][1];
+    document.getElementById('kdetail').innerHTML =
+      `<span class="big">${k.c}</span>
+       <div><b>${k.m || '—'}</b> &nbsp; <span class="rd">${k.r || ''}</span>
+       <div class="sub">WaniKani level ${k.l} &middot; ${k.k ? 'known' : stage}
+       &middot; appears ${k.n.toLocaleString()}&times; in your titles</div></div>`;
+  }
+
+  document.querySelectorAll('.modes button').forEach(b => b.onclick = () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll('.modes button').forEach(x =>
+      x.classList.toggle('on', x === b));
+    draw();
+  });
+  draw();
+})();
+"""
+
+GRID_CSS = """
+:root { --k0:#e8e2d9; --k-known:#15803d; --k-hot:#dc2626; }
+@media (prefers-color-scheme: dark) {
+  :root { --k0:#2a2622; --k-known:#22c55e; --k-hot:#ef4444; }
+}
+.gridbar { display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center;
+  justify-content:space-between; margin-bottom:14px; }
+.modes { display:flex; gap:6px; }
+.modes button.on { background:var(--accent); border-color:var(--accent);
+  color:#fff; }
+.modes button.on:hover { background:var(--accent); color:#fff; }
+.legend-row { display:flex; flex-wrap:wrap; gap:12px; font-size:11.5px;
+  color:var(--muted); }
+.lg { display:inline-flex; align-items:center; gap:5px; }
+.lg i { width:11px; height:11px; border-radius:3px; display:inline-block; }
+.gridout { background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; padding:12px 14px; box-shadow:var(--shadow); }
+.lvlrow { display:flex; gap:10px; align-items:flex-start; padding:2px 0; }
+.lvlnum { width:2em; text-align:right; font-size:10.5px; color:var(--faint);
+  padding-top:7px; font-variant-numeric:tabular-nums; flex:none; }
+.lvlnum.now { color:var(--accent); font-weight:700; }
+.kanjis { display:flex; flex-wrap:wrap; gap:3px; }
+.k { width:27px; height:27px; padding:0; border:0; border-radius:6px;
+  font-size:16px; line-height:1; color:#fff; cursor:pointer;
+  text-shadow:0 1px 2px rgba(0,0,0,.35); font-family:inherit; }
+.k:hover { outline:2px solid var(--fg); outline-offset:1px; background-clip:padding-box; }
+.kdetail { display:flex; align-items:center; gap:16px; margin-top:12px;
+  min-height:62px; background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; padding:12px 16px; box-shadow:var(--shadow); }
+.kdetail .big { font-size:40px; line-height:1; }
+.kdetail .rd { color:var(--accent); }
+.kdetail .hint { color:var(--faint); font-style:italic; }
+.kdetail .sub { margin:2px 0 0; font-size:12.5px; }
+"""
+
 SLIDER_CSS = """
 .slider { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
   background:var(--raise); border:1px solid var(--line); border-radius:14px;
@@ -2038,6 +2156,25 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     leeches = sorted(((n, ch) + struggling[ch] for ch, n in occ.items()
                       if ch in struggling and ch not in known["kanji_known"]),
                      reverse=True)[:24]
+    # Every WaniKani kanji, by level, coloured either by how well you know it
+    # or by how much not knowing it costs you in the titles you track.
+    grid_data = sorted(
+        ({"c": s["characters"], "l": s["level"],
+          "s": assignments.get(sid, 0),
+          "k": s["characters"] in known["kanji_known"],
+          "n": occ.get(s["characters"], 0),
+          "r": "、".join(s.get("readings") or []),
+          "m": s.get("meaning") or ""}
+         for sid, s in subjects.items() if s["type"] == "kanji"),
+        key=lambda k: (k["l"], -k["n"], k["c"]))
+    grid_json = json.dumps(grid_data, ensure_ascii=False, separators=(",", ":"))
+    seen_kanji = sum(1 for k in grid_data if k["n"])
+    h.append(h2("Kanji grid"))
+    h.append(f'<p class="sub">All {len(grid_data):,} WaniKani kanji by level. '
+             f'{seen_kanji:,} of them turn up in the titles you track. '
+             f'Switch the colouring to see which gaps actually cost you.</p>')
+    h.append(GRID_HTML)
+
     h.append(h2("Leeches blocking your reading"))
     if leeches:
         h.append('<p class="sub">Apprentice kanji, ranked by how often they appear '
@@ -2103,12 +2240,13 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                     "c": [round(p, 2) for _lv, p in r["curve"]]}
                    for d, r in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"])],
     }, ensure_ascii=False, separators=(",", ":"))
-    head += f"<style>{SLIDER_CSS}</style>"
+    head += f"<style>{SLIDER_CSS}{GRID_CSS}</style>"
 
     def compose(live: bool) -> str:
         parts, css = list(h), head
-        parts.append(f"<script>const TRACK={track};</script>"
-                     f"<script>{SLIDER_JS}</script>")
+        parts.append(f"<script>const TRACK={track};const GRID={grid_json};"
+                     f"const GRID_LEVEL={lvl};</script>"
+                     f"<script>{SLIDER_JS}</script><script>{GRID_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.

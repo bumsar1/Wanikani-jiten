@@ -350,9 +350,13 @@ every WaniKani level would give you on each title, coverage over time once you
 have two days of history, the leech table, and the recommendations. No external
 scripts, fonts or trackers, and it follows your system's light/dark setting.
 
-Both also carry a **level slider**: drag it and every tracked title's coverage
-updates to what it would be at that level, with how far off that is at your pace.
-The curves are embedded in the page, so this works offline in the saved file too.
+Both also carry a **level slider** — drag it and every tracked title's coverage
+updates to what it would be at that level, with how far off that is at your pace —
+and a **kanji grid**: all ~2,100 WaniKani kanji laid out by level, coloured either
+by SRS stage in WaniKani's own colours, or by how much *not* knowing each one is
+costing you across the titles you track. Click any tile for its reading, meaning,
+stage and occurrence count. Both work offline in the saved file, since the data is
+embedded rather than fetched.
 
 `serve` adds a **search box for the whole jiten.moe catalogue**. Filter by type,
 sort by your own coverage, then hit *when?* on any title and it works out — right
