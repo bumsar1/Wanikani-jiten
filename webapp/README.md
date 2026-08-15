@@ -100,12 +100,47 @@ invitations under **invites**; there is no open registration.
 
 ---
 
-## Reaching it from outside
+## Letting someone else in
 
-The container binds to loopback on purpose. To let a friend in, put a reverse
-proxy with a real certificate in front of it (Caddy is two lines), and set
-`WKJITEN_HTTPS=1` so the session cookie is marked secure. Do not simply publish
-port 8080 to the internet: the login would travel in the clear.
+Both the launcher and the container bind to loopback on purpose, so nothing off
+the machine can reach them — your public IP will not help on its own.
+
+**Do not simply bind it wide and forward a port.** The login and password would
+travel in clear text, the session cookie with them, and the development server
+would be facing the whole internet. Home addresses also tend to change, and
+plenty of consumer connections sit behind CGNAT where forwarding is not possible
+at all.
+
+### The easy way: Tailscale
+
+For a couple of people this is both the simplest and the safest. No port
+forwarding, nothing published, and no domain name to buy:
+
+```bash
+tailscale serve --bg 8080
+```
+
+That gives you `https://<machine>.<tailnet>.ts.net` with a real certificate,
+reachable only by members of your tailnet. The app keeps listening on loopback;
+Tailscale sits in front. Your friend installs Tailscale, you invite him, he opens
+the link. Set `WKJITEN_HTTPS=1` once it is served over TLS so the session cookie
+gets the Secure flag.
+
+On Bazzite the system is immutable, so layer it and reboot:
+`rpm-ostree install tailscale`.
+
+### If it really has to be public
+
+Then you want: a domain name, dynamic DNS if your address moves, a forwarded
+port, and Caddy or nginx terminating TLS in front of the container — not the
+development server. Set `WKJITEN_HTTPS=1`. Registration is invitation-only, which
+limits what an anonymous visitor can do, but a login form on the open internet is
+still a login form on the open internet.
+
+### Or Cloudflare Tunnel
+
+A middle road: a public hostname with HTTPS and no ports opened, at the cost of
+routing your traffic through Cloudflare.
 
 ---
 
