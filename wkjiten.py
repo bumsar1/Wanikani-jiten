@@ -1808,7 +1808,10 @@ a:hover { border-bottom-color:var(--accent); color:var(--accent); }
 
 /* bits */
 .meter { display:block; width:96px; height:6px; background:var(--line);
-  border-radius:99px; overflow:hidden; }
+  border-radius:99px; overflow:hidden; margin-top:5px; margin-left:auto; }
+table.tight { min-width:0; }
+table.tight th, table.tight td { padding-left:9px; padding-right:9px; }
+table.tight td:first-child:not(.num) { min-width:9em; }
 .meter i { display:block; height:100%; border-radius:99px; background:var(--accent); }
 .up { color:var(--good); font-weight:640; }
 .subs { display:inline-block; font-size:10.5px; font-weight:650; padding:1px 7px;
@@ -2601,6 +2604,17 @@ GRID_JS = """
                                                       : 'Show the grid';
     if (fold.open && !drawn){ drawn = true; draw(); }
   });
+
+  // Any other fold on the page just flips its own wording.
+  document.querySelectorAll('details.fold').forEach(function (d) {
+    if (d === fold) return;
+    const label = d.querySelector('.tw');
+    if (!label) return;
+    const shut = label.textContent;
+    d.addEventListener('toggle', () => {
+      label.textContent = d.open ? shut.replace(/^Show/, 'Hide') : shut;
+    });
+  });
 })();
 """
 
@@ -2774,6 +2788,7 @@ function render(){
           <td class="acts"><button data-when="${d.deckId}">when?</button>
             <button data-track="${d.deckId}" data-status="2">watching/reading</button>
             <button data-track="${d.deckId}" data-status="1">plan to watch/read</button>
+            <button data-track="${d.deckId}" data-status="3">finished</button>
             </td></tr>`;
   }
   const pages = Math.max(1, Math.ceil(total / PER));
@@ -2802,7 +2817,8 @@ async function track(id, status, btn){
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({status})});
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    btn.textContent = status === 2 ? 'watching/reading ✓' : 'planned ✓';
+    btn.textContent = {2: 'watching/reading ✓', 1: 'planned ✓',
+                       3: 'finished ✓'}[status] || 'saved ✓';
     btn.classList.add('done');
   } catch (e){
     btn.textContent = 'failed'; btn.disabled = false;
@@ -2957,6 +2973,15 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     lvl = cache.get("level") or 0
     jkey = jimaku_key(getattr(args, "jimaku_key", None))
 
+    # Listed but never analysed: you are done with these, and each would cost a
+    # word-list download to measure.
+    finished = []
+    if key:
+        try:
+            finished = jiten_status_decks("completed", key)
+        except SystemExit:
+            finished = []
+
     rows, curves, titles = [], [], {}
     for deck, words in load_decks(ids, key, args.sleep, progress=True):
         res = analyse_deck(words, known)
@@ -3009,10 +3034,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     h.append(BROWSE_SLOT)
 
     h.append(h2("Your tracked titles"))
-    h.append(f'<div class="wrap"><table class="sortable"><tr><th>title</th><th>list</th>'
-             f'<th class="num">kanji</th>'
-             f'<th></th><th class="num">finish L{lvl}</th>'
-             f'<th class="num">jiten</th><th class="num">lvl for 95%</th>'
+    h.append(f'<div class="wrap"><table class="sortable tight"><tr><th>title</th>'
+             f'<th class="num">kanji</th><th class="num">finish L{lvl}</th>'
+             f'<th class="num">jiten</th><th class="num">lvl 95%</th>'
              f'<th class="num">ceiling</th><th class="num">trend</th></tr>')
     for deck, res in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"]):
         deck_id = deck.get("deckId")
@@ -3036,9 +3060,8 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
             + f' <button class="subs setst" data-deck="{deck_id}" data-st="3"'
               f' title="Mark as finished on jiten.moe">finished</button>'
             + f'</td>'
-            f'<td>{esc(STATUS_LABELS.get(DECK_STATUS.get(deck_id), "—"))}</td>'
-            f'<td class="num">{k:.1f}%</td>'
-            f'<td><span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
+            f'<td class="num">{k:.1f}%'
+            f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
             f'<td class="num">{fin_cell}</td>'
             f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
             f'<td class="num">{level_for(res["curve"], 95) or "&mdash;"}</td>'
@@ -3047,6 +3070,37 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     h.append("</table></div>")
 
     h.append('<div id="subsbox" class="subsbox" hidden></div>')
+
+    if finished:
+        h.append(h2("Finished"))
+        h.append(f'<p class="sub">{len(finished)} titles you have been through. '
+                 f'These are not analysed - they cost a word-list download each '
+                 f'and you are done with them - but they are what '
+                 f'<b>Because you know these</b> works from.</p>')
+        h.append('<div class="wrap"><table class="sortable"><tr><th>title</th>'
+                 '<th>type</th><th class="num">chars</th>'
+                 '<th class="num">jiten coverage</th></tr>')
+        for d in finished:
+            did = d.get("deckId")
+            name = d.get("originalTitle") or d.get("englishTitle") or "?"
+            cov = d.get("coverage")
+            cov_txt = f"{cov}%" if cov is not None else "&mdash;"
+            hide = "this.style.visibility='hidden'"
+            h.append(
+                f'<tr><td class="withcover"><span class="ct">'
+                f'<img class="cover" loading="lazy" alt="" src="{cover_url(did)}"'
+                f' onerror="{hide}">'
+                f'<a href="https://jiten.moe/decks/media/{did}/detail"'
+                f' target="_blank" rel="noopener">{esc(name)}</a></span></td>'
+                f'<td>{MEDIA_TYPES.get(d.get("mediaType"), "?")}</td>'
+                f'<td class="num">{d.get("characterCount") or 0:,}</td>'
+                f'<td class="num">{cov_txt}</td></tr>')
+        h.append("</table></div>")
+    else:
+        h.append(h2("Finished"))
+        h.append('<p class="empty">Nothing marked finished yet. Search above for '
+                 'something you have already seen and press <b>finished</b>, or '
+                 'use the button beside a title you are tracking.</p>')
 
     h.append(h2("What each level would buy you"))
     h.append(CHART_HTML)
@@ -3114,8 +3168,13 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
 
     h.append(h2("Leeches blocking your reading"))
     if leeches:
+        blocked = sum(row[0] for row in leeches)
+        h.append(f'<details class="fold"><summary><span class="tw">Show the '
+                 f'{len(leeches)} worst</span><span class="cnt">{blocked:,} '
+                 f'occurrences you cannot read, all in items already sitting in '
+                 f'your review queue</span></summary>')
         h.append('<p class="sub">Apprentice kanji, ranked by how often they appear '
-                 'in the titles above. Already in your review queue.</p>')
+                 'in the titles above.</p>')
         h.append('<div class="wrap"><table class="sortable"><tr><th>kanji</th><th>reading</th>'
                  '<th>meaning</th><th class="num">occurrences</th><th>stage</th>'
                  '<th class="num">wk level</th></tr>')
@@ -3127,7 +3186,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                      f'<td class="num">{n:,}</td>'
                      f'<td>{SRS_STAGE_NAMES.get(stage, "?")}</td>'
                      f'<td class="num">{klvl}</td></tr>')
-        h.append("</table></div>")
+        h.append("</table></div></details>")
     else:
         h.append('<p class="empty">Nothing in Apprentice shows up in your tracked '
                  'titles.</p>')

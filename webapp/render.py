@@ -635,10 +635,10 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                  'jiten.moe, or use the search above, then refresh.</p>')
     else:
         h.append(h2("Your tracked titles"))
-        h.append(f'<div class="wrap"><table class="sortable"><tr><th>title</th>'
-                 f'<th>list</th><th class="num">kanji</th><th></th>'
+        h.append(f'<div class="wrap"><table class="sortable tight"><tr>'
+                 f'<th>title</th><th class="num">kanji</th>'
                  f'<th class="num">finish L{lvl}</th><th class="num">jiten</th>'
-                 f'<th class="num">lvl for 95%</th><th class="num">ceiling</th>'
+                 f'<th class="num">lvl 95%</th><th class="num">ceiling</th>'
                  f'<th class="num">trend</th></tr>')
         for deck, res in sorted(decks, key=lambda r: -r[1]["kanji_cov_occ"]):
             did = deck.get("deckId")
@@ -657,9 +657,8 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                 + f' <button class="subs setst" data-deck="{did}" data-st="3"'
                   f' title="Mark as finished on jiten.moe">finished</button>'
                 + f'</td>'
-                f'<td>{esc(STATUS_LABELS.get(extras["status"].get(did), "—"))}</td>'
-                f'<td class="num">{k:.1f}%</td>'
-                f'<td><span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
+                f'<td class="num">{k:.1f}%'
+                f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
                 f'<td class="num">{f"{fin:.1f}% <span class=\'up\'>{fin-k:+.1f}</span>" if fin else "&mdash;"}</td>'
                 f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
                 f'<td class="num">{w.level_for(res["curve"], 95) or "&mdash;"}</td>'
@@ -710,6 +709,11 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                      reverse=True)[:24]
     if leeches:
         h.append(h2("Leeches blocking your reading"))
+        blocked = sum(row[0] for row in leeches)
+        h.append(f'<details class="fold"><summary><span class="tw">Show the '
+                 f'{len(leeches)} worst</span><span class="cnt">{blocked:,} '
+                 f'occurrences you cannot read, all in items already sitting in '
+                 f'your review queue</span></summary>')
         h.append('<p class="sub">Apprentice kanji, ranked by how often they turn '
                  'up in the titles above.</p>')
         h.append('<div class="wrap"><table class="sortable"><tr><th>kanji</th>'
@@ -722,7 +726,35 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                      f'<td>{esc(mean)}</td><td class="num">{n:,}</td>'
                      f'<td>{w.SRS_STAGE_NAMES.get(stage, "?")}</td>'
                      f'<td class="num">{klvl}</td></tr>')
+        h.append("</table></div></details>")
+
+    done = extras.get("finished") or []
+    h.append(h2("Finished"))
+    if done:
+        h.append(f'<p class="sub">{len(done)} titles you have been through. Not '
+                 f'analysed - you are done with them, and each would cost a '
+                 f'word-list download - but they are what <b>Because you know '
+                 f'these</b> works from.</p>')
+        h.append('<div class="wrap"><table class="sortable"><tr><th>title</th>'
+                 '<th class="num">chars</th>'
+                 '<th class="num">jiten coverage</th></tr>')
+        hide = "this.style.visibility='hidden'"
+        for d in done:
+            did = d["deck_id"]
+            cov = d.get("coverage")
+            h.append(
+                f'<tr><td class="withcover"><span class="ct">'
+                f'<img class="cover" loading="lazy" alt="" src="{w.cover_url(did)}"'
+                f' onerror="{hide}">'
+                f'<a href="https://jiten.moe/decks/media/{did}/detail"'
+                f' target="_blank" rel="noopener">{esc(d["title"])}</a></span></td>'
+                f'<td class="num">{d.get("chars") or 0:,}</td>'
+                f'<td class="num">{f"{cov:.0f}%" if cov else "&mdash;"}</td></tr>')
         h.append("</table></div>")
+    else:
+        h.append('<p class="empty">Nothing marked finished yet. Search above for '
+                 'something you have already seen and press <b>finished</b>, or '
+                 'use the button beside a title you are tracking.</p>')
 
     h.append(h2("Nearly within reach"))
     h.append(w.REACH_HTML)

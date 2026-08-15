@@ -303,7 +303,8 @@ def dashboard():
 
     prev = store.get_snapshot(user["id"], "previous")
     extras = {"status": status, "tags": [], "moved_up": set(),
-              "jimaku_key": creds.get("jimaku_key")}
+              "jimaku_key": creds.get("jimaku_key"),
+              "finished": [r for r in everything if r["status"] == "completed"]}
     if prev:
         old = w.wk_known(prev)
         extras["d_kanji"] = len(known["kanji_known"]) - len(old["kanji_known"])
