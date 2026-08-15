@@ -62,6 +62,20 @@ CREATE TABLE IF NOT EXISTS history (
   jiten_cov REAL,
   PRIMARY KEY (user_id, day, deck_id)
 );
+-- What each account is watching or reading, captured when they load their
+-- dashboard. Stored so the shared page never has to use one person's API key
+-- to answer someone else's request.
+CREATE TABLE IF NOT EXISTS shared_lists (
+  user_id INTEGER NOT NULL,
+  deck_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  title TEXT,
+  media_type INTEGER,
+  chars INTEGER,
+  coverage REAL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, deck_id)
+);
 -- Shared: a deck's word list is the same for everyone.
 CREATE TABLE IF NOT EXISTS decks (
   deck_id INTEGER PRIMARY KEY,
@@ -130,6 +144,11 @@ def db():
 def init() -> None:
     with db() as con:
         con.executescript(SCHEMA)
+        # Added after the first release; existing databases need the column.
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(users)")}
+        if "share_lists" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN share_lists"
+                        " INTEGER NOT NULL DEFAULT 0")
 
 
 def now() -> str:
@@ -176,9 +195,69 @@ def set_password(user_id: int, password: str) -> None:
 
 def delete_user(user_id: int) -> None:
     with db() as con:
-        for t in ("creds", "snapshots", "history"):
+        for t in ("creds", "snapshots", "history", "shared_lists"):
             con.execute(f"DELETE FROM {t} WHERE user_id = ?", (user_id,))
         con.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+# ------------------------------------------------------------ shared lists
+
+def set_sharing(user_id: int, on: bool) -> None:
+    """Turning it off also drops what was already stored, so 'off' means gone
+    rather than merely hidden."""
+    with db() as con:
+        con.execute("UPDATE users SET share_lists = ? WHERE id = ?",
+                    (1 if on else 0, user_id))
+        if not on:
+            con.execute("DELETE FROM shared_lists WHERE user_id = ?", (user_id,))
+
+
+def is_sharing(user_id: int) -> bool:
+    with db() as con:
+        row = con.execute("SELECT share_lists FROM users WHERE id = ?",
+                          (user_id,)).fetchone()
+    return bool(row and row["share_lists"])
+
+
+def put_shared_lists(user_id: int, rows: list[dict]) -> None:
+    """Replace this account's snapshot wholesale, so titles they removed on
+    jiten.moe disappear here too."""
+    with db() as con:
+        con.execute("DELETE FROM shared_lists WHERE user_id = ?", (user_id,))
+        for r in rows:
+            con.execute(
+                "INSERT OR REPLACE INTO shared_lists (user_id, deck_id, status,"
+                " title, media_type, chars, coverage, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (user_id, r["deck_id"], r["status"], r.get("title"),
+                 r.get("media_type"), r.get("chars"), r.get("coverage"), now()))
+
+
+def everyones_lists() -> list[dict]:
+    """Every sharing account's titles, newest snapshot first."""
+    with db() as con:
+        rows = con.execute(
+            "SELECT s.*, u.username FROM shared_lists s"
+            " JOIN users u ON u.id = s.user_id"
+            " WHERE u.share_lists = 1"
+            " ORDER BY u.username, s.status, s.coverage DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def all_usernames() -> list[dict]:
+    with db() as con:
+        rows = con.execute("SELECT id, username FROM users ORDER BY username")
+        return [dict(r) for r in rows]
+
+
+def sharing_users() -> list[dict]:
+    with db() as con:
+        rows = con.execute(
+            "SELECT u.id, u.username,"
+            " (SELECT COUNT(*) FROM shared_lists s WHERE s.user_id = u.id) AS titles,"
+            " (SELECT MAX(updated_at) FROM shared_lists s WHERE s.user_id = u.id) AS seen"
+            " FROM users u WHERE u.share_lists = 1 ORDER BY u.username").fetchall()
+    return [dict(r) for r in rows]
 
 
 # ------------------------------------------------------------------- invites

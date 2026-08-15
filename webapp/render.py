@@ -54,7 +54,7 @@ def shell(title: str, body: str, *, user=None, extra_css: str = "",
     bar = ""
     if user:
         bar = (f'<div class="topbar"><nav><a href="/">dashboard</a>'
-               f'<a href="/settings">settings</a>'
+               f'<a href="/together">together</a><a href="/settings">settings</a>'
                + ('<a href="/invites">invites</a>' if user.get("is_admin") else "")
                + f'</nav><span class="who">{esc(user["username"])} &middot; '
                  f'<a href="/logout">log out</a></span></div>')
@@ -160,6 +160,112 @@ def invites_page(user, invites, base_url: str) -> str:
       <h2>Codes</h2>
       <div class="wrap"><table><tr><th>code</th><th>created</th><th>used by</th>
       <th>link</th></tr>{rows}</table></div>""", user=user)
+
+
+TOGETHER_CSS = """
+.people { display:grid; gap:20px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+  margin-bottom:8px; }
+.person { background:var(--raise); border:1px solid var(--line); border-radius:14px;
+  box-shadow:var(--shadow); overflow:hidden; }
+.person > header { padding:16px 18px 12px; border-bottom:1px solid var(--line);
+  display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+.person h3 { margin:0; font-size:18px; font-weight:640; letter-spacing:-.015em; }
+.person .meta { color:var(--faint); font-size:12px; }
+.person .group { padding:12px 18px 4px; }
+.person .group h4 { margin:0 0 8px; font-size:10.5px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--faint); font-weight:650; }
+.titlelist { list-style:none; margin:0 0 12px; padding:0; }
+.titlelist li { display:flex; justify-content:space-between; gap:12px; padding:5px 0;
+  border-bottom:1px solid var(--line-soft); font-size:14.5px; }
+.titlelist li:last-child { border-bottom:0; }
+.titlelist .cov { color:var(--muted); font-variant-numeric:tabular-nums;
+  white-space:nowrap; }
+.titlelist .both { color:var(--accent); font-weight:600; }
+.overlap { background:var(--accent-soft); border:1px solid var(--line);
+  border-radius:14px; padding:4px 18px 14px; margin-bottom:8px; }
+.who-has { color:var(--muted); font-size:13px; }
+.notsharing { display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  background:var(--raise); border:1px solid var(--line); border-radius:14px;
+  padding:16px 18px; box-shadow:var(--shadow); }
+"""
+
+
+def together_page(user, sharing: bool, people, by_user, overlap, absent) -> str:
+    if not sharing:
+        head = f"""
+      <div class="notsharing">
+        <div style="flex:1 1 320px">
+          <b>You are not sharing.</b>
+          <div class="sub" style="margin:4px 0 0">You can see what others share
+          without sharing yourself, but it is a nicer trade the other way.</div>
+        </div>
+        <form method="post" action="/together/share"><input type="hidden"
+          name="on" value="1"><button class="go">Share my lists</button></form>
+      </div>"""
+    else:
+        head = f"""
+      <div class="notsharing">
+        <div style="flex:1 1 320px">
+          <b>You are sharing your lists.</b>
+          <div class="sub" style="margin:4px 0 0">Everyone with an account here can
+          see your titles, their status and your coverage on them. Not your keys,
+          not your reviews.</div>
+        </div>
+        <form method="post" action="/together/share"><input type="hidden"
+          name="on" value="0"><button>Stop sharing</button></form>
+      </div>"""
+
+    cards = []
+    for p in people:
+        groups = []
+        for status, label in (("ongoing", "watching / reading"),
+                              ("planning", "plan to watch / read"),
+                              ("completed", "finished")):
+            items = by_user.get(p["id"], {}).get(status, [])
+            if not items:
+                continue
+            lis = "".join(
+                f'<li><span class="{"both" if it["deck_id"] in overlap else ""}">'
+                f'<a href="https://jiten.moe/decks/media/{it["deck_id"]}/detail"'
+                f' target="_blank" rel="noopener">{esc(it["title"])}</a></span>'
+                f'<span class="cov">'
+                f'{f"{it['coverage']:.0f}%" if it.get("coverage") else "&mdash;"}'
+                f'</span></li>' for it in items[:30])
+            more = (f'<li class="who-has">and {len(items) - 30} more</li>'
+                    if len(items) > 30 else "")
+            groups.append(f'<div class="group"><h4>{label} &middot; {len(items)}</h4>'
+                          f'<ul class="titlelist">{lis}{more}</ul></div>')
+        seen = (p.get("seen") or "")[:10]
+        cards.append(
+            f'<div class="person"><header><h3>{esc(p["username"])}'
+            f'{" (you)" if p["id"] == user["id"] else ""}</h3>'
+            f'<span class="meta">{p["titles"]} titles &middot; {esc(seen)}</span>'
+            f'</header>{"".join(groups) or "<div class=group><p class=empty>Nothing yet.</p></div>"}</div>')
+
+    overlap_html = ""
+    if overlap:
+        rows = "".join(
+            f'<li><span><a href="https://jiten.moe/decks/media/{d}/detail"'
+            f' target="_blank" rel="noopener">{esc(info["title"])}</a></span>'
+            f'<span class="who-has">{esc(", ".join(info["who"]))}</span></li>'
+            for d, info in sorted(overlap.items(),
+                                  key=lambda kv: -len(kv[1]["who"]))[:20])
+        overlap_html = (f'<h2>Both of you</h2><div class="overlap">'
+                        f'<ul class="titlelist">{rows}</ul></div>')
+
+    missing = ""
+    if absent:
+        missing = (f'<p class="sub">Not sharing yet: '
+                   f'{esc(", ".join(absent))}. They can turn it on from this page.</p>')
+
+    body = (f'<h1>Together</h1><p class="sub">What everyone here is watching, '
+            f'reading and has finished, straight from their jiten.moe lists.</p>'
+            f'{head}{overlap_html}<h2>Everyone</h2>'
+            f'<div class="people">{"".join(cards) or ""}</div>{missing}')
+    if not people:
+        body = (f'<h1>Together</h1><p class="sub">Nobody is sharing their lists yet.'
+                f'</p>{head}{missing}')
+    return shell("Together", body, user=user, extra_css=TOGETHER_CSS)
 
 
 # ---------------------------------------------------------------- dashboard

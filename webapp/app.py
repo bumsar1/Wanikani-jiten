@@ -110,20 +110,37 @@ def deck_words_shared(deck_id: int, key: str | None, deck: dict | None):
     return counts
 
 
+SHARED_STATUSES = ("ongoing", "planning", "completed")
+
+
 def user_decks(key: str | None):
-    """The titles on this account's jiten.moe lists."""
+    """Every title on this account's jiten.moe lists.
+
+    Returns the ids to analyse (what they are actually on), the status of each,
+    and the full set including finished titles for the shared page - those are
+    worth showing to a friend but not worth downloading word lists for.
+    """
     if not key:
-        return [], {}
-    ids, status = [], {}
-    for st in ("ongoing", "planning"):
+        return [], {}, []
+    ids, status, everything = [], {}, []
+    for st in SHARED_STATUSES:
         try:
-            for row in w.jiten_status_decks(st, key):
-                if row["deckId"] not in status:
-                    status[row["deckId"]] = st
-                    ids.append(row["deckId"])
+            rows = w.jiten_status_decks(st, key)
         except SystemExit:
             continue
-    return ids, status
+        for row in rows:
+            did = row["deckId"]
+            everything.append({
+                "deck_id": did, "status": st,
+                "title": (row.get("originalTitle") or row.get("englishTitle")
+                          or row.get("romajiTitle") or "?"),
+                "media_type": row.get("mediaType"),
+                "chars": row.get("characterCount"),
+                "coverage": row.get("coverage")})
+            if st != "completed" and did not in status:
+                status[did] = st
+                ids.append(did)
+    return ids, status, everything
 
 
 # -------------------------------------------------------------------- routes
@@ -251,7 +268,9 @@ def dashboard():
 
     known = w.wk_known(cache)
     key = creds.get("jiten_key")
-    ids, status = user_decks(key)
+    ids, status, everything = user_decks(key)
+    if store.is_sharing(user["id"]) and everything:
+        store.put_shared_lists(user["id"], everything)
 
     decks = []
     for deck_id in ids[:40]:
@@ -294,6 +313,47 @@ def dashboard():
 
     return render.dashboard(user, cache, known, decks,
                             store.get_history(user["id"]), extras)
+
+
+@app.get("/together")
+def together():
+    user = require_login()
+    people = store.sharing_users()
+    rows = store.everyones_lists()
+
+    by_user: dict[int, dict[str, list]] = {}
+    for r in rows:
+        by_user.setdefault(r["user_id"], {}).setdefault(r["status"], []).append(r)
+
+    # A title more than one person has is the interesting bit.
+    seen: dict[int, dict] = {}
+    for r in rows:
+        entry = seen.setdefault(r["deck_id"], {"title": r["title"], "who": []})
+        if r["username"] not in entry["who"]:
+            entry["who"].append(r["username"])
+    overlap = {d: v for d, v in seen.items() if len(v["who"]) > 1}
+
+    sharing_ids = {p["id"] for p in people}
+    absent = [u["username"] for u in store.all_usernames()
+              if u["id"] not in sharing_ids]
+
+    return render.together_page(user, store.is_sharing(user["id"]),
+                                people, by_user, overlap, absent)
+
+
+@app.post("/together/share")
+def set_sharing():
+    user = require_login()
+    on = request.form.get("on") == "1"
+    store.set_sharing(user["id"], on)
+    # Publish straight away rather than making them reload the dashboard first.
+    if on:
+        key = creds_of(user).get("jiten_key")
+        if key:
+            _ids, _status, everything = user_decks(key)
+            if everything:
+                store.put_shared_lists(user["id"], everything)
+    return redirect(url_for("together"))
 
 
 # ---------------------------------------------------- per-user Jiten access

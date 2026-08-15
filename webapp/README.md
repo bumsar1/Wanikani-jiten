@@ -9,6 +9,13 @@ Deck word lists are cached **once for the whole instance**, because a word list
 belongs to a title rather than an account. The second person to look at a series
 gets an instant answer, and Jiten sees one download instead of one per user.
 
+There is also a **Together** page: what everyone is watching, reading and has
+finished, with the titles more than one of you has picked out. It is **off by
+default** — a reading list is data about a person, not about an anime, so each
+account turns their own on. Turning it off deletes what was stored rather than
+merely hiding it. What gets shared is the title, its status and that person's
+coverage on it; never their keys, their reviews or their WaniKani account.
+
 ---
 
 ## Before you host this
