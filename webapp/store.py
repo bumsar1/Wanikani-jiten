@@ -164,6 +164,11 @@ def init() -> None:
         scols = {r["name"] for r in con.execute("PRAGMA table_info(shared_lists)")}
         if "kanji_cov" not in scols:
             con.execute("ALTER TABLE shared_lists ADD COLUMN kanji_cov REAL")
+        for col, decl in (("bio", "TEXT"), ("avatar", "BLOB"),
+                          ("avatar_type", "TEXT"), ("banner", "BLOB"),
+                          ("banner_type", "TEXT")):
+            if col not in cols:
+                con.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
         ccols = {r["name"] for r in con.execute("PRAGMA table_info(creds)")}
         if "jimaku_key" not in ccols:
             con.execute("ALTER TABLE creds ADD COLUMN jimaku_key BLOB")
@@ -343,7 +348,9 @@ def all_usernames() -> list[dict]:
 def sharing_users() -> list[dict]:
     with db() as con:
         rows = con.execute(
-            "SELECT u.id, u.username,"
+            "SELECT u.id, u.username, u.bio,"
+            " u.avatar IS NOT NULL AS has_avatar,"
+            " u.banner IS NOT NULL AS has_banner,"
             " (SELECT COUNT(*) FROM shared_lists s WHERE s.user_id = u.id) AS titles,"
             " (SELECT MAX(updated_at) FROM shared_lists s WHERE s.user_id = u.id) AS seen"
             " FROM users u WHERE u.visibility <> 'private'"
@@ -521,3 +528,76 @@ def get_history(user_id: int) -> dict[int, list[dict]]:
     for r in rows:
         out.setdefault(r["deck_id"], []).append(dict(r))
     return out
+
+
+# ------------------------------------------------------------------ profile
+
+# Only formats a browser renders as an image and nothing else. SVG is absent on
+# purpose: it can carry script, and it would be served from this origin.
+IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+MAX_IMAGE = 3 * 1024 * 1024
+
+
+def sniff_image(data: bytes) -> str | None:
+    """The declared type is whatever the uploader claimed; this reads the bytes."""
+    if not data or len(data) > MAX_IMAGE:
+        return None
+    for magic, mime in IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def set_image(user_id: int, kind: str, data: bytes | None) -> str | None:
+    """kind is 'avatar' or 'banner'. Returns an error message, or None on success."""
+    if kind not in ("avatar", "banner"):
+        return "Unknown image."
+    if not data:
+        with db() as con:
+            con.execute(f"UPDATE users SET {kind} = NULL, {kind}_type = NULL"
+                        " WHERE id = ?", (user_id,))
+        return None
+    mime = sniff_image(data)
+    if not mime:
+        return ("That file is not a PNG, JPEG, GIF or WebP under 3 MB."
+                if len(data) <= MAX_IMAGE else "That image is over 3 MB.")
+    with db() as con:
+        con.execute(f"UPDATE users SET {kind} = ?, {kind}_type = ? WHERE id = ?",
+                    (data, mime, user_id))
+    return None
+
+
+def get_image(user_id: int, kind: str):
+    if kind not in ("avatar", "banner"):
+        return None, None
+    with db() as con:
+        row = con.execute(f"SELECT {kind} AS img, {kind}_type AS mime"
+                          " FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row or not row["img"]:
+        return None, None
+    return row["img"], row["mime"]
+
+
+def has_image(user_id: int, kind: str) -> bool:
+    return get_image(user_id, kind)[0] is not None
+
+
+def set_bio(user_id: int, bio: str) -> None:
+    with db() as con:
+        con.execute("UPDATE users SET bio = ? WHERE id = ?",
+                    (bio.strip()[:160] or None, user_id))
+
+
+def get_profile(user_id: int) -> dict:
+    with db() as con:
+        row = con.execute("SELECT username, bio, avatar IS NOT NULL AS has_avatar,"
+                          " banner IS NOT NULL AS has_banner FROM users"
+                          " WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else {}

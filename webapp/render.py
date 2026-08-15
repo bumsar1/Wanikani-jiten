@@ -195,6 +195,28 @@ TOGETHER_CSS = """
 .statsbox { display:flex; align-items:center; gap:7px; font-size:14px;
   color:var(--muted); cursor:pointer; }
 .statsbox input { width:16px; height:16px; accent-color:var(--accent); }
+.banner { height:120px; border-radius:14px 14px 0 0; background-size:cover;
+  background-position:center; border-bottom:1px solid var(--line); }
+.person .idbar { display:flex; gap:12px; align-items:center; padding:14px 18px 12px;
+  border-bottom:1px solid var(--line); }
+.person .idbar.pulled { margin-top:-34px; border-bottom:0; padding-bottom:6px; }
+.avatar { width:52px; height:52px; border-radius:50%; object-fit:cover; flex:none;
+  border:2px solid var(--raise); background:var(--sunk); }
+.avatar.blank { display:grid; place-items:center; font:600 20px/1 var(--sans, sans-serif);
+  color:var(--faint); }
+.bio { color:var(--muted); font-size:13.5px; margin:2px 0 0; }
+.profileform { display:grid; gap:14px; }
+.profileform .row2 { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; }
+.profileform input[type=file] { font-size:13px; color:var(--muted); }
+.profileform input[type=text] { width:100%; font:inherit; padding:9px 12px;
+  border-radius:10px; border:1px solid var(--line); background:var(--bg);
+  color:var(--fg); }
+.addbtn { font:600 11px/1 var(--sans, sans-serif); padding:3px 9px; border-radius:99px;
+  border:1px solid var(--line); background:var(--bg); color:var(--muted);
+  cursor:pointer; margin-left:8px; }
+.addbtn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+.addbtn:disabled { opacity:.5; cursor:default; }
+.addbtn.done { color:var(--good); border-color:var(--good); }
 .titlelist .both { color:var(--accent); font-weight:600; }
 .overlap { background:var(--accent-soft); border:1px solid var(--line);
   border-radius:14px; padding:4px 18px 14px; margin-bottom:8px; }
@@ -297,9 +319,47 @@ w_labels = {
 }
 
 
+def profile_panel(profile: dict, user) -> str:
+    """Picture, banner and a line about yourself. All optional, all removable."""
+    return f"""
+      <div class="sharebox">
+        <form method="post" action="/profile" enctype="multipart/form-data"
+              class="profileform">
+          <div class="row">
+            {avatar_tag(user["id"], profile.get("has_avatar"), user["username"])}
+            <div style="flex:1 1 260px">
+              <b>Your profile</b>
+              <div class="sub" style="margin:2px 0 0">Shown on the shared pages.
+              Leave it all empty and your name stands on its own.</div>
+            </div>
+          </div>
+          <input type="text" name="bio" maxlength="160" value="{esc(profile.get("bio") or "")}"
+                 placeholder="A line about yourself, if you like">
+          <div class="row2">
+            <label>Picture<br><input type="file" name="avatar"
+              accept="image/png,image/jpeg,image/gif,image/webp"></label>
+            <label>Banner<br><input type="file" name="banner"
+              accept="image/png,image/jpeg,image/gif,image/webp"></label>
+            <button class="go">Save profile</button>
+          </div>
+          <div class="row" style="gap:16px">
+            {'<label class="statsbox"><input type="checkbox" name="clear_avatar" value="1"> Remove picture</label>' if profile.get("has_avatar") else ""}
+            {'<label class="statsbox"><input type="checkbox" name="clear_banner" value="1"> Remove banner</label>' if profile.get("has_banner") else ""}
+          </div>
+          <span class="hint">PNG, JPEG, GIF or WebP, up to 3 MB.</span>
+        </form>
+      </div>"""
+
+
 def together_page(user, visibility, token, base_url, people, by_user, overlap,
-                  absent, share_stats=False) -> str:
+                  absent, share_stats=False, profile=None, can_add=False,
+                  note="") -> str:
     head = share_panel(visibility, token, base_url, user["username"], share_stats)
+    head += profile_panel(profile or {}, user)
+    if note:
+        head = f'<div class="ok">{esc(note)}</div>' + head
+    mine = {r["deck_id"] for st in by_user.get(user["id"], {}).values()
+            for r in st}
 
     cards = []
     for p in people:
@@ -310,22 +370,38 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
             items = by_user.get(p["id"], {}).get(status, [])
             if not items:
                 continue
-            lis = "".join(
-                f'<li><span class="{"both" if it["deck_id"] in overlap else ""}">'
-                f'<a href="https://jiten.moe/decks/media/{it["deck_id"]}/detail"'
-                f' target="_blank" rel="noopener">{esc(it["title"])}</a></span>'
-                f'<span class="covs">{cov_cells(it)}</span></li>'
-                for it in items[:30])
+            lis = ""
+            for it in items[:30]:
+                # Only worth offering for someone else's titles, and only when
+                # you have a Jiten key to add it with.
+                add = ""
+                if can_add and p["id"] != user["id"] and it["deck_id"] not in mine:
+                    add = (f'<button class="addbtn" data-add="{it["deck_id"]}"'
+                           f' title="Add to your plan to watch/read">+ my list</button>')
+                lis += (
+                    f'<li><span class="{"both" if it["deck_id"] in overlap else ""}">'
+                    f'<a href="https://jiten.moe/decks/media/{it["deck_id"]}/detail"'
+                    f' target="_blank" rel="noopener">{esc(it["title"])}</a>{add}</span>'
+                    f'<span class="covs">{cov_cells(it)}</span></li>')
             more = (f'<li class="who-has">and {len(items) - 30} more</li>'
                     if len(items) > 30 else "")
             groups.append(f'<div class="group"><h4>{label} &middot; {len(items)}</h4>'
                           f'<ul class="titlelist">{lis}{more}</ul></div>')
         seen = (p.get("seen") or "")[:10]
+        top = ""
+        if p.get("has_banner"):
+            top = (f'<div class="banner" style="background-image:url(/media/banner/'
+                   f'{p["id"]})"></div>')
+        idbar = (f'<div class="idbar{" pulled" if top else ""}">'
+                 f'{avatar_tag(p["id"], p.get("has_avatar"), p["username"])}'
+                 f'<div><h3>{esc(p["username"])}'
+                 f'{" (you)" if p["id"] == user["id"] else ""}</h3>'
+                 f'<div class="meta">{p["titles"]} titles &middot; {esc(seen)}</div>'
+                 + (f'<p class="bio">{esc(p["bio"])}</p>' if p.get("bio") else "")
+                 + '</div></div>')
         cards.append(
-            f'<div class="person"><header><h3>{esc(p["username"])}'
-            f'{" (you)" if p["id"] == user["id"] else ""}</h3>'
-            f'<span class="meta">{p["titles"]} titles &middot; {esc(seen)}</span>'
-            f'</header>{"".join(groups) or "<div class=group><p class=empty>Nothing yet.</p></div>"}</div>')
+            f'<div class="person">{top}{idbar}'
+            f'{"".join(groups) or "<div class=group><p class=empty>Nothing yet.</p></div>"}</div>')
 
     overlap_html = ""
     if overlap:
@@ -351,7 +427,37 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
         body = (f'<h1>Together</h1><p class="sub">Nobody is sharing their lists yet.'
                 f'</p>{head}{missing}')
     return shell("Together", body, user=user, extra_css=TOGETHER_CSS,
-                 scripts=SHARE_JS)
+                 scripts=SHARE_JS + ADD_JS)
+
+
+ADD_JS = """
+<script>
+document.querySelectorAll('[data-add]').forEach(function (btn) {
+  btn.addEventListener('click', async function () {
+    var was = btn.textContent;
+    btn.disabled = true; btn.textContent = 'adding\u2026';
+    try {
+      var r = await fetch('/api/user/deck-preferences/' + btn.dataset.add + '/status', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: 1})});
+      if (!r.ok) throw new Error(r.status);
+      btn.textContent = 'on your list';
+      btn.classList.add('done');
+    } catch (e) {
+      btn.textContent = 'failed'; btn.disabled = false;
+      setTimeout(function () { btn.textContent = was; }, 2000);
+    }
+  });
+});
+</script>
+"""
+
+
+def avatar_tag(user_id: int, has: bool, name: str, cls: str = "avatar") -> str:
+    if has:
+        return (f'<img class="{cls}" src="/media/avatar/{user_id}" alt=""'
+                f' width="52" height="52">')
+    return f'<div class="{cls} blank" aria-hidden="true">{esc(name[:1].upper())}</div>'
 
 
 def cov_cells(it) -> str:
@@ -366,8 +472,9 @@ def cov_cells(it) -> str:
             f'<span class="cov kanjicov">{kanji} kanji</span>')
 
 
-def public_profile(username: str, stats, lists, base_url: str) -> str:
+def public_profile(owner, profile: dict, stats, lists, base_url: str) -> str:
     """The read-only view behind a share link. No login, no navigation."""
+    username = owner["username"]
     groups = []
     total = 0
     for status, label in (("ongoing", "watching / reading"),
@@ -406,11 +513,23 @@ def public_profile(username: str, stats, lists, base_url: str) -> str:
     asof = ""
     if stats and stats.get("as_of"):
         asof = f' &middot; as of {esc(stats["as_of"])}'
+    banner = ""
+    if profile.get("has_banner"):
+        banner = (f'<div class="banner" style="max-width:620px;margin-top:26px;'
+                  f'border-radius:14px;background-image:url(/media/banner/'
+                  f'{owner["id"]})"></div>')
     body = f"""
-      <div class="hero" style="padding:48px 0 22px">
-        <h1>{esc(username)}</h1>
-        <p class="sub">What {esc(username)} is watching and reading on
-        jiten.moe &middot; {total} titles{asof}</p>
+      {banner}
+      <div class="hero" style="padding:{"18px" if banner else "48px"} 0 22px">
+        <div style="display:flex;gap:14px;align-items:center">
+          {avatar_tag(owner["id"], profile.get("has_avatar"), username)}
+          <div>
+            <h1 style="margin:0">{esc(username)}</h1>
+            <p class="sub" style="margin:2px 0 0">What {esc(username)} is watching
+            and reading on jiten.moe &middot; {total} titles{asof}</p>
+          </div>
+        </div>
+        {f'<p class="bio" style="margin-top:10px">{esc(profile["bio"])}</p>' if profile.get("bio") else ""}
       </div>
       {cards}
       <div class="person" style="max-width:620px">{inner}</div>

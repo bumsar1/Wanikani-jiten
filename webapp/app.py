@@ -28,7 +28,7 @@ import store                 # noqa: E402
 app = Flask(__name__)
 app.secret_key = os.environ.get("WKJITEN_SESSION_SECRET") or os.urandom(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                  MAX_CONTENT_LENGTH=1 << 20)
+                  MAX_CONTENT_LENGTH=4 << 20)
 if os.environ.get("WKJITEN_HTTPS", "").lower() in ("1", "true", "yes"):
     app.config["SESSION_COOKIE_SECURE"] = True
 
@@ -352,7 +352,10 @@ def together():
     token = store.share_token(user["id"]) if vis in ("link", "public") else ""
     return render.together_page(user, vis, token, request.url_root.rstrip("/"),
                                 people, by_user, overlap, absent,
-                                store.shares_stats(user["id"]))
+                                store.shares_stats(user["id"]),
+                                store.get_profile(user["id"]),
+                                bool(creds_of(user).get("jiten_key")),
+                                request.args.get("note", ""))
 
 
 @app.post("/together/share")
@@ -371,6 +374,37 @@ def set_sharing():
     return redirect(url_for("together"))
 
 
+@app.post("/profile")
+def save_profile():
+    user = require_login()
+    store.set_bio(user["id"], request.form.get("bio", ""))
+    problems = []
+    for kind in ("avatar", "banner"):
+        if request.form.get(f"clear_{kind}") == "1":
+            store.set_image(user["id"], kind, None)
+            continue
+        upload = request.files.get(kind)
+        if upload and upload.filename:
+            err = store.set_image(user["id"], kind, upload.read())
+            if err:
+                problems.append(f"{kind}: {err}")
+    note = "; ".join(problems) if problems else "Profile saved."
+    return redirect(url_for("together", note=note))
+
+
+@app.get("/media/<kind>/<int:user_id>")
+def media(kind, user_id):
+    """User-supplied images, served with the type read from their own bytes and
+    sniffing switched off, so nothing here can be coaxed into running."""
+    data, mime = store.get_image(user_id, kind)
+    if not data:
+        abort(404)
+    return Response(data, mimetype=mime, headers={
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Cache-Control": "public, max-age=300"})
+
+
 @app.post("/together/newlink")
 def new_share_link():
     user = require_login()
@@ -379,6 +413,7 @@ def new_share_link():
 
 
 def _public_view(owner):
+    profile = store.get_profile(owner["id"])
     stats = None
     if store.shares_stats(owner["id"]):
         snap = store.get_snapshot(owner["id"])
@@ -389,7 +424,7 @@ def _public_view(owner):
                      "words": len(known["words_known_set"]),
                      "pace": round(w.wk_pace(snap) or 0, 1),
                      "as_of": (snap.get("fetched_at") or "")[:10]}
-    return render.public_profile(owner["username"], stats,
+    return render.public_profile(owner, profile, stats,
                                  store.lists_of(owner["id"]),
                                  request.url_root.rstrip("/"))
 
