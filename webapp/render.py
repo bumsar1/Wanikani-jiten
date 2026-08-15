@@ -117,8 +117,10 @@ def settings_page(user, creds, note: str = "", error: str = "") -> str:
           <input id="wk" name="wk_token" placeholder="paste to replace"
                  autocomplete="off">
           <div class="hint">Make it <b>read-only</b> at
-            wanikani.com/settings/personal_access_tokens. Read-only is all this
-            needs.</div>
+            <a href="https://www.wanikani.com/settings/personal_access_tokens"
+               target="_blank" rel="noopener"
+               >wanikani.com/settings/personal_access_tokens</a>. Read-only is
+            all this needs.</div>
         </div>
         <div class="field">
           <label for="jt">Jiten API key &mdash; currently {has_jt}</label>
@@ -126,17 +128,20 @@ def settings_page(user, creds, note: str = "", error: str = "") -> str:
                  autocomplete="off">
           <div class="hint">Optional. Without it you still get the full kanji
             analysis; with it you also get your account's word coverage, the
-            known-words upload and the list buttons. Jiten's own docs say this
-            key <b>carries every permission your account has</b> &mdash; treat
-            it like a password, and remove it here whenever you like.</div>
+            known-words upload and the list buttons. Yours is at
+            <a href="https://jiten.moe/settings" target="_blank" rel="noopener"
+               >jiten.moe/settings</a>. Jiten's own docs say this key
+            <b>carries every permission your account has</b> &mdash; treat it
+            like a password, and remove it here whenever you like.</div>
         </div>
         <div class="field">
           <label for="jm">jimaku.cc API key &mdash; currently {has_jm}</label>
           <input id="jm" name="jimaku_key" placeholder="paste to replace"
                  autocomplete="off">
           <div class="hint">Optional. Adds a <b>subs</b> link beside anime,
-            drama and film, straight to that title's Japanese subtitles. Found
-            under your account settings on jimaku.cc.</div>
+            drama and film, straight to that title's Japanese subtitles. Yours
+            is at <a href="https://jimaku.cc/account" target="_blank"
+               rel="noopener">jimaku.cc/account</a>.</div>
         </div>
         <button class="go" type="submit">Save</button>
       </form>
