@@ -38,6 +38,28 @@ users do not share a budget.
 
 ---
 
+## Trying it on Windows first
+
+You do not need a server, a container, or Linux to see whether you like it:
+
+* **Windows** — double-click `Run locally.bat`
+* **macOS / Linux** — `./run-locally.sh`
+
+The first run builds its own virtual environment, installs Flask and
+cryptography into it, and starts on <http://127.0.0.1:8770>. It takes a minute;
+after that it starts immediately. Everything it writes goes in `webapp/data/`,
+separate from the command-line tool's `cache/` and ignored by git — delete that
+folder and you are back to nothing.
+
+Watch the window for the invitation link on first run, open it, and create the
+first account. That one becomes the admin.
+
+This is Flask's development server on loopback: fine for trying it out and for
+your own machine, not what you want other people connecting to. For that, the
+container below.
+
+---
+
 ## Running it on Bazzite
 
 Bazzite is an immutable image, so install nothing on the host — run it in a
