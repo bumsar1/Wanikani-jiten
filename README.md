@@ -16,6 +16,24 @@ Kun Python 3.9+ og standardbiblioteket. Ingen pip install.
 
 ---
 
+## Den nemme vej: dobbeltklik
+
+Når nøglerne ligger på plads (se nedenfor), behøver du aldrig røre terminalen:
+
+* **Windows** — `Opdater coverage.bat`
+* **macOS** — `Opdater coverage.command`
+
+Den henter dine WaniKani-data forfra, sender ordlisten til jiten.moe og printer
+coverage på alle titlerne i `decks.txt`. Kør den når du er steget et level.
+
+På macOS skal filen gøres kørbar første gang: åbn Terminal, skriv `chmod +x `
+(med mellemrum til sidst), træk filen ind i vinduet og tryk retur.
+
+`decks.txt` er din liste over titler — ét deck-id pr. linje, alt efter `#`
+ignoreres. Find id'er med `python wkjiten.py search "titel"` og redigér frit.
+
+---
+
 ## Opsætning
 
 **WaniKani-token** (read-only er nok) — <https://www.wanikani.com/settings/personal_access_tokens>
