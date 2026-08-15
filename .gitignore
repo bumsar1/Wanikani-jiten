@@ -5,3 +5,9 @@ wanikani-known-words.txt
 coverage.csv
 report.html
 gap *.csv
+webapp/.venv/
+webapp/testdata/
+webapp/data/
+webapp/.env
+webapp/__pycache__/
+__pycache__/

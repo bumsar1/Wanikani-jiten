@@ -1,0 +1,30 @@
+# podman-compose up -d   (or docker compose up -d)
+# Run from the repository root: the build context has to include wkjiten.py.
+services:
+  wkjiten:
+    build:
+      context: ..
+      dockerfile: webapp/Containerfile
+    image: localhost/wkjiten:latest
+    container_name: wkjiten
+    restart: unless-stopped
+    ports:
+      # Loopback only. Put a reverse proxy in front of this if it should be
+      # reachable from anywhere else - the session cookie is not worth
+      # exposing over plain HTTP on a network.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - wkjiten-data:/data
+    environment:
+      # Keep sessions valid across restarts. Generate once:
+      #   python -c "import secrets;print(secrets.token_hex(32))"
+      WKJITEN_SESSION_SECRET: "${WKJITEN_SESSION_SECRET:?set this in .env}"
+      # Optional. If unset, a key is generated into /data/secret.key on first
+      # run. Back it up: losing it means everyone re-enters their API keys.
+      WKJITEN_SECRET: "${WKJITEN_SECRET:-}"
+      # Set to 1 once you are serving over HTTPS.
+      WKJITEN_HTTPS: "${WKJITEN_HTTPS:-0}"
+      WKJITEN_STALE_HOURS: "18"
+
+volumes:
+  wkjiten-data:
