@@ -2012,12 +2012,7 @@ REACH_HTML = """
   <label for="rlevel">Judge everything as if I were level</label>
   <input id="rlevel" type="number" min="1" max="60">
 </div>
-<div class="modes reachtabs">
-  <button data-reach="mine" class="on">your list</button>
-  <button data-reach="others">others</button>
-</div>
-<div id="reach-mine"></div>
-<div id="reach-others" hidden>
+<div id="reach-others">
   <div class="controls">
     <select id="rtype">
       <option value="">any type</option>
@@ -2043,32 +2038,12 @@ REACH_HTML = """
 
 REACH_JS = """
 (function(){
-  const mine = document.getElementById('reach-mine');
-  if (!mine || typeof TRACK === 'undefined') return;
+  const box0 = document.getElementById('reach-others');
+  if (!box0 || typeof TRACK === 'undefined') return;
   const lvlInput = document.getElementById('rlevel');
   lvlInput.min = TRACK.level;
   lvlInput.value = REACH_TARGET;
   const target = () => Math.max(TRACK.level, Math.min(60, +lvlInput.value || TRACK.level));
-
-  function drawMine(){
-    const lv = target();
-    if (!TRACK.titles.length){
-      mine.innerHTML = '<p class="empty">Nothing on your jiten.moe lists yet. ' +
-        'Mark something as watching/reading or plan to watch/read, or look ' +
-        'under <b>others</b>.</p>';
-      return;
-    }
-    const rows = TRACK.titles.map(t => {
-      const then = t.c[lv - 1];
-      return `<tr><td>${t.t}</td><td class="num">${t.now.toFixed(1)}%</td>
-              <td class="num">${then.toFixed(1)}%</td>
-              <td class="num up">+${(then - t.now).toFixed(1)}pp</td></tr>`;
-    }).join('');
-    mine.innerHTML = `<div class="wrap"><table class="sortable"><tr><th>title</th>
-      <th class="num">kanji now</th><th class="num">at ${lv}</th>
-      <th class="num">gain</th></tr>${rows}</table></div>`;
-    sortable();
-  }
 
   const sel = document.getElementById('rtag');
   if (sel && typeof TAGS !== 'undefined'){
@@ -2199,22 +2174,14 @@ REACH_JS = """
     wire(box);
   }
 
-  document.querySelectorAll('[data-reach]').forEach(b => b.onclick = () => {
-    const which = b.dataset.reach;
-    document.querySelectorAll('[data-reach]').forEach(x =>
-      x.classList.toggle('on', x === b));
-    document.getElementById('reach-mine').hidden = which !== 'mine';
-    document.getElementById('reach-others').hidden = which !== 'others';
-    if (which === 'others' && !document.getElementById('reach-results').innerHTML)
-      find();
-  });
   document.getElementById('rgo').onclick = find;
+  // Changing the level invalidates whatever is on screen, but re-running is a
+  // sweep of downloads - so clear it and let them press Find again.
   lvlInput.addEventListener('change', () => {
-    drawMine();
-    document.getElementById('reach-results').innerHTML = '';
-    if (!document.getElementById('reach-others').hidden) find();
+    document.getElementById('reach-results').innerHTML =
+      '<p class="empty">Level changed. Press Find to look again.</p>';
   });
-  drawMine(); sortable();
+  sortable();
 })();
 """
 
