@@ -571,7 +571,35 @@ def bootstrap() -> None:
 
 bootstrap()
 
+def lan_address() -> str | None:
+    """This machine's address on the local network.
+
+    Opens a UDP socket towards a public address to see which interface the
+    routing table would pick. Nothing is sent, and it works offline.
+    """
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
 if __name__ == "__main__":
-    app.run(host=os.environ.get("WKJITEN_HOST", "127.0.0.1"),
-            port=int(os.environ.get("WKJITEN_PORT", "8080")),
+    host = os.environ.get("WKJITEN_HOST", "127.0.0.1")
+    port = int(os.environ.get("WKJITEN_PORT", "8080"))
+    if host not in ("127.0.0.1", "localhost"):
+        ip = lan_address()
+        print("\n" + "=" * 62, flush=True)
+        print("  Reachable from other machines on this network at:", flush=True)
+        print(f"    http://{ip or 'this-machine'}:{port}/", flush=True)
+        print("", flush=True)
+        print("  This is plain HTTP, so the password travels unencrypted over", flush=True)
+        print("  your network. Fine at home; do not do it on shared wifi, and", flush=True)
+        print("  never forward this port on your router.", flush=True)
+        print("=" * 62 + "\n", flush=True)
+    app.run(host=host, port=port,
             debug=os.environ.get("WKJITEN_DEBUG") == "1")

@@ -1,0 +1,7 @@
+# WaniKani personal access token.
+#
+# Make one at https://www.wanikani.com/settings/personal_access_tokens
+# READ-ONLY is all this needs - do not grant write permissions.
+#
+# Paste it on the line below, replacing this comment block if you like.
+# Lines starting with # are ignored, so you can leave these notes in place.

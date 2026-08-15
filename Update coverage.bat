@@ -15,6 +15,9 @@ if not defined PY (
     goto :done
 )
 
+rem Turns the shipped templates into real key files on a fresh download.
+%PY% wkjiten.py setup
+
 echo.
 echo == 1/5  Fetching your WaniKani data ==
 %PY% wkjiten.py export --refresh

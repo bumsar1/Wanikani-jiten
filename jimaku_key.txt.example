@@ -1,0 +1,6 @@
+# jimaku.cc API key. Optional - it adds the "subs" button beside anime,
+# drama and film, linking straight to that title's Japanese subtitles.
+#
+# Found under your account settings on https://jimaku.cc
+#
+# Paste it on the line below. Lines starting with # are ignored.

@@ -99,12 +99,26 @@ def get_json(url: str, **kw) -> Any:
 # WaniKani
 # --------------------------------------------------------------------------
 
+def read_key_file(path: str) -> str | None:
+    """First real line of a key file, ignoring blanks and # comments.
+
+    The shipped templates carry their own instructions, so the reader has to
+    skip past them rather than treating the guidance as a key.
+    """
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                return line
+    return None
+
+
 def wk_token(cli_token: str | None) -> str:
     token = cli_token or os.environ.get("WANIKANI_TOKEN")
     if not token:
-        token_file = os.path.join(HERE, "wanikani_token.txt")
-        if os.path.exists(token_file):
-            token = open(token_file, encoding="utf-8").read().strip()
+        token = read_key_file(os.path.join(HERE, "wanikani_token.txt"))
     if not token:
         raise SystemExit(
             "No WaniKani token. Create a read-only personal access token at\n"
@@ -284,9 +298,7 @@ def jiten_headers(api_key: str | None) -> dict:
 def jiten_key(cli_key: str | None) -> str | None:
     key = cli_key or os.environ.get("JITEN_API_KEY")
     if not key:
-        key_file = os.path.join(HERE, "jiten_key.txt")
-        if os.path.exists(key_file):
-            key = open(key_file, encoding="utf-8").read().strip()
+        key = read_key_file(os.path.join(HERE, "jiten_key.txt"))
     return key
 
 
@@ -540,6 +552,44 @@ def bar(pct: float, width: int = 32) -> str:
 # commands
 # --------------------------------------------------------------------------
 
+KEY_FILES = ("wanikani_token.txt", "jiten_key.txt", "jimaku_key.txt")
+
+
+def ensure_key_files() -> list[str]:
+    """Copy any missing key file from its shipped template.
+
+    The real filenames stay out of git: were they tracked, pasting a key would
+    show up as a change to commit, and one careless push would publish it.
+    The templates travel instead, and this turns them into the real thing.
+    """
+    made = []
+    for name in KEY_FILES:
+        target = os.path.join(HERE, name)
+        template = target + ".example"
+        if not os.path.exists(target) and os.path.exists(template):
+            with open(template, encoding="utf-8") as src:
+                body = src.read()
+            with open(target, "w", encoding="utf-8") as dst:
+                dst.write(body)
+            made.append(name)
+    return made
+
+
+def cmd_setup(args) -> None:
+    made = ensure_key_files()
+    print("Key files live next to this script:\n")
+    for name in KEY_FILES:
+        path = os.path.join(HERE, name)
+        value = read_key_file(path)
+        state = ("filled in" if value else
+                 "waiting for your key" if os.path.exists(path) else "missing")
+        mark = "  (just created)" if name in made else ""
+        print(f"  {name:<22} {state}{mark}")
+    print("\nOpen each one and paste the key on its own line. The comments can")
+    print("stay - anything starting with # is ignored.")
+    print("\nOnly the WaniKani token is required, and read-only is enough.")
+
+
 def cmd_export(args) -> None:
     cache = wk_load(args.wk_token, refresh=args.refresh)
     known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
@@ -718,9 +768,7 @@ JIMAKU_CACHE = os.path.join(CACHE_DIR, "jimaku.json")
 def jimaku_key(cli_key: str | None = None) -> str | None:
     key = cli_key or os.environ.get("JIMAKU_API_KEY")
     if not key:
-        path = os.path.join(HERE, "jimaku_key.txt")
-        if os.path.exists(path):
-            key = open(path, encoding="utf-8").read().strip()
+        key = read_key_file(os.path.join(HERE, "jimaku_key.txt"))
     return key or None
 
 
@@ -3536,6 +3584,9 @@ def main() -> None:
         add_common(sp, suppress=True)
         return sp
 
+    s = subparser("setup", help="create the key files and show what is filled in")
+    s.set_defaults(func=cmd_setup)
+
     s = subparser("export", help="write your WaniKani words to a Jiten-importable txt")
     s.add_argument("--out")
     s.add_argument("--normalize", action="store_true", help="NFKC-normalise the words")
@@ -3700,6 +3751,10 @@ def main() -> None:
     s.set_defaults(func=cmd_text)
 
     args = p.parse_args()
+    made = ensure_key_files()
+    if made:
+        print("Created " + ", ".join(made) + " - paste your keys into them.",
+              file=sys.stderr)
     args.func(args)
 
 

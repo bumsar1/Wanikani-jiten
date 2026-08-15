@@ -71,13 +71,29 @@ with `python wkjiten.py search "title"`.
 
 ## Setup
 
+Run either launcher once, or `python wkjiten.py setup`, and the three key files
+appear next to the script with instructions inside them:
+
+```
+wanikani_token.txt     waiting for your key
+jiten_key.txt          waiting for your key
+jimaku_key.txt         waiting for your key
+```
+
+Open each and paste the key on its own line. The comments can stay — anything
+starting with `#` is ignored. Only the first is required.
+
+The repository ships `.example` templates rather than the real filenames, and
+the launcher copies them into place. That way pasting a key never shows up as a
+change to commit, so it cannot be pushed by accident.
+
 **WaniKani token** (read-only is enough) — <https://www.wanikani.com/settings/personal_access_tokens>
+
+You can also use an environment variable instead of the file:
 
 ```bash
 setx WANIKANI_TOKEN "your-token-here"
 ```
-
-or drop it in `wanikani_token.txt` next to the script.
 
 **Jiten API key** (only needed for `push` and for live coverage) — jiten.moe →
 Settings → Advanced → API Key. It is shown **once**. Save it in `jiten_key.txt`

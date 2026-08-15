@@ -1,0 +1,10 @@
+# Jiten API key. Optional, but without it you lose your account's word
+# coverage, the known-words upload and the list buttons.
+#
+# Make one at jiten.moe -> Settings -> Advanced -> API Key. It is shown ONCE.
+#
+# Jiten's own docs: this key "carries every permission your account has,
+# including the calls that rewrite your known words and delete cards."
+# Treat it like a password.
+#
+# Paste it on the line below. Lines starting with # are ignored.
