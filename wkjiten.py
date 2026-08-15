@@ -24,9 +24,11 @@ import re
 import sys
 import time
 import unicodedata
+import io
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from collections import Counter
 from typing import Any, Iterable
 
@@ -767,6 +769,68 @@ def jimaku_entry(anilist: int, key: str) -> int | None:
     with open(JIMAKU_CACHE, "w", encoding="utf-8") as f:
         json.dump(cache, f)
     return entry
+
+
+JA_TOKENS = {"ja", "jp", "jpn", "jap", "japanese", "ja-en", "jaen", "ja_en"}
+CN_TOKENS = {"chs", "cht", "chi", "zh", "cn", "sc", "tc", "gb", "gb2312",
+             "big5", "zh-cn", "zh-tw", "zhcn", "zhtw", "chinese"}
+DUAL_TOKENS = {"jpsc", "jptc", "jpcn", "jp_sc", "jp_tc", "scjp", "tcjp",
+               "ja-zh", "jazh"}
+CN_MARKS = ("简", "繁", "中文", "简体", "繁體", "繁体")
+# Commas and semicolons matter: "[JPN, CHS]" is a dual release, and missing the
+# separator reads it as Chinese-only and throws away a usable Japanese track.
+TOKEN_SPLIT = re.compile(r"[.\[\]_(),;/&+\s-]+")
+
+
+def subtitle_language(name: str) -> str:
+    """Guess a subtitle file's language from its name: jp, cn, dual, unknown.
+
+    jimaku's uploads are named by whoever made them, so this reads the tokens
+    conventions actually put there - .ja.srt, .JPSC.ass, .chs.ass - rather than
+    assuming a single scheme. Anything unrecognised counts as unknown and is
+    kept, since most single-language Japanese releases carry no marker at all.
+    """
+    stem = re.sub(r"\.(ass|srt|ssa|vtt|sub|idx|zip|7z|rar)$", "", name, flags=re.I)
+    tokens = {t.lower() for t in TOKEN_SPLIT.split(stem) if t}
+    if tokens & DUAL_TOKENS:
+        return "dual"
+    has_cn = bool(tokens & CN_TOKENS) or any(m in name for m in CN_MARKS)
+    has_ja = bool(tokens & JA_TOKENS)
+    if has_cn and has_ja:
+        return "dual"
+    if has_cn:
+        return "cn"
+    if has_ja:
+        return "jp"
+    return "unknown"
+
+
+def jimaku_files(entry_id: int, key: str) -> list[dict]:
+    status, body, _ = http(f"{JIMAKU_API}/entries/{entry_id}/files",
+                           headers={"Authorization": key}, timeout=60)
+    if status >= 400:
+        return []
+    try:
+        rows = json.loads(body.decode("utf-8"))
+    except ValueError:
+        return []
+    for r in rows:
+        r["lang"] = subtitle_language(r.get("name", ""))
+    return rows
+
+
+def wanted_subtitles(rows: list[dict], allow_dual: bool = False) -> list[dict]:
+    """Japanese files, with Chinese ones left behind.
+
+    If a title only exists as dual Japanese/Chinese, those come back anyway -
+    half a subtitle beats none, and the caller says so rather than showing an
+    empty list.
+    """
+    keep = [r for r in rows if r["lang"] in ("jp", "unknown")]
+    dual = [r for r in rows if r["lang"] == "dual"]
+    if allow_dual or not keep:
+        keep += dual
+    return sorted(keep, key=lambda r: r.get("name", ""))
 
 
 def jimaku_url(deck: dict, key: str | None = None) -> str | None:
@@ -1708,6 +1772,84 @@ footer { color:var(--faint); font-size:12px; margin-top:56px;
 
 BROWSE_SLOT = "<!--browse-->"
 NAV_SLOT = "<!--nav-->"
+
+SUBS_JS = """
+(function(){
+  const box = document.getElementById('subsbox');
+  if (!box) return;
+  let entry = null, title = '', dual = false;
+
+  function bytes(n){
+    return n > 1048576 ? (n/1048576).toFixed(1) + ' MB'
+         : n > 1024 ? Math.round(n/1024) + ' kB' : (n || 0) + ' B';
+  }
+
+  async function load(){
+    box.hidden = false;
+    box.innerHTML = '<p class="empty">Asking jimaku&hellip;</p>';
+    let d;
+    try { d = await (await fetch(`/subs/${entry}?dual=${dual ? 1 : 0}`)).json(); }
+    catch (e){ box.innerHTML = '<p class="empty">Could not reach jimaku.</p>'; return; }
+    if (!d.files.length){
+      box.innerHTML = `<p class="empty">No Japanese subtitles for this one.</p>`;
+      return;
+    }
+    const withCn = d.files.filter(f => f.lang === 'dual').length;
+    const note = d.onlyDual
+      ? `Only Japanese-and-Chinese versions exist for this title, so those are
+         what you get.`
+      : withCn
+      ? `${withCn} of these carry Chinese subtitles alongside the Japanese.`
+      : d.skipped
+      ? `${d.skipped} Chinese ${d.skipped === 1 ? 'file' : 'files'} left out of
+         ${d.total}.`
+      : `All ${d.total} files are Japanese.`;
+    box.innerHTML = `
+      <div class="subshead">
+        <div><b>${title}</b> <span class="sub">&middot; ${d.files.length} files
+          &middot; ${note}</span></div>
+        <div class="modes">
+          <a class="go dl" href="/subs/${entry}/zip?dual=${dual ? 1 : 0}"
+             download>Download all as .zip</a>
+          <button id="subsdual">${dual ? 'Hide' : 'Include'} JP+CN versions</button>
+          <button id="subsclose">Close</button>
+        </div>
+      </div>
+      <div class="wrap"><table><tr><th>file</th><th class="num">size</th>
+        <th></th></tr>` +
+      d.files.map(f => `<tr><td>${f.name}</td>
+        <td class="num">${bytes(f.size)}</td>
+        <td class="num"><a href="${f.url}" download>download</a></td></tr>`).join('') +
+      '</table></div>';
+    document.getElementById('subsclose').onclick = () => { box.hidden = true; };
+    document.getElementById('subsdual').onclick = () => { dual = !dual; load(); };
+  }
+
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-entry]');
+    if (!btn) return;
+    e.preventDefault();
+    entry = btn.dataset.entry;
+    title = btn.dataset.title || '';
+    dual = false;
+    load();
+    box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  });
+})();
+"""
+
+SUBS_CSS = """
+.subsbox { background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; padding:14px 16px; margin:12px 0 0; box-shadow:var(--shadow); }
+.subshead { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center;
+  justify-content:space-between; margin-bottom:10px; }
+a.go.dl { text-decoration:none; border:1px solid var(--accent);
+  background:var(--accent); color:#fff; padding:6px 14px; border-radius:99px;
+  font-size:12.5px; font-weight:600; }
+a.go.dl:hover { filter:brightness(1.08); color:#fff; }
+.subsbox td:first-child { min-width:16em; font-weight:400; font-size:13px;
+  word-break:break-word; }
+"""
 
 # Works in the saved file too: the curves are already embedded, so dragging the
 # slider needs no network at all.
@@ -2686,8 +2828,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         h.append(
             f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}/detail">'
             f'{esc(deck_title(deck))}</a>'
-            + (f' <a class="subs" href="{subs}" target="_blank" '
-               f'rel="noopener" title="Japanese subtitles on jimaku.cc">subs</a>'
+            + (f' <button class="subs" data-entry="{subs.rsplit("/", 1)[-1]}"'
+               f' data-title="{esc(deck_title(deck))}"'
+               f' title="Japanese subtitles on jimaku.cc">subs</button>'
                if subs else "")
             + f'</td>'
             f'<td>{esc(STATUS_LABELS.get(DECK_STATUS.get(deck_id), "—"))}</td>'
@@ -2699,6 +2842,8 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
             f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
             f'<td class="num">{t}</td></tr>')
     h.append("</table></div>")
+
+    h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
     h.append(h2("What each level would buy you"))
     h.append(CHART_HTML)
@@ -2834,7 +2979,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                     "c": [round(p, 2) for _lv, p in r["curve"]]}
                    for d, r in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"])],
     }, ensure_ascii=False, separators=(",", ":"))
-    head += f"<style>{SLIDER_CSS}{GRID_CSS}{CHART_CSS}{REACH_CSS}</style>"
+    head += f"<style>{SLIDER_CSS}{GRID_CSS}{CHART_CSS}{REACH_CSS}{SUBS_CSS}</style>"
     titles_json = json.dumps(grid_titles, ensure_ascii=False, separators=(",", ":"))
     others_json = json.dumps(others, ensure_ascii=False, separators=(",", ":"))
     tags_json = json.dumps(tags, ensure_ascii=False, separators=(",", ":"))
@@ -2848,7 +2993,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                      f"const REACH_TARGET={target_level};</script>"
                      f"<script>{SORT_JS}</script><script>{SLIDER_JS}</script>"
                      f"<script>{CHART_JS}</script><script>{GRID_JS}</script>"
-                     f"<script>{REACH_JS}</script>")
+                     f"<script>{REACH_JS}</script><script>{SUBS_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.
@@ -2950,6 +3095,51 @@ def cmd_serve(args) -> None:
             # page that analyses a dozen titles would stall on the eleventh.
             # It is also far less for the browser to chew on: a few thousand
             # word counts instead of half a megabyte of repeated lines.
+            # Subtitles: list what is worth having, or hand over a zip of it.
+            if self.path.startswith("/subs/"):
+                jkey = jimaku_key(getattr(args, "jimaku_key", None))
+                if not jkey:
+                    return self._send(400, b"no jimaku key", "text/plain")
+                parts = self.path.split("?")[0].strip("/").split("/")
+                query = urllib.parse.parse_qs(
+                    self.path.split("?")[1] if "?" in self.path else "")
+                dual = query.get("dual", ["0"])[0] == "1"
+                try:
+                    entry = int(parts[1])
+                except (ValueError, IndexError):
+                    return self._send(400, b"bad entry", "text/plain")
+                rows = jimaku_files(entry, jkey)
+                keep = wanted_subtitles(rows, allow_dual=dual)
+                if len(parts) > 2 and parts[2] == "zip":
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                        for r in keep:
+                            st, data, _ = http(r["url"], timeout=120)
+                            if st < 400:
+                                z.writestr(r["name"], data)
+                    name = urllib.parse.quote(f"jimaku-{entry}.zip")
+                    body = buf.getvalue()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/zip")
+                    self.send_header("Content-Disposition",
+                                     f"attachment; filename={name}")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    try:
+                        self.wfile.write(body)
+                    except (BrokenPipeError, ConnectionAbortedError):
+                        pass
+                    return
+                payload = json.dumps({
+                    "files": [{"name": r["name"], "url": r["url"],
+                               "size": r.get("size"), "lang": r["lang"]}
+                              for r in keep],
+                    "skipped": sum(1 for r in rows if r not in keep),
+                    "total": len(rows),
+                    "onlyDual": bool(keep) and all(r["lang"] == "dual" for r in keep),
+                }, ensure_ascii=False).encode()
+                return self._send(200, payload, "application/json")
+
             if self.path.startswith("/words/"):
                 try:
                     deck_id = int(self.path.rsplit("/", 1)[-1])
