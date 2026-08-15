@@ -149,6 +149,14 @@ def init() -> None:
         if "share_lists" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN share_lists"
                         " INTEGER NOT NULL DEFAULT 0")
+        if "visibility" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN visibility TEXT"
+                        " NOT NULL DEFAULT 'private'")
+            # Anyone already sharing with the instance keeps exactly that.
+            con.execute("UPDATE users SET visibility = 'instance'"
+                        " WHERE share_lists = 1")
+        if "share_token" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN share_token TEXT")
 
 
 def now() -> str:
@@ -202,21 +210,79 @@ def delete_user(user_id: int) -> None:
 
 # ------------------------------------------------------------ shared lists
 
-def set_sharing(user_id: int, on: bool) -> None:
-    """Turning it off also drops what was already stored, so 'off' means gone
-    rather than merely hidden."""
+# Each level contains the one before it.
+VISIBILITY = ("private", "instance", "link", "public")
+VISIBILITY_LABELS = {
+    "private": "Just me",
+    "instance": "People with an account here",
+    "link": "Anyone with the secret link",
+    "public": "Anyone at all, at a permanent address",
+}
+
+
+def set_visibility(user_id: int, level: str) -> None:
+    """Going private also drops what was stored, so 'off' means gone rather
+    than merely hidden."""
+    if level not in VISIBILITY:
+        level = "private"
     with db() as con:
-        con.execute("UPDATE users SET share_lists = ? WHERE id = ?",
-                    (1 if on else 0, user_id))
-        if not on:
+        con.execute("UPDATE users SET visibility = ?, share_lists = ?"
+                    " WHERE id = ?",
+                    (level, 0 if level == "private" else 1, user_id))
+        if level == "private":
             con.execute("DELETE FROM shared_lists WHERE user_id = ?", (user_id,))
 
 
-def is_sharing(user_id: int) -> bool:
+def get_visibility(user_id: int) -> str:
     with db() as con:
-        row = con.execute("SELECT share_lists FROM users WHERE id = ?",
+        row = con.execute("SELECT visibility FROM users WHERE id = ?",
                           (user_id,)).fetchone()
-    return bool(row and row["share_lists"])
+    return (row["visibility"] if row else "private") or "private"
+
+
+def is_sharing(user_id: int) -> bool:
+    return get_visibility(user_id) != "private"
+
+
+def share_token(user_id: int, regenerate: bool = False) -> str:
+    """The unguessable half of a share link. Regenerating breaks old links,
+    which is the only way to take one back."""
+    with db() as con:
+        row = con.execute("SELECT share_token FROM users WHERE id = ?",
+                          (user_id,)).fetchone()
+        token = row["share_token"] if row else None
+        if not token or regenerate:
+            token = secrets.token_urlsafe(12)
+            con.execute("UPDATE users SET share_token = ? WHERE id = ?",
+                        (token, user_id))
+    return token
+
+
+def user_by_token(token: str):
+    with db() as con:
+        row = con.execute(
+            "SELECT * FROM users WHERE share_token = ? AND visibility IN"
+            " ('link','public')", (token,)).fetchone()
+    return dict(row) if row else None
+
+
+def user_by_public_name(username: str):
+    with db() as con:
+        row = con.execute(
+            "SELECT * FROM users WHERE username = ? AND visibility = 'public'",
+            (username,)).fetchone()
+    return dict(row) if row else None
+
+
+def lists_of(user_id: int) -> dict[str, list[dict]]:
+    with db() as con:
+        rows = con.execute(
+            "SELECT * FROM shared_lists WHERE user_id = ?"
+            " ORDER BY status, coverage DESC", (user_id,)).fetchall()
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["status"], []).append(dict(r))
+    return out
 
 
 def put_shared_lists(user_id: int, rows: list[dict]) -> None:
@@ -239,7 +305,7 @@ def everyones_lists() -> list[dict]:
         rows = con.execute(
             "SELECT s.*, u.username FROM shared_lists s"
             " JOIN users u ON u.id = s.user_id"
-            " WHERE u.share_lists = 1"
+            " WHERE u.visibility <> 'private'"
             " ORDER BY u.username, s.status, s.coverage DESC").fetchall()
     return [dict(r) for r in rows]
 
@@ -256,7 +322,8 @@ def sharing_users() -> list[dict]:
             "SELECT u.id, u.username,"
             " (SELECT COUNT(*) FROM shared_lists s WHERE s.user_id = u.id) AS titles,"
             " (SELECT MAX(updated_at) FROM shared_lists s WHERE s.user_id = u.id) AS seen"
-            " FROM users u WHERE u.share_lists = 1 ORDER BY u.username").fetchall()
+            " FROM users u WHERE u.visibility <> 'private'"
+            " ORDER BY u.username").fetchall()
     return [dict(r) for r in rows]
 
 

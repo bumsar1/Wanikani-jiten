@@ -10,11 +10,26 @@ belongs to a title rather than an account. The second person to look at a series
 gets an instant answer, and Jiten sees one download instead of one per user.
 
 There is also a **Together** page: what everyone is watching, reading and has
-finished, with the titles more than one of you has picked out. It is **off by
-default** — a reading list is data about a person, not about an anime, so each
-account turns their own on. Turning it off deletes what was stored rather than
-merely hiding it. What gets shared is the title, its status and that person's
-coverage on it; never their keys, their reviews or their WaniKani account.
+finished, with the titles more than one of you has picked out.
+
+Sharing is one setting with four levels, each containing the one before it, and
+it starts at the first — a reading list is data about a person, not about an
+anime, so nothing leaves an account until its owner says so:
+
+| level | who can see it |
+|---|---|
+| **Just me** | nobody, and nothing is stored |
+| **People with an account here** | the others on this instance, on the Together page |
+| **Anyone with the secret link** | whoever you send `/s/<token>` to, no account needed |
+| **Anyone at all** | the above, plus a permanent `/u/<username>` |
+
+The secret link can be revoked by generating a new one, which is the only way to
+take a shared link back. Dropping to **Just me** deletes the stored snapshot
+rather than hiding it.
+
+Shared either way: the title, whether it is being watched, planned or finished,
+and that person's coverage on it. Never their keys, their reviews, or anything
+from WaniKani.
 
 ---
 

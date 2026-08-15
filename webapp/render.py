@@ -184,36 +184,102 @@ TOGETHER_CSS = """
 .overlap { background:var(--accent-soft); border:1px solid var(--line);
   border-radius:14px; padding:4px 18px 14px; margin-bottom:8px; }
 .who-has { color:var(--muted); font-size:13px; }
-.notsharing { display:flex; flex-wrap:wrap; gap:10px; align-items:center;
-  background:var(--raise); border:1px solid var(--line); border-radius:14px;
-  padding:16px 18px; box-shadow:var(--shadow); }
+.sharebox { background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; padding:16px 18px; box-shadow:var(--shadow);
+  margin-bottom:22px; }
+.sharebox .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.sharebox select { font:inherit; font-size:14px; padding:8px 11px; border-radius:10px;
+  border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+.sharelink { margin-top:16px; padding-top:14px; border-top:1px solid var(--line-soft); }
+.sharelink label { display:block; font:600 10.5px/1 var(--sans, inherit);
+  letter-spacing:.09em; text-transform:uppercase; color:var(--faint);
+  margin-bottom:7px; }
+.sharelink input { flex:1 1 260px; font:13px ui-monospace,Consolas,monospace;
+  padding:9px 12px; border-radius:10px; border:1px solid var(--line);
+  background:var(--bg); color:var(--fg); }
+.sharelink .hint { display:block; margin-top:8px; color:var(--faint); font-size:12.5px; }
+.sharelink form.inline { display:inline; margin-top:8px; }
 """
 
 
-def together_page(user, sharing: bool, people, by_user, overlap, absent) -> str:
-    if not sharing:
-        head = f"""
-      <div class="notsharing">
-        <div style="flex:1 1 320px">
-          <b>You are not sharing.</b>
-          <div class="sub" style="margin:4px 0 0">You can see what others share
-          without sharing yourself, but it is a nicer trade the other way.</div>
-        </div>
-        <form method="post" action="/together/share"><input type="hidden"
-          name="on" value="1"><button class="go">Share my lists</button></form>
+SHARE_JS = """
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var text = document.getElementById(btn.dataset.copy).value;
+    var done = function () {
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = 'Copy link'; }, 1500);
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, done);
+    else {
+      var el = document.getElementById(btn.dataset.copy);
+      el.select(); try { document.execCommand('copy'); done(); } catch (e) {}
+    }
+  });
+});
+</script>
+"""
+
+
+def share_panel(visibility: str, token: str, base_url: str, username: str) -> str:
+    """One control, four levels, each containing the one before it."""
+    opts = "".join(
+        f'<option value="{v}"{" selected" if v == visibility else ""}>'
+        f'{esc(w_labels[v])}</option>' for v in w_levels)
+
+    links = ""
+    if visibility in ("link", "public"):
+        url = f"{base_url}/s/{token}"
+        links += f"""
+        <div class="sharelink">
+          <label for="secret">Secret link &mdash; works for anyone you send it to</label>
+          <div class="row">
+            <input id="secret" value="{esc(url)}" readonly onclick="this.select()">
+            <button type="button" data-copy="secret">Copy link</button>
+          </div>
+          <form method="post" action="/together/newlink" class="inline">
+            <button>Make a new link</button></form>
+          <span class="hint">Making a new one stops the old link working. That is
+          the only way to take a shared link back.</span>
+        </div>"""
+    if visibility == "public":
+        pub = f"{base_url}/u/{username}"
+        links += f"""
+        <div class="sharelink">
+          <label for="pub">Permanent address &mdash; open to anyone, no link needed</label>
+          <div class="row">
+            <input id="pub" value="{esc(pub)}" readonly onclick="this.select()">
+            <button type="button" data-copy="pub">Copy link</button>
+          </div>
+        </div>"""
+
+    return f"""
+      <div class="sharebox">
+        <form method="post" action="/together/share" class="row">
+          <label for="vis"><b>Who can see my lists</b></label>
+          <select id="vis" name="visibility" onchange="this.form.submit()">{opts}</select>
+          <noscript><button>Save</button></noscript>
+        </form>
+        <p class="sub" style="margin:10px 0 0">Shared: the title, whether you are
+        watching, planning or finished, and your coverage on it. Never your keys,
+        your reviews or anything from WaniKani.</p>
+        {links}
       </div>"""
-    else:
-        head = f"""
-      <div class="notsharing">
-        <div style="flex:1 1 320px">
-          <b>You are sharing your lists.</b>
-          <div class="sub" style="margin:4px 0 0">Everyone with an account here can
-          see your titles, their status and your coverage on them. Not your keys,
-          not your reviews.</div>
-        </div>
-        <form method="post" action="/together/share"><input type="hidden"
-          name="on" value="0"><button>Stop sharing</button></form>
-      </div>"""
+
+
+w_levels = ("private", "instance", "link", "public")
+w_labels = {
+    "private": "Just me",
+    "instance": "People with an account here",
+    "link": "Anyone with the secret link",
+    "public": "Anyone at all, at a permanent address",
+}
+
+
+def together_page(user, visibility, token, base_url, people, by_user, overlap,
+                  absent) -> str:
+    head = share_panel(visibility, token, base_url, user["username"])
 
     cards = []
     for p in people:
@@ -265,7 +331,44 @@ def together_page(user, sharing: bool, people, by_user, overlap, absent) -> str:
     if not people:
         body = (f'<h1>Together</h1><p class="sub">Nobody is sharing their lists yet.'
                 f'</p>{head}{missing}')
-    return shell("Together", body, user=user, extra_css=TOGETHER_CSS)
+    return shell("Together", body, user=user, extra_css=TOGETHER_CSS,
+                 scripts=SHARE_JS)
+
+
+def public_profile(username: str, level, lists, base_url: str) -> str:
+    """The read-only view behind a share link. No login, no navigation."""
+    groups = []
+    total = 0
+    for status, label in (("ongoing", "watching / reading"),
+                          ("planning", "plan to watch / read"),
+                          ("completed", "finished")):
+        items = lists.get(status, [])
+        total += len(items)
+        if not items:
+            continue
+        lis = "".join(
+            f'<li><span><a href="https://jiten.moe/decks/media/{it["deck_id"]}/detail"'
+            f' target="_blank" rel="noopener">{esc(it["title"])}</a></span>'
+            f'<span class="cov">'
+            f'{f"{it['coverage']:.0f}%" if it.get("coverage") else "&mdash;"}</span>'
+            f'</li>' for it in items)
+        groups.append(f'<div class="group"><h4>{label} &middot; {len(items)}</h4>'
+                      f'<ul class="titlelist">{lis}</ul></div>')
+
+    inner = "".join(groups) or '<div class="group"><p class="empty">Nothing here yet.</p></div>'
+    body = f"""
+      <div class="hero" style="padding:48px 0 22px">
+        <h1>{esc(username)}</h1>
+        <p class="sub">What {esc(username)} is watching and reading on
+        jiten.moe{f" &middot; WaniKani level {level}" if level else ""}
+        &middot; {total} titles</p>
+      </div>
+      <div class="person" style="max-width:620px">{inner}</div>
+      <footer style="max-width:620px">Percentages are how much of each title's
+      vocabulary {esc(username)} already knows, measured by
+      <a href="https://jiten.moe" target="_blank" rel="noopener">jiten.moe</a>.
+      This page is shared deliberately and can be withdrawn at any time.</footer>"""
+    return shell(f"{username} on jiten.moe", body, extra_css=TOGETHER_CSS)
 
 
 # ---------------------------------------------------------------- dashboard

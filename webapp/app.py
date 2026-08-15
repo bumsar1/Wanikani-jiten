@@ -337,23 +337,59 @@ def together():
     absent = [u["username"] for u in store.all_usernames()
               if u["id"] not in sharing_ids]
 
-    return render.together_page(user, store.is_sharing(user["id"]),
+    vis = store.get_visibility(user["id"])
+    token = store.share_token(user["id"]) if vis in ("link", "public") else ""
+    return render.together_page(user, vis, token, request.url_root.rstrip("/"),
                                 people, by_user, overlap, absent)
 
 
 @app.post("/together/share")
 def set_sharing():
     user = require_login()
-    on = request.form.get("on") == "1"
-    store.set_sharing(user["id"], on)
+    level = request.form.get("visibility", "private")
+    store.set_visibility(user["id"], level)
     # Publish straight away rather than making them reload the dashboard first.
-    if on:
+    if level != "private":
         key = creds_of(user).get("jiten_key")
         if key:
             _ids, _status, everything = user_decks(key)
             if everything:
                 store.put_shared_lists(user["id"], everything)
     return redirect(url_for("together"))
+
+
+@app.post("/together/newlink")
+def new_share_link():
+    user = require_login()
+    store.share_token(user["id"], regenerate=True)
+    return redirect(url_for("together"))
+
+
+def _public_view(owner):
+    snap = store.get_snapshot(owner["id"])
+    return render.public_profile(owner["username"],
+                                 (snap or {}).get("level"),
+                                 store.lists_of(owner["id"]),
+                                 request.url_root.rstrip("/"))
+
+
+@app.get("/s/<token>")
+def shared_link(token):
+    """Deliberately open: the whole point is that it works without an account."""
+    owner = store.user_by_token(token)
+    if not owner:
+        return Response("This link is not active.", status=404,
+                        mimetype="text/plain")
+    return _public_view(owner)
+
+
+@app.get("/u/<username>")
+def public_profile(username):
+    owner = store.user_by_public_name(username)
+    if not owner:
+        return Response("No public profile here.", status=404,
+                        mimetype="text/plain")
+    return _public_view(owner)
 
 
 # ---------------------------------------------------- per-user Jiten access
