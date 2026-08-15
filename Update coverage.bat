@@ -35,8 +35,6 @@ echo == 4/5  Leeches blocking your reading ==
 %PY% wkjiten.py leeches
 if errorlevel 1 goto :failed
 
-start "" "https://jiten.moe/decks/media"
-
 echo.
 echo == 5/5  Dashboard with live search ==
 echo.

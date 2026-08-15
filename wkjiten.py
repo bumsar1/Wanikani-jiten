@@ -1453,54 +1453,6 @@ def esc(s) -> str:
             .replace('"', "&quot;"))
 
 
-def svg_curves(series: list[tuple[str, list[tuple[int, float]]]], user_level: int,
-               width: int = 760, height: int = 320) -> str:
-    """Kanji coverage against WaniKani level, one line per title."""
-    pad_l, pad_b, pad_t, pad_r = 44, 34, 12, 150
-    pw, ph = width - pad_l - pad_r, height - pad_t - pad_b
-    palette = ["#c2410c", "#0369a1", "#15803d", "#7e22ce", "#b45309",
-               "#0f766e", "#be123c", "#4338ca", "#65a30d", "#a21caf",
-               "#0891b2", "#9f1239", "#1d4ed8"]
-
-    def x(lv):
-        return pad_l + (lv - 1) / 59 * pw
-
-    def y(pct):
-        return pad_t + ph - pct / 100 * ph
-
-    parts = [f'<svg viewBox="0 0 {width} {height}" class="chart" '
-             f'role="img" aria-label="Kanji coverage by WaniKani level">']
-    for pct in range(0, 101, 25):
-        parts.append(f'<line x1="{pad_l}" y1="{y(pct):.1f}" x2="{pad_l + pw}" '
-                     f'y2="{y(pct):.1f}" class="grid"/>')
-        parts.append(f'<text x="{pad_l - 8}" y="{y(pct) + 4:.1f}" '
-                     f'class="tick" text-anchor="end">{pct}%</text>')
-    for lv in (1, 10, 20, 30, 40, 50, 60):
-        parts.append(f'<text x="{x(lv):.1f}" y="{height - 12}" class="tick" '
-                     f'text-anchor="middle">{lv}</text>')
-    if user_level:
-        parts.append(f'<line x1="{x(user_level):.1f}" y1="{pad_t}" '
-                     f'x2="{x(user_level):.1f}" y2="{pad_t + ph}" class="you"/>')
-        parts.append(f'<text x="{x(user_level) + 4:.1f}" y="{pad_t + 10}" '
-                     f'class="tick">you</text>')
-    for i, (label, curve) in enumerate(series):
-        colour = palette[i % len(palette)]
-        pts = " ".join(f"{x(lv):.1f},{y(pct):.1f}" for lv, pct in curve)
-        parts.append(f'<polyline points="{pts}" fill="none" stroke="{colour}" '
-                     f'stroke-width="1.8"/>')
-        ly = pad_t + 12 + i * 15
-        parts.append(f'<line x1="{pad_l + pw + 10}" y1="{ly}" '
-                     f'x2="{pad_l + pw + 26}" y2="{ly}" stroke="{colour}" '
-                     f'stroke-width="2.4"/>')
-        short = label if len(label) <= 16 else label[:15] + "…"
-        parts.append(f'<text x="{pad_l + pw + 31}" y="{ly + 4}" '
-                     f'class="legend">{esc(short)}</text>')
-    parts.append(f'<text x="{pad_l + pw / 2}" y="{height - 1}" class="tick" '
-                 f'text-anchor="middle">WaniKani level</text>')
-    parts.append("</svg>")
-    return "".join(parts)
-
-
 def svg_history(past: dict[int, list[dict]], titles: dict[int, str],
                 width: int = 760, height: int = 260) -> str:
     """Coverage per title over time. Needs at least two dated runs."""
@@ -1724,6 +1676,91 @@ SLIDER_JS = """
 })();
 """
 
+CHART_HTML = """
+<div class="chartbar">
+  <div id="series" class="series"></div>
+  <div class="modes">
+    <button id="allon">show all</button>
+    <button id="tall">taller</button>
+  </div>
+</div>
+<div id="chart" class="chartbox"></div>
+"""
+
+CHART_JS = """
+(function(){
+  const box = document.getElementById('chart');
+  if (!box || typeof TRACK === 'undefined' || !TRACK.titles.length) return;
+  const PAL = ['#c2410c','#0369a1','#15803d','#7e22ce','#b45309','#0f766e',
+               '#be123c','#4338ca','#65a30d','#a21caf','#0891b2','#9f1239'];
+  const on = TRACK.titles.map(() => true);
+  let tall = false;
+
+  function draw(){
+    const W = 760, H = tall ? 460 : 300, L = 46, R = 14, T = 12, B = 34;
+    const pw = W - L - R, ph = H - T - B;
+    const x = lv => L + (lv - 1) / 59 * pw;
+    const y = p => T + ph - p / 100 * ph;
+    let s = `<svg viewBox="0 0 ${W} ${H}" class="chart">`;
+    for (let p = 0; p <= 100; p += 25){
+      s += `<line x1="${L}" y1="${y(p)}" x2="${L+pw}" y2="${y(p)}" class="grid"/>
+            <text x="${L-8}" y="${y(p)+4}" class="tick" text-anchor="end">${p}%</text>`;
+    }
+    for (const lv of [1,10,20,30,40,50,60])
+      s += `<text x="${x(lv)}" y="${H-12}" class="tick" text-anchor="middle">${lv}</text>`;
+    s += `<line x1="${x(TRACK.level)}" y1="${T}" x2="${x(TRACK.level)}" y2="${T+ph}"
+          class="you"/><text x="${x(TRACK.level)+5}" y="${T+11}" class="tick">you</text>`;
+    TRACK.titles.forEach((t, i) => {
+      if (!on[i]) return;
+      const pts = t.c.map((p, j) => `${x(j+1).toFixed(1)},${y(p).toFixed(1)}`).join(' ');
+      s += `<polyline points="${pts}" fill="none" stroke="${PAL[i % PAL.length]}"
+            stroke-width="2" stroke-linejoin="round"/>`;
+      const at = t.c[TRACK.level - 1];
+      s += `<circle cx="${x(TRACK.level).toFixed(1)}" cy="${y(at).toFixed(1)}" r="3.5"
+            fill="${PAL[i % PAL.length]}"/>`;
+    });
+    s += `<text x="${L+pw/2}" y="${H-1}" class="tick" text-anchor="middle">WaniKani level</text></svg>`;
+    box.innerHTML = s;
+  }
+
+  function chips(){
+    document.getElementById('series').innerHTML = TRACK.titles.map((t, i) =>
+      `<button class="chip${on[i] ? ' on' : ''}" data-i="${i}"
+        style="--c:${PAL[i % PAL.length]}"><i></i>${t.t}</button>`).join('');
+    document.querySelectorAll('#series .chip').forEach(b => {
+      const i = +b.dataset.i;
+      b.onclick = e => {
+        // Plain click solos a line when it is the only way to read a cluster;
+        // clicking it again brings everything back.
+        if (on[i] && on.filter(Boolean).length === 1) on.fill(true);
+        else { on.fill(false); on[i] = true; }
+        chips(); draw();
+      };
+      b.oncontextmenu = e => { e.preventDefault(); on[i] = !on[i]; chips(); draw(); };
+    });
+  }
+
+  document.getElementById('allon').onclick = () => { on.fill(true); chips(); draw(); };
+  document.getElementById('tall').onclick = e => {
+    tall = !tall; e.target.textContent = tall ? 'shorter' : 'taller'; draw();
+  };
+  chips(); draw();
+})();
+"""
+
+CHART_CSS = """
+.chartbar { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:flex-start;
+  justify-content:space-between; margin-bottom:10px; }
+.series { display:flex; flex-wrap:wrap; gap:6px; }
+.chip { display:inline-flex; align-items:center; gap:7px; opacity:.42; }
+.chip.on { opacity:1; }
+.chip i { width:11px; height:3px; border-radius:2px; background:var(--c);
+  display:inline-block; }
+.chip.on { border-color:var(--c); color:var(--fg); }
+.chartbox { background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; box-shadow:var(--shadow); padding:6px 10px; }
+"""
+
 GRID_HTML = """
 <details class="fold" id="gridfold">
   <summary><span class="tw">Show the grid</span><span class="cnt"></span></summary>
@@ -1814,18 +1851,41 @@ GRID_JS = """
          <span class="lg"><i style="background:var(--k-hot)"></i>costs you most</span>`;
   }
 
-  function show(c){
+  async function show(c){
     const k = GRID.find(x => x.c === c);
     if (!k) return;
     const stage = STAGES[band(k.s)][1];
+    const wk = 'https://www.wanikani.com/kanji/' + encodeURIComponent(k.c);
+    const where = (k.d || []).map(([i, n]) =>
+      `${GRID_TITLES[i]} ${n.toLocaleString()}&times;`).join(' &middot; ');
+    const moved = k.up ? `<span class="pill">moved up since last run</span>` : '';
     document.getElementById('kdetail').innerHTML =
-      `<a class="big" href="https://www.wanikani.com/kanji/${encodeURIComponent(k.c)}"
-          target="_blank" rel="noopener" title="Open on WaniKani">${k.c}</a>
-       <div><b>${k.m || '—'}</b> &nbsp; <span class="rd">${k.r || ''}</span>
-       <div class="sub">WaniKani level ${k.l} &middot; ${k.k ? 'known' : stage}
-       &middot; appears ${k.n.toLocaleString()}&times; in your titles &middot;
-       <a href="https://www.wanikani.com/kanji/${encodeURIComponent(k.c)}"
-          target="_blank" rel="noopener">open on WaniKani &#8599;</a></div></div>`;
+      `<a class="big" href="${wk}" target="_blank" rel="noopener"
+          title="Open on WaniKani">${k.c}</a>
+       <div class="kmeta">
+         <div><b>${k.m || '—'}</b> <span class="rd">${k.r || ''}</span> ${moved}</div>
+         <div class="sub">WaniKani level ${k.l} &middot; ${k.k ? 'known' : stage}
+           &middot; <a href="${wk}" target="_blank" rel="noopener">on WaniKani
+           &#8599;</a></div>
+         ${where ? `<div class="sub">${where}</div>`
+                 : '<div class="sub">Does not appear in your titles.</div>'}
+         <div class="words sub" id="kwords"></div>
+       </div>`;
+    if (!LIVE) return;
+    // Example words come from Jiten and so need the proxy; the saved file
+    // simply does without them.
+    const slot = document.getElementById('kwords');
+    slot.textContent = 'looking up words…';
+    try {
+      const r = await fetch(`/api/kanji/${encodeURIComponent(k.c)}`);
+      const d = await r.json();
+      const words = (d.topWords || []).slice(0, 12);
+      slot.innerHTML = words.length
+        ? 'common words: ' + words.map(w =>
+            `<span class="w" title="${(w.mainDefinition || '').replace(/"/g, '')}"
+             >${w.reading || ''}</span>`).join('')
+        : '';
+    } catch (e){ slot.textContent = ''; }
   }
 
   // One delegated listener beats 2,000 closures.
@@ -1905,6 +1965,9 @@ GRID_CSS = """
 .kdetail .rd { color:var(--accent); }
 .kdetail .hint { color:var(--faint); font-style:italic; }
 .kdetail .sub { margin:2px 0 0; font-size:12.5px; }
+.kdetail .kmeta { min-width:0; }
+.kdetail .words .w { display:inline-block; margin:2px 8px 0 0; }
+.kdetail .pill { margin-left:8px; }
 """
 
 SLIDER_CSS = """
@@ -2259,7 +2322,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     h.append("</table></div>")
 
     h.append(h2("What each level would buy you"))
-    h.append(svg_curves(curves, lvl))
+    h.append(CHART_HTML)
     h.append(SLIDER_HTML)
 
     h.append(h2("Coverage over time"))
@@ -2280,13 +2343,38 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                      reverse=True)[:24]
     # Every WaniKani kanji, by level, coloured either by how well you know it
     # or by how much not knowing it costs you in the titles you track.
+    # Which title each kanji turns up in, and how often - "899x in your titles"
+    # is less useful than knowing it is nearly all one show.
+    grid_titles = [deck_title(d) for d, _ in rows]
+    per_title: dict[str, list] = {}
+    for i, (_deck, res) in enumerate(rows):
+        for ch, n in res["kanji_occ"].items():
+            per_title.setdefault(ch, []).append([i, n])
+    for ch in per_title:
+        per_title[ch].sort(key=lambda p: -p[1])
+
+    # Anything that climbed an SRS stage since the previous snapshot.
+    moved_up: set[str] = set()
+    if os.path.exists(WK_CACHE_PREV):
+        with open(WK_CACHE_PREV, encoding="utf-8") as f:
+            old = json.load(f)
+        old_stage = old.get("assignments", {})
+        old_subj = old.get("subjects", {})
+        for sid, s in subjects.items():
+            if s["type"] != "kanji":
+                continue
+            if sid in old_subj and assignments.get(sid, 0) > old_stage.get(sid, 0):
+                moved_up.add(s["characters"])
+
     grid_data = sorted(
         ({"c": s["characters"], "l": s["level"],
           "s": assignments.get(sid, 0),
           "k": s["characters"] in known["kanji_known"],
           "n": occ.get(s["characters"], 0),
           "r": "、".join(s.get("readings") or []),
-          "m": s.get("meaning") or ""}
+          "m": s.get("meaning") or "",
+          "d": per_title.get(s["characters"], []),
+          **({"up": 1} if s["characters"] in moved_up else {})}
          for sid, s in subjects.items() if s["type"] == "kanji"),
         key=lambda k: (k["l"], -k["n"], k["c"]))
     grid_json = json.dumps(grid_data, ensure_ascii=False, separators=(",", ":"))
@@ -2364,13 +2452,16 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                     "c": [round(p, 2) for _lv, p in r["curve"]]}
                    for d, r in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"])],
     }, ensure_ascii=False, separators=(",", ":"))
-    head += f"<style>{SLIDER_CSS}{GRID_CSS}</style>"
+    head += f"<style>{SLIDER_CSS}{GRID_CSS}{CHART_CSS}</style>"
+    titles_json = json.dumps(grid_titles, ensure_ascii=False, separators=(",", ":"))
 
     def compose(live: bool) -> str:
         parts, css = list(h), head
         parts.append(f"<script>const TRACK={track};const GRID={grid_json};"
-                     f"const GRID_LEVEL={lvl};</script>"
-                     f"<script>{SLIDER_JS}</script><script>{GRID_JS}</script>")
+                     f"const GRID_LEVEL={lvl};const GRID_TITLES={titles_json};"
+                     f"const LIVE={'true' if live else 'false'};</script>"
+                     f"<script>{SLIDER_JS}</script><script>{CHART_JS}</script>"
+                     f"<script>{GRID_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.
