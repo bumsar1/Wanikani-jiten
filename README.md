@@ -11,6 +11,10 @@ different things:
 | `deck` / `batch` | **Kanji** coverage per deck — what wanilog's read-check measures — plus the WaniKani level you need to hit 95% / 98% | in the terminal |
 | `status` | Progress since your last run, the best titles for you right now per media type, and what comes within reach as you level | in the terminal |
 | `leeches` | The Apprentice items you keep failing, ranked by how often they actually block the titles you want to read | in the terminal |
+| `next` | The kanji worth learning next, priced in coverage on your own titles | in the terminal |
+| `parts` | Per-episode / per-volume breakdown, so you know where a series opens up | in the terminal |
+| `edge` | Titles that are easier for you than their difficulty rating suggests | in the terminal |
+| `gap` | The words in a title you cannot read yet, as a CSV | a file |
 | `report` | All of the above as one self-contained HTML page with charts | in your browser |
 
 The vocabulary figure will look modest (WaniKani teaches ~6,500 words) while the
@@ -217,7 +221,65 @@ which review is worth the most reading.
 
 ---
 
-## 5) The HTML dashboard
+## 5) What to learn next, and where to start
+
+```bash
+python wkjiten.py next
+```
+
+The mirror image of `leeches`: every kanji you cannot read yet, ranked by how
+much coverage it would buy you on the titles you actually track, with a running
+total and whether it is unlocked, locked, or already in your queue.
+
+```
+rank   occur kanji reading         meaning         lvl    gain  running  status
+   1     624 俺    おれ            I                13   1.35%    1.35%  locked until level 13
+   2     575 言    げん、ごん      Say               5   1.25%    2.60%  Apprentice IV
+   3     402 合    ごう、がっ      Suit             12   0.87%    3.47%  unlocked, not started
+```
+
+```bash
+python wkjiten.py parts 21948           # per-episode / per-volume
+python wkjiten.py parts 21948 --kanji   # also compute kanji coverage per part
+```
+
+A series is not one difficulty. `parts` reads the subdecks — episodes, volumes,
+chapters — which already carry your coverage, so the breakdown costs no extra
+requests. It reports the spread and only suggests an entry point when the spread
+is wide enough to be worth skipping around for; otherwise it tells you to start
+at the beginning.
+
+```bash
+python wkjiten.py edge
+```
+
+Jiten's difficulty score is one number for everybody, but WaniKani front-loads
+particular kanji, so some titles sit well above the trend for *your* account.
+`edge` samples titles across the catalogue, fits coverage against difficulty,
+and reports the biggest positive residuals — titles punching above their rating
+for you specifically. It prints the fitted slope and the difficulty range it
+covers so you can judge the fit.
+
+```bash
+python wkjiten.py gap 21948 --target 95 --no-sentences
+```
+
+Writes a CSV of the words in a title you do not know yet — word, furigana,
+reading, occurrences, pitch — filtered server-side against your account.
+`--target 95` stops once the list is enough to reach 95% coverage.
+
+`batch` also shouts when a title crosses a coverage threshold since the last
+run, which is what makes the plan-to-read pile useful:
+
+```
+*** 捏造トラップ―NTR― just crossed 65.0% coverage (60.0% -> 73.2%). Might be time to start it. ***
+```
+
+Set the bar with `--alert-at 85`.
+
+---
+
+## 6) The HTML dashboard
 
 ```bash
 python wkjiten.py report              # writes report.html and opens it
@@ -256,6 +318,10 @@ python wkjiten.py text chapter1.txt
 --soon-limit N       candidate titles status analyses (default 6, 0=off)
 --status LIST        Jiten lists to track (default ongoing,planning; "" to disable)
 --max-stage N        highest SRS stage still counted as a leech (default 4)
+--alert-at N         batch: shout when a title crosses this coverage (default 80)
+--flat N             parts: spread below this counts as uniform (default 5pp)
+--sample N           edge: titles sampled per media type (default 100)
+--target N           gap: stop once the list reaches this % coverage
 --no-open            report: do not launch a browser
 --no-recommend       report: skip the recommendation sections (faster)
 ```

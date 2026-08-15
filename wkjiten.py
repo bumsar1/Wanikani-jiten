@@ -793,6 +793,23 @@ def cmd_batch(args) -> None:
             print(f"[{i+1}/{len(ids)}] {title}  kanji {res['kanji_cov_occ']:.2f}%  "
                   f"vocab {vocab}")
 
+    # Crossings are worked out against the stored history *before* today's rows
+    # are written, or every title would look like it just crossed.
+    previous = read_history()
+    crossed = []
+    for row in history:
+        did = row["deckId"]
+        earlier = [r for r in previous.get(did, []) if r.get("date") != row["date"]]
+        if not earlier or not row["jitenCoverage"]:
+            continue
+        try:
+            was = float(earlier[-1].get("jitenCoverage") or 0)
+        except ValueError:
+            continue
+        now = float(row["jitenCoverage"])
+        if was < args.alert_at <= now:
+            crossed.append((row["title"], was, now))
+
     log_history(history)
     past = read_history()
 
@@ -815,6 +832,9 @@ def cmd_batch(args) -> None:
         if gains:
             print(f"\nFinishing level {lvl} alone is worth "
                   f"{sum(gains) / len(gains):+.2f}pp of kanji coverage on average.")
+    for title, was, now in crossed:
+        print(f"\n*** {title} just crossed {args.alert_at}% coverage "
+              f"({was:.1f}% -> {now:.1f}%). Might be time to start it. ***")
     print(f"\nwrote {out}")
 
 
@@ -968,7 +988,8 @@ def collect_status(args, key: str, cache: dict, known: dict) -> dict:
             gains.append((res["curve"][target - 1][1] - now, now,
                           res["curve"][target - 1][1], d))
             time.sleep(args.sleep)
-    return {"recommendations": recommendations, "gains": sorted(gains, reverse=True),
+    return {"recommendations": recommendations,
+            "gains": sorted(gains, key=lambda g: -g[0]),
             "target_level": target, "candidates": len(candidates)}
 
 
@@ -1016,6 +1037,244 @@ def cmd_status(args) -> None:
         print(f"{now:6.2f}% {later:7.2f}% {gain:+7.2f}pp   "
               f"{d.get('originalTitle') or d.get('englishTitle') or '?'}")
         print(f"{'':29}jiten.moe/decks/media/{d.get('deckId')}/detail")
+
+
+def jiten_subdecks(deck_id: int, key: str | None) -> list[dict]:
+    """Episodes / volumes / chapters of a deck, all pages.
+
+    Each one already carries your coverage, so the breakdown costs nothing
+    beyond the detail calls themselves.
+    """
+    out, offset = [], 0
+    while True:
+        body = get_json(f"{JITEN_API}/api/media-deck/{deck_id}/detail?offset={offset}",
+                        headers=jiten_headers(key))
+        data = body.get("data", body)
+        rows = data.get("subDecks") or []
+        out.extend(rows)
+        offset += body.get("pageSize") or 25
+        if not rows or offset >= (body.get("totalItems") or 0):
+            return out
+
+
+def cmd_parts(args) -> None:
+    """Where to start inside a series, instead of judging it as one lump."""
+    key = jiten_key(args.jiten_key)
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+
+    for deck_id in args.deck_ids:
+        deck = jiten_deck_detail(deck_id, key)
+        subs = jiten_subdecks(deck_id, key)
+        print()
+        print("=" * 72)
+        print(f"  {deck_title(deck)} - {len(subs)} parts")
+        print("=" * 72)
+        if not subs:
+            print("This title has no subdecks; it is measured as a whole.")
+            continue
+
+        covs = [s.get("coverage") for s in subs if s.get("coverage") is not None]
+        if covs:
+            print(f"\nYour coverage across parts: {min(covs):.2f}% to {max(covs):.2f}% "
+                  f"(whole title: {deck.get('coverage') or 0}%)")
+
+        wanted = subs
+        if args.kanji:
+            wanted = sorted(subs, key=lambda s: -(s.get("coverage") or 0))[:args.limit]
+            print(f"Computing kanji coverage for the {len(wanted)} easiest parts...")
+
+        rows = []
+        for s in wanted:
+            k = None
+            if args.kanji:
+                k = analyse_deck(deck_words(s["deckId"], key, s),
+                                 known)["kanji_cov_occ"]
+                time.sleep(args.sleep)
+            rows.append((s, k))
+
+        rows.sort(key=lambda r: -(r[0].get("coverage") or 0))
+        print(f"\n{'jiten':>7} {'kanji':>7} {'chars':>8}  part")
+        for s, k in rows[:args.limit]:
+            kt = f"{k:6.2f}%" if k is not None else "      -"
+            print(f"{s.get('coverage') or 0:>6}% {kt} {s.get('characterCount') or 0:>8,}"
+                  f"  {s.get('originalTitle') or s.get('englishTitle') or '?'}")
+        if not covs:
+            continue
+        spread = max(covs) - min(covs)
+        best = rows[0][0]
+        if spread < args.flat:
+            print(f"\nSpread is only {spread:.1f}pp, so the parts are all much of a "
+                  f"muchness.\nNo reason to skip around - start at the beginning.")
+        else:
+            print(f"\nSpread is {spread:.1f}pp. Easiest entry point: "
+                  f"{best.get('originalTitle')} at {best.get('coverage')}%"
+                  f", hardest is {min(covs):.2f}%.")
+
+
+def cmd_next(args) -> None:
+    """The kanji worth learning next, priced in coverage on your own titles."""
+    key = jiten_key(args.jiten_key)
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+    ids = tracked_ids(args, key)
+    lvl = cache.get("level") or 1
+
+    subjects, assignments = cache["subjects"], cache["assignments"]
+    meta = {}
+    for sid, s in subjects.items():
+        if s["type"] == "kanji":
+            meta[s["characters"]] = (s["level"], assignments.get(sid, 0),
+                                     "、".join(s.get("readings") or []),
+                                     s.get("meaning") or "")
+
+    occ: Counter[str] = Counter()
+    for _deck, words in load_decks(ids, key, args.sleep, progress=True):
+        for word, n in words.items():
+            for ch in KANJI_RE.findall(word):
+                occ[ch] += n
+    total = sum(occ.values())
+    if not total:
+        raise SystemExit("no kanji found in those titles")
+
+    unknown = [(n, ch) for ch, n in occ.items() if ch not in known["kanji_known"]]
+    unknown.sort(reverse=True)
+
+    print()
+    print("=" * 72)
+    print(f"  Best kanji to learn next, by what they unlock in your titles")
+    print("=" * 72)
+    print(f"\n{'rank':>4} {'occur':>7} {pad('kanji', 6)}{pad('reading', 16)}"
+          f"{pad('meaning', 15)}{'lvl':>4} {'gain':>7} {'running':>8}  status")
+    running = 0.0
+    shown = 0
+    for n, ch in unknown:
+        lv, stage, readings, meaning = meta.get(ch, (None, 0, "", ""))
+        gain = n / total * 100
+        running += gain
+        shown += 1
+        if lv is None:
+            status = "not in WaniKani"
+        elif stage:
+            status = SRS_STAGE_NAMES.get(stage, "?")
+        elif lv <= lvl:
+            status = "unlocked, not started"
+        else:
+            status = f"locked until level {lv}"
+        print(f"{shown:>4} {n:>7} {pad(ch, 6)}{pad(readings, 16)}{pad(meaning[:14], 15)}"
+              f"{lv if lv else '--':>4} {gain:6.2f}% {running:7.2f}%  {status}")
+        if shown >= args.top:
+            break
+    print(f"\nLearning those {shown} kanji would take you from "
+          f"{ (sum(v for c, v in occ.items() if c in known['kanji_known']) / total * 100):.2f}% "
+          f"to {(sum(v for c, v in occ.items() if c in known['kanji_known']) / total * 100) + running:.2f}% "
+          f"kanji coverage.")
+
+
+def cmd_gap(args) -> None:
+    """The words in a title you cannot read yet, straight from Jiten."""
+    key = jiten_key(args.jiten_key)
+    if not key:
+        raise SystemExit("`gap` needs a Jiten API key so it knows what you know.")
+    for deck_id in args.deck_ids or tracked_ids(args, key):
+        deck = jiten_deck_detail(deck_id, key)
+        payload = {"format": 2, "downloadType": 1, "order": 3,
+                   "excludeMatureMasteredBlacklisted": True,
+                   "excludeExampleSentences": args.no_sentences}
+        if args.target:
+            payload.update({"downloadType": 5, "targetPercentage": args.target})
+        if args.min_occurrences:
+            payload["minOccurrences"] = args.min_occurrences
+
+        status, body, _ = http(f"{JITEN_API}/api/media-deck/{deck_id}/download",
+                               method="POST", headers=jiten_headers(key),
+                               body=json.dumps(payload).encode(),
+                               content_type="application/json", timeout=180)
+        if status >= 400:
+            print(f"  {deck_title(deck)}: failed ({status}) "
+                  f"{body[:200].decode('utf-8', 'replace')}")
+            continue
+        safe = re.sub(r"[^\w\- ]", "", deck_title(deck)).strip()[:40] or str(deck_id)
+        out = os.path.join(args.out or HERE, f"gap {safe}.csv")
+        with open(out, "wb") as f:
+            f.write(body)
+        lines = body.decode("utf-8", "replace").count("\n")
+        print(f"{deck_title(deck)}: {lines - 1:,} unknown words -> {out}")
+        time.sleep(args.sleep)
+
+
+def cmd_edge(args) -> None:
+    """Titles that are easier for you than their difficulty rating suggests.
+
+    Jiten's difficulty is one number for everybody. Yours is not: WaniKani
+    front-loads certain kanji, so some titles land well above the trend line
+    for your account. Fit coverage against difficulty over a sampled pool and
+    report the biggest positive residuals.
+    """
+    key = jiten_key(args.jiten_key)
+    if not key:
+        raise SystemExit("`edge` needs a Jiten API key to read your coverage.")
+
+    pool: list[dict] = []
+    for mtype, label, min_chars in RECOMMEND_TYPES:
+        # Sort by title: alphabetical order is uncorrelated with difficulty, so
+        # the fit is not dragged toward one end of the range the way sorting by
+        # difficulty or coverage would drag it. Then take pages spread across
+        # the whole catalogue rather than the first N, or every candidate comes
+        # back starting with あ.
+        base = (f"{JITEN_API}/api/media-deck/get-media-decks?mediaType={mtype}"
+                f"&charCountMin={min_chars}&sortBy=title&sortOrder=0")
+        first = get_json(base + "&offset=0", headers=jiten_headers(key))
+        total = first.get("totalItems") or 0
+        pages = max(1, args.sample // 50)
+        step = max(1, (total // 50) // pages) * 50 if total > 50 else 50
+        offsets = [min(i * step, max(0, total - 50)) for i in range(pages)]
+        for offset in dict.fromkeys(offsets):
+            rows = (first.get("data") if offset == 0 else
+                    get_json(f"{base}&offset={offset}",
+                             headers=jiten_headers(key)).get("data")) or []
+            for r in rows:
+                r["_type"] = label
+            pool.extend(rows)
+            time.sleep(0.4)
+
+    pts = [(float(d["difficulty"]), float(d["coverage"]), d) for d in pool
+           if d.get("difficulty") and d.get("coverage") is not None]
+    if len(pts) < 10:
+        raise SystemExit("not enough sampled titles to fit a trend")
+
+    n = len(pts)
+    mx = sum(p[0] for p in pts) / n
+    my = sum(p[1] for p in pts) / n
+    var = sum((p[0] - mx) ** 2 for p in pts)
+    slope = (sum((p[0] - mx) * (p[1] - my) for p in pts) / var) if var else 0.0
+    intercept = my - slope * mx
+
+    # Sort on the residual only: ties would otherwise fall through to comparing
+    # the deck dicts, which raises.
+    scored = [(y - (slope * x + intercept), x, y, d) for x, y, d in pts]
+    scored.sort(key=lambda r: -r[0])
+
+    print()
+    print("=" * 74)
+    print(f"  Easier for you than for the average learner")
+    print("=" * 74)
+    lo, hi = min(p[0] for p in pts), max(p[0] for p in pts)
+    print(f"\nFitted over {n} sampled titles spanning difficulty {lo:.1f}-{hi:.1f}: "
+          f"every point of difficulty costs {-slope:.2f}pp of coverage.")
+    print("'edge' is how far above that line your coverage sits.\n")
+    print(f"{'edge':>6} {'cover':>7} {'diff':>6}  {'type':<14} {'chars':>9}  title")
+    seen = set()
+    for resid, diff, cov, d in scored:
+        if d["deckId"] in seen:
+            continue
+        seen.add(d["deckId"])
+        print(f"{resid:+5.1f}pp {cov:6.2f}% {diff:6.2f}  {d['_type']:<14} "
+              f"{d.get('characterCount') or 0:>9,}  "
+              f"{d.get('originalTitle') or d.get('englishTitle') or '?'}")
+        print(f"{'':>15}jiten.moe/decks/media/{d['deckId']}/detail")
+        if len(seen) >= args.top_n:
+            break
 
 
 def esc(s) -> str:
@@ -1441,8 +1700,50 @@ def main() -> None:
     s.add_argument("--status", default="ongoing,planning",
                    help="pull titles from your Jiten lists: ongoing, planning, "
                         "completed, fav, dropped. Empty string to disable.")
+    s.add_argument("--alert-at", type=float, default=80.0,
+                   help="shout when a title crosses this coverage (default 80)")
     s.add_argument("--out")
     s.set_defaults(func=cmd_batch)
+
+    s = subparser("parts", help="per-episode / per-volume breakdown of a series")
+    s.add_argument("deck_ids", nargs="+", type=int)
+    s.add_argument("--kanji", action="store_true",
+                   help="also compute kanji coverage per part (one request each)")
+    s.add_argument("--limit", type=int, default=15, help="parts to show")
+    s.add_argument("--flat", type=float, default=5.0,
+                   help="spread below this counts as uniform (default 5pp)")
+    s.set_defaults(func=cmd_parts)
+
+    s = subparser("next", help="kanji worth learning next, priced in coverage")
+    s.add_argument("deck_ids", nargs="*", type=int)
+    s.add_argument("--deck-file", help="file of deck ids (default: decks.txt)")
+    s.add_argument("--status", default="ongoing,planning",
+                   help="pull titles from your Jiten lists")
+    s.add_argument("--search", help="use every deck matching this title filter")
+    s.add_argument("--limit", type=int, default=25)
+    s.set_defaults(func=cmd_next)
+
+    s = subparser("gap", help="export the words in a title you cannot read yet")
+    s.add_argument("deck_ids", nargs="*", type=int)
+    s.add_argument("--deck-file", help="file of deck ids (default: decks.txt)")
+    s.add_argument("--status", default="ongoing,planning",
+                   help="pull titles from your Jiten lists")
+    s.add_argument("--search", help="use every deck matching this title filter")
+    s.add_argument("--limit", type=int, default=25)
+    s.add_argument("--target", type=float,
+                   help="stop once the deck reaches this %% coverage, e.g. 95")
+    s.add_argument("--min-occurrences", type=int,
+                   help="skip words appearing fewer than this many times")
+    s.add_argument("--no-sentences", action="store_true",
+                   help="leave out example sentences")
+    s.add_argument("--out", help="directory to write into (default: here)")
+    s.set_defaults(func=cmd_gap)
+
+    s = subparser("edge", help="titles easier for you than their difficulty says")
+    s.add_argument("--sample", type=int, default=100,
+                   help="titles to sample per media type (default 100)")
+    s.add_argument("--top-n", type=int, default=15)
+    s.set_defaults(func=cmd_edge)
 
     s = subparser("leeches", help="Apprentice items ranked by what they block")
     s.add_argument("deck_ids", nargs="*", type=int)

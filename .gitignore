@@ -4,3 +4,4 @@ jiten_key.txt
 wanikani-known-words.txt
 coverage.csv
 report.html
+gap *.csv
