@@ -60,12 +60,23 @@ users do not share a budget.
 
 ---
 
-## Trying it on Windows first
+## Trying it on your own machine first
 
-You do not need a server, a container, or Linux to see whether you like it:
+You do not need a server, a container, or Linux to see whether you like it.
+Every launcher says on the tin which system it is for — double-click the one
+that matches:
 
-* **Windows** — double-click `Run locally.bat`
-* **macOS / Linux** — `./run-locally.sh`
+| | on this machine only | shared on your home network |
+|---|---|---|
+| **Windows** | `Run locally (Windows).bat` | `Run on my network (Windows).bat` |
+| **macOS** | `Run locally (macOS).command` | `Run on my network (macOS).command` |
+
+On Linux, run the macOS file from a shell — it is an ordinary bash script.
+
+**On a Mac, clone rather than download the zip.** A zip from the browser arrives
+quarantined and macOS refuses to open the launchers; `git clone` does not. If
+you already have a downloaded copy, clear it once with
+`xattr -dr com.apple.quarantine .` in the project folder.
 
 The first run builds its own virtual environment, installs Flask and
 cryptography into it, and starts on <http://127.0.0.1:8770>. It takes a minute;
