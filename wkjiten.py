@@ -1622,6 +1622,14 @@ nav a:hover { color:var(--accent); }
 .wrap { overflow-x:auto; -webkit-overflow-scrolling:touch;
   background:var(--raise); border:1px solid var(--line); border-radius:14px;
   box-shadow:var(--shadow); }
+/* The default chunky scrollbar looks awful against a rounded card. */
+.wrap, .gridout { scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.wrap::-webkit-scrollbar, .gridout::-webkit-scrollbar { height:8px; width:8px; }
+.wrap::-webkit-scrollbar-track, .gridout::-webkit-scrollbar-track {
+  background:transparent; }
+.wrap::-webkit-scrollbar-thumb, .gridout::-webkit-scrollbar-thumb {
+  background:var(--line); border-radius:99px; border:2px solid var(--raise); }
+.wrap:hover::-webkit-scrollbar-thumb { background:var(--faint); }
 table { border-collapse:collapse; width:100%; font-size:14px; min-width:540px; }
 th { text-align:left; font-weight:650; color:var(--faint); font-size:10.5px;
   text-transform:uppercase; letter-spacing:.07em; padding:13px 14px 9px;
@@ -1641,8 +1649,7 @@ a:hover { border-bottom-color:var(--accent); color:var(--accent); }
 /* bits */
 .meter { display:block; width:96px; height:6px; background:var(--line);
   border-radius:99px; overflow:hidden; }
-.meter i { display:block; height:100%; border-radius:99px;
-  background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 60%,#e879f9)); }
+.meter i { display:block; height:100%; border-radius:99px; background:var(--accent); }
 .up { color:var(--good); font-weight:640; }
 .pill { display:inline-block; font-size:11px; padding:2px 9px; border-radius:99px;
   background:var(--accent-soft); color:var(--accent); font-weight:620;
@@ -1743,14 +1750,32 @@ GRID_JS = """
   const max = Math.max(1, ...GRID.filter(k => !k.k).map(k => k.n));
   let mode = 'srs';
 
-  function colour(k){
-    if (mode === 'srs') return STAGES[band(k.s)][2];
-    if (k.k) return 'var(--k-known)';
-    if (!k.n) return 'var(--k0)';
-    // Unknown and common: the darker the red, the more it is costing you.
-    const t = Math.sqrt(k.n / max);
-    return `color-mix(in srgb, var(--k-hot) ${Math.round(18 + t * 82)}%, var(--k0))`;
+  // Resolve the themed colours once and blend numerically. Leaving 2,000-odd
+  // color-mix() calls in inline styles makes every style recalculation on the
+  // page - including ones triggered by typing in the search box - walk the
+  // whole grid, which is enough to make the cursor stutter.
+  const css = getComputedStyle(document.documentElement);
+  const rgb = name => {
+    const v = css.getPropertyValue(name).trim();
+    const m = v.match(/^#([0-9a-f]{6})$/i);
+    if (m) return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+    const n = v.match(/\\d+/g);
+    return n ? n.slice(0, 3).map(Number) : [128, 128, 128];
+  };
+  const COLD = rgb('--k0'), HOT = rgb('--k-hot'), KNOWN = rgb('--k-known');
+  const hex = c => '#' + c.map(v =>
+    Math.round(v).toString(16).padStart(2, '0')).join('');
+  const IMPACT = new Map();
+  for (const k of GRID){
+    if (k.k) IMPACT.set(k.c, hex(KNOWN));
+    else if (!k.n) IMPACT.set(k.c, hex(COLD));
+    else {
+      const t = 0.18 + Math.sqrt(k.n / max) * 0.82;
+      IMPACT.set(k.c, hex(COLD.map((c, i) => c + (HOT[i] - c) * t)));
+    }
   }
+  const SRS = new Map(GRID.map(k => [k.c, STAGES[band(k.s)][2]]));
+  const colour = k => (mode === 'srs' ? SRS : IMPACT).get(k.c);
 
   function draw(){
     const byLevel = new Map();
@@ -1763,12 +1788,11 @@ GRID_JS = """
       html += `<div class="lvlrow"><span class="lvlnum${lv === GRID_LEVEL ?
         ' now' : ''}">${lv}</span><div class="kanjis">`;
       for (const k of list)
-        html += `<button class="k" style="background:${colour(k)}"
-                 data-c="${k.c}" title="${k.c}">${k.c}</button>`;
+        html += `<span class="k" style="background:${colour(k)}"
+                 data-c="${k.c}">${k.c}</span>`;
       html += '</div></div>';
     }
     out.innerHTML = html;
-    out.querySelectorAll('.k').forEach(b => b.onclick = () => show(b.dataset.c));
 
     document.getElementById('legend').innerHTML = mode === 'srs'
       ? STAGES.map(s => `<span class="lg"><i style="background:${s[2]}"></i>${s[1]}</span>`).join('')
@@ -1788,6 +1812,11 @@ GRID_JS = """
        &middot; appears ${k.n.toLocaleString()}&times; in your titles</div></div>`;
   }
 
+  // One delegated listener beats 2,000 closures.
+  out.addEventListener('click', e => {
+    const tile = e.target.closest('.k');
+    if (tile) show(tile.dataset.c);
+  });
   document.querySelectorAll('.modes button').forEach(b => b.onclick = () => {
     mode = b.dataset.mode;
     document.querySelectorAll('.modes button').forEach(x =>
@@ -1820,10 +1849,10 @@ GRID_CSS = """
   padding-top:7px; font-variant-numeric:tabular-nums; flex:none; }
 .lvlnum.now { color:var(--accent); font-weight:700; }
 .kanjis { display:flex; flex-wrap:wrap; gap:3px; }
-.k { width:27px; height:27px; padding:0; border:0; border-radius:6px;
-  font-size:16px; line-height:1; color:#fff; cursor:pointer;
-  text-shadow:0 1px 2px rgba(0,0,0,.35); font-family:inherit; }
-.k:hover { outline:2px solid var(--fg); outline-offset:1px; background-clip:padding-box; }
+.k { width:27px; height:27px; border-radius:6px; font-size:16px; line-height:27px;
+  text-align:center; color:#fff; cursor:pointer; user-select:none;
+  text-shadow:0 1px 2px rgba(0,0,0,.35); }
+.k:hover { outline:2px solid var(--fg); outline-offset:1px; }
 .kdetail { display:flex; align-items:center; gap:16px; margin-top:12px;
   min-height:62px; background:var(--raise); border:1px solid var(--line);
   border-radius:14px; padding:12px 16px; box-shadow:var(--shadow); }
@@ -1959,6 +1988,29 @@ function when(levels){
   return `${span}, around ${when.toLocaleString('en', {month:'short', year:'numeric'})}`;
 }
 
+function countKanji(text, btn){
+  return new Promise(resolve => {
+    const occ = new Map();
+    const CHUNK = 120000;
+    let i = 0;
+    (function slice(){
+      const end = Math.min(text.length, i + CHUNK);
+      for (; i < end; i++){
+        const c = text.charCodeAt(i);
+        if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3400 && c <= 0x4dbf) ||
+            (c >= 0xf900 && c <= 0xfaff)){
+          const ch = text[i];
+          occ.set(ch, (occ.get(ch) || 0) + 1);
+        }
+      }
+      if (i < text.length){
+        if (btn) btn.textContent = Math.round(i / text.length * 100) + '%';
+        setTimeout(slice, 0);
+      } else resolve(occ);
+    })();
+  });
+}
+
 async function analyse(id, btn){
   btn.disabled = true; btn.textContent = 'reading…';
   const d = lastRows.find(r => r.deckId === id) || {};
@@ -1967,8 +2019,11 @@ async function analyse(id, btn){
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({format: 4, downloadType: 1, order: 3})});
     const text = await r.text();
-    const occ = new Map();
-    for (const ch of text) if (KANJI.test(ch)) occ.set(ch, (occ.get(ch)||0) + 1);
+    // Half a megabyte of repeated words, and megabytes for a long series.
+    // Scanned in one go this blocks the main thread long enough for the whole
+    // page - cursor included - to stutter, so walk it in slices and hand
+    // control back between them. charCodeAt beats a regex test per character.
+    const occ = await countKanji(text, btn);
 
     let total = 0, mine = 0, outside = 0;
     const byLevel = new Array(61).fill(0);
