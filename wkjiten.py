@@ -2123,17 +2123,33 @@ REACH_JS = """
       return;
     }
 
-    // Kanji coverage has to be computed per title, one word list each, so this
-    // walks a bounded number of candidates and reports as it goes.
-    const budget = Math.min(rows.length, 14);
+    // Kanji coverage has to be computed per title, one word list each. Ten is
+    // not an arbitrary cap: Jiten allows ten of these downloads a minute, so a
+    // sweep over unfamiliar titles is one minute's work rather than several.
+    const budget = Math.min(rows.length, 10);
     const found = [];
+    const draw = (progress) => {
+      const table = found.length ? `<div class="wrap"><table class="sortable tight">
+        <tr><th>title</th><th>type</th><th class="num">chars</th>
+        <th class="num">kanji now</th><th class="num">at ${lv}</th>
+        <th class="num">word cov</th><th></th></tr>` +
+        found.slice().sort((a, b) => b.then - a.then).map(f => `<tr>${titleCell(f.r)}
+          <td>${WK.types[f.r.mediaType] || '?'}</td>
+          <td class="num">${(f.r.characterCount||0).toLocaleString()}</td>
+          <td class="num">${f.now.toFixed(1)}%</td>
+          <td class="num up">${f.then.toFixed(1)}%</td>
+          <td class="num">${f.r.coverage != null ? f.r.coverage + '%' : '—'}</td>
+          ${planCell(f.r.deckId)}</tr>`).join('') + '</table></div>' : '';
+      box.innerHTML = (progress || '') + table;
+      if (found.length) wire(box);
+    };
+
     for (let i = 0; i < budget; i++){
       const r = rows[i];
-      box.innerHTML = `<p class="empty">Reading ${i + 1} of ${budget}
+      draw(`<p class="empty">Reading ${i + 1} of ${budget}
         &mdash; ${found.length} over ${pct}% so far&hellip;<br>
-        <small>Each title has to be read once. Jiten allows ten of those a
-        minute, so the first pass over unfamiliar titles is slow; they are
-        cached afterwards and come back instantly.</small></p>`;
+        <small>Each title is read once and then cached, so this is slow only
+        the first time.</small></p>`);
       let occ;
       try { occ = await kanjiCounts(r.deckId); }
       catch (e){ continue; }
@@ -2158,20 +2174,8 @@ REACH_JS = """
         higher level.</p>`;
       return;
     }
-    found.sort((a, b) => b.then - a.then);
-    box.innerHTML = `<p class="sub">Checked the ${budget} titles you are closest to;
-      ${found.length} clear ${pct}% kanji coverage once you reach level ${lv}.</p>
-      <div class="wrap"><table class="sortable"><tr><th>title</th><th>type</th>
-      <th class="num">chars</th><th class="num">kanji now</th>
-      <th class="num">at ${lv}</th><th class="num">word cov</th><th></th></tr>` +
-      found.map(f => `<tr>${titleCell(f.r)}
-        <td>${WK.types[f.r.mediaType] || '?'}</td>
-        <td class="num">${(f.r.characterCount||0).toLocaleString()}</td>
-        <td class="num">${f.now.toFixed(1)}%</td>
-        <td class="num up">${f.then.toFixed(1)}%</td>
-        <td class="num">${f.r.coverage != null ? f.r.coverage + '%' : '—'}</td>
-        ${planCell(f.r.deckId)}</tr>`).join('') + '</table></div>';
-    wire(box);
+    draw(`<p class="sub">Read the ${budget} titles you are closest to;
+      ${found.length} clear ${pct}% kanji coverage once you reach level ${lv}.</p>`);
   }
 
   document.getElementById('rgo').onclick = find;
