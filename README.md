@@ -1,106 +1,110 @@
-# wkjiten — WaniKani-coverage på jiten.moe-decks
+# wkjiten — WaniKani coverage for jiten.moe decks
 
-Jiten regner coverage ud fra *dine* kendte ord, men kan kun importere fra Anki,
-JPDB, frekvensbånd eller sin egen backup. Der er ingen WaniKani-knap. Det her
-værktøj bygger broen — på to måder, fordi WaniKani måler to forskellige ting:
+Jiten works out coverage from *your* known words, but it can only import from
+Anki, JPDB, a frequency band, or its own backup. There is no WaniKani button.
+This tool bridges the gap — two ways, because WaniKani and Jiten measure
+different things:
 
-| | Hvad du får | Hvor |
+| | What you get | Where |
 |---|---|---|
-| `export` + `push` | Dine WaniKani-ord bliver "kendte ord" på Jiten, så coverage-kolonnen, filtrene og sorteringen på **jiten.moe virker for dig** | på hjemmesiden |
-| `deck` / `batch` | **Kanji**-coverage pr. deck — det wanilog/read-check måler — plus hvilket WaniKani-level du skal på for at ramme 95 % / 98 % | i terminalen |
+| `export` + `push` | Your WaniKani words become "known words" on Jiten, so the coverage column, filters and sorting on **jiten.moe work for you** | on the website |
+| `deck` / `batch` | **Kanji** coverage per deck — what wanilog's read-check measures — plus the WaniKani level you need to hit 95% / 98% | in the terminal |
+| `status` | Progress since your last run, the best titles for you right now per media type, and what comes within reach as you level | in the terminal |
 
-Vokabular-tallet bliver lavt (WaniKani lærer dig ~6.500 ord), kanji-tallet bliver
-højt. Begge dele er sandheden, bare fra hver sin vinkel.
+The vocabulary figure will look modest (WaniKani teaches ~6,500 words) while the
+kanji figure runs high. Both are true; they just measure from different angles.
 
-Kun Python 3.9+ og standardbiblioteket. Ingen pip install.
+Python 3.9+ and the standard library. No pip install.
 
 ---
 
-## Den nemme vej: dobbeltklik
+## The easy way: double-click
 
-Når nøglerne ligger på plads (se nedenfor), behøver du aldrig røre terminalen:
+Once your keys are in place (see below), you never have to touch a terminal:
 
 * **Windows** — `Opdater coverage.bat`
 * **macOS** — `Opdater coverage.command`
 
-Den henter dine WaniKani-data forfra, sender ordlisten til jiten.moe, printer
-coverage på alle titlerne i `decks.txt` og slutter med et statusoverblik:
+It re-fetches your WaniKani data, sends the word list to jiten.moe, prints
+coverage for every title in `decks.txt`, and finishes with a status overview:
 
-* **hvor mange nye kanji og ord** du har lært siden sidste kørsel, og hvilke
-* **top 5 titler pr. medietype** — romaner, visual novels, anime, manga, spil —
-  sorteret efter din faktiske coverage
-* **hvad der snart er inden for rækkevidde**: titler lige under listen, med
-  kanji-coverage nu vs. om fem levels, sorteret efter hvor meget de rykker
+* **how many new kanji and words** you have learned since the last run, and which
+* **top 5 titles per media type** — novels, visual novels, anime, manga, games —
+  ranked by your actual coverage
+* **what is nearly within reach**: titles just below that list, with kanji
+  coverage now vs. five levels from now, sorted by how much they move
 
-Kør den når du er steget et level.
+Run it whenever you gain a level.
 
-På macOS skal filen gøres kørbar første gang: åbn Terminal, skriv `chmod +x `
-(med mellemrum til sidst), træk filen ind i vinduet og tryk retur.
+On macOS the file has to be made executable once: open Terminal, type `chmod +x `
+(with a trailing space), drag the file into the window, press return.
 
-`decks.txt` er din liste over titler — ét deck-id pr. linje, alt efter `#`
-ignoreres. Find id'er med `python wkjiten.py search "titel"` og redigér frit.
+`decks.txt` is your list of titles — one deck id per line, anything after `#` is
+ignored. Find ids with `python wkjiten.py search "title"` and edit it freely.
 
 ---
 
-## Opsætning
+## Setup
 
-**WaniKani-token** (read-only er nok) — <https://www.wanikani.com/settings/personal_access_tokens>
+**WaniKani token** (read-only is enough) — <https://www.wanikani.com/settings/personal_access_tokens>
 
 ```bash
-setx WANIKANI_TOKEN "din-token-her"
+setx WANIKANI_TOKEN "your-token-here"
 ```
 
-eller læg den i `wanikani_token.txt` ved siden af scriptet.
+or drop it in `wanikani_token.txt` next to the script.
 
-**Jiten API-key** (kun nødvendig til `push`) — jiten.moe → Settings → Advanced →
-API Key. Den vises **én gang**. Gem den i `jiten_key.txt` eller som `JITEN_API_KEY`.
+**Jiten API key** (only needed for `push` and for live coverage) — jiten.moe →
+Settings → Advanced → API Key. It is shown **once**. Save it in `jiten_key.txt`
+or as `JITEN_API_KEY`.
 
-Første kørsel henter ~9.000 subjects + dine assignments fra WaniKani og cacher
-dem i `cache/wanikani.json`. Kør med `--refresh` når du er steget i level.
+The first run fetches ~9,000 subjects plus your assignments from WaniKani and
+caches them in `cache/wanikani.json`. Use `--refresh` after you level up.
 
 ---
 
-## 1) Få WaniKani-coverage vist på selve jiten.moe
+## 1) Get WaniKani coverage showing on jiten.moe itself
 
 ```bash
 python wkjiten.py export
 ```
 
-Skriver `wanikani-known-words.txt` med ét ord pr. linje — præcis det format
-Jitens importer forventer ("alt før første tab eller komma").
+Writes `wanikani-known-words.txt`, one word per line — exactly the format
+Jiten's importer expects ("everything before the first tab or comma").
 
-Upload den:
+Upload it:
 
 ```bash
 python wkjiten.py push
 ```
 
-…eller manuelt på jiten.moe → Settings → Vocabulary → import fra fil, hvis din
-API-key viser sig at være read-only (`push` siger klart til, hvis den er).
+…or by hand at jiten.moe → Settings → Vocabulary → import from file, if your API
+key turns out to be read-only (`push` says so clearly if it is).
 
-Derefter viser deck-listen på jiten.moe din rigtige coverage, og du kan sortere
-og filtrere på `coverageMin` osv. som alle andre.
+After that the deck list on jiten.moe shows your real coverage, and you can sort
+and filter on `coverageMin` and friends like any other user.
 
-**Hvad tæller som kendt?** Default er SRS-stage ≥ 5 (Guru I — WaniKanis egen
-"passed"). Skru på det:
+**What counts as known?** The default is SRS stage ≥ 5 (Guru I — WaniKani's own
+"passed"). Adjust it:
 
 ```bash
-python wkjiten.py export --min-stage 9          # kun Burned
-python wkjiten.py export --mode level --level 30 # alt til og med level 30
+python wkjiten.py export --min-stage 9           # burned only
+python wkjiten.py export --mode level --level 30 # everything up to level 30
 ```
 
-To ting der er værd at slå til bagefter, inde på Jiten:
+Two things worth enabling on Jiten afterwards:
 
-* **Composition inference** (Settings → Vocabulary) udleder sammensatte ord fra
-  dem du kender. WaniKani-ord er netop byggeklodser, så det løfter tallet mærkbart.
-* **Word sets** → "Particles & Common Grammar". WaniKani lærer dig ikke partikler,
-  og de er de hyppigste ord i alt japansk.
+* **Composition inference** (Settings → Vocabulary) infers compound words from
+  the ones you know. WaniKani words are exactly those building blocks, so this
+  lifts the number noticeably.
+* **Word sets** → "Particles & Common Grammar". WaniKani never teaches particles,
+  and they are the most frequent words in all Japanese.
 
 ---
 
-## 2) Kanji-coverage pr. deck (wanilog-vinklen)
+## 2) Kanji coverage per deck (the wanilog angle)
 
-Find deck-id'et:
+Find the deck id:
 
 ```bash
 python wkjiten.py search "yotsuba"
@@ -111,105 +115,107 @@ python wkjiten.py search "yotsuba"
    96859  manga            167600  0.00  Yotsuba&!
 ```
 
-Og kør rapporten:
+Then run the report:
 
 ```bash
 python wkjiten.py deck 96859
 ```
 
-Du får kanji-coverage målt både på forekomster og på unikke tegn, det samme for
-vokabular, en kurve over hvad hvert WaniKani-level ville give dig på lige præcis
-den titel, hvilket level der rammer 90/95/98/99 %, og listen over de hyppigste
-kanji du mangler (med det level de ligger på).
+You get kanji coverage by both occurrence and unique characters, the same for
+vocabulary, a curve showing what each WaniKani level would give you on that
+specific title, which level reaches 90/95/98/99%, and the most frequent kanji
+you are missing along with the level they sit at.
 
-"Hard ceiling" er andelen af kanji i værket som WaniKani **aldrig** lærer dig —
-navne, sjældne tegn. Selv på level 60 kommer du ikke over det loft.
+The **hard ceiling** is the share of kanji in the work that WaniKani never
+teaches — names, rare characters. Even at level 60 you do not get past it.
 
-Flere decks til en CSV, som du kan sortere i Excel:
+Several decks into a CSV you can sort in Excel:
 
 ```bash
 python wkjiten.py batch 96859 118624 --out coverage.csv
 python wkjiten.py batch --search "one piece" --limit 10
+python wkjiten.py batch                      # everything in decks.txt
 ```
 
 ---
 
-## 3) Status: fremgang og anbefalinger
+## 3) Status: progress and recommendations
 
 ```bash
 python wkjiten.py status
 ```
 
-Fremgang siden sidst måles mod et snapshot, der gemmes automatisk hver gang du
-kører med `--refresh`. Første kørsel har intet at sammenligne med.
+Progress is measured against a snapshot saved automatically every time you run
+with `--refresh`. The very first run has nothing to compare against.
 
-Anbefalingerne kommer fra Jiten selv: med API-key kan `get-media-decks` sortere
-på `coverage`, altså *din* coverage, server-side. Det er én request pr.
-medietype i stedet for at hente tusindvis af decks ned og regne lokalt.
+The recommendations come from Jiten itself: with an API key, `get-media-decks`
+can sort by `coverage` — *your* coverage — server-side. That is one request per
+media type instead of pulling down thousands of decks and computing locally.
 
-"Snart inden for rækkevidde" er derimod lokalt regnet — kanji-kurven for hver
-kandidat, nu vs. om fem levels. Det koster én request pr. titel, så den er
-sat til 6 kandidater som standard:
+"Nearly within reach" is computed locally instead, because no server knows the
+kanji curve per WaniKani level. It costs one request per title, so it defaults
+to 6 candidates:
 
 ```bash
 python wkjiten.py status --soon-limit 15 --soon-levels 10
-python wkjiten.py status --soon-limit 0     # spring projektionen helt over
+python wkjiten.py status --soon-limit 0     # skip the projection entirely
 ```
 
 ---
 
-Vilkårlig tekst, som wanilogs read-check:
+Arbitrary text, like wanilog's read-check:
 
 ```bash
-python wkjiten.py text kapitel1.txt
+python wkjiten.py text chapter1.txt
 ```
 
 ---
 
-## Nyttige flag
+## Useful flags
 
 ```
---mode srs|level     srs = SRS-stage tæller (default), level = alt op til et level
+--mode srs|level     srs = SRS stage counts (default), level = everything up to a level
 --min-stage N        5=Guru I (default), 6=Guru II, 7=Master, 8=Enlightened, 9=Burned
---level N            level-grænse når --mode level
---refresh            hent WaniKani-data forfra
---top N              hvor mange ukendte kanji der listes (default 25)
---sleep S            pause mellem decks i batch (default 6s)
---top-n N            titler pr. medietype i status (default 5)
---soon-levels N      hvor mange levels frem status projicerer (default 5)
---soon-limit N       antal kandidat-titler status analyserer (default 6, 0=fra)
+--level N            level cutoff when using --mode level
+--refresh            re-fetch WaniKani data
+--top N              how many unknown kanji to list (default 25)
+--sleep S            pause between decks in batch (default 6s)
+--top-n N            titles per media type in status (default 5)
+--soon-levels N      how many levels ahead status projects (default 5)
+--soon-limit N       candidate titles status analyses (default 6, 0=off)
 ```
 
-Flagene virker både før og efter underkommandoen.
+Flags work both before and after the subcommand.
 
 ---
 
-## Hvordan det virker
+## How it works
 
 **WaniKani** ([docs](https://docs.api.wanikani.com/)) — `GET /v2/subjects?types=kanji,vocabulary,kana_vocabulary`
-for tegn og level, `GET /v2/assignments?started=true` for din SRS-stage pr. subject.
-Bearer-token, 60 requests/min.
+for characters and levels, `GET /v2/assignments?started=true` for your SRS stage
+per subject. Bearer token, 60 requests/min.
 
 **Jiten** ([guide](https://jiten.moe/guides/using-the-api), [swagger](https://api.jiten.moe/swagger/v1/swagger.json)) —
-`GET /api/media-deck/{id}/detail` for titeldata, og
-`POST /api/media-deck/{id}/download` med `format: 4` (TxtRepeated) for hele
-ordlisten, hvor hvert ord er gentaget lige så mange gange som det optræder i
-værket. Det er én request pr. deck i stedet for at side gennem `/vocabulary`
-200 ad gangen, og det giver vægtningen gratis. `POST /api/user/vocabulary/import-from-anki-txt`
-tager txt-filen. 300 requests/min, 10/min på de tunge — derfor `--sleep`.
+`GET /api/media-deck/{id}/detail` for title data, and
+`POST /api/media-deck/{id}/download` with `format: 4` (TxtRepeated) for the whole
+word list, where each word is repeated as many times as it occurs in the work.
+That is one request per deck instead of paging `/vocabulary` 200 at a time, and
+it gives you the occurrence weighting for free.
+`POST /api/user/vocabulary/import-from-anki-txt` takes the txt file, and
+`get-media-decks?sortBy=coverage` ranks the library by your own coverage.
+300 requests/min, 10/min on the heavy endpoints — hence `--sleep`.
 
-## Forbehold
+## Caveats
 
-* **Vokabular-coverage: brug Jitens eget tal.** Med en API-key henter `deck` og
-  `batch` `coverage` direkte fra din konto. Uden key falder de tilbage på et
-  lokalt estimat, der matcher på nøjagtig skrivemåde og derfor rammer markant
-  for lavt — målt på 13 titler gav det 14-19 %, hvor Jiten selv sagde 61-71 %.
-  Jiten tæller nemlig også redundante skrivemåder af et ord du kender, og de
-  word sets du har blacklistet (navne, stednavne), og det kan et lokalt
-  streng-match ikke se.
-* Kanji-tallene er lokale og upåvirkede af det. Ordformerne fra Jiten er
-  JMdicts hovedform og ikke nødvendigvis den skrivemåde værket faktisk bruger,
-  men for kanji-optælling er den forskel lille.
-* WaniKani skriver tællere og affikser med tilde (〜人, 〜ヶ月). Værktøjet
-  tilføjer den bare form, ellers ville de aldrig matche mod JMdict.
-* `push` skriver til din Jiten-konto. Kør `export` og kig filen igennem først.
+* **Vocabulary coverage: trust Jiten's own number.** With an API key, `deck` and
+  `batch` read `coverage` straight from your account. Without one they fall back
+  to a local estimate that matches on exact spelling and therefore reads far too
+  low — across 13 titles it gave 14–19% where Jiten itself said 61–71%. Jiten
+  also counts redundant writings of a word you know and the word sets you have
+  blacklisted (names, places), and a local string match cannot see any of that.
+* The kanji figures are local and unaffected by this. Word forms from Jiten are
+  JMdict's headword rather than the spelling the work actually uses, but for
+  counting kanji that difference is small.
+* WaniKani writes counters and affixes with a tilde (〜人, 〜ヶ月). The tool adds
+  the bare form as well, or they would never match against JMdict.
+* `push` writes to your Jiten account. Run `export` and look at the file first.
