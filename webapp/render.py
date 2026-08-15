@@ -217,6 +217,7 @@ TOGETHER_CSS = """
 .addbtn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
 .addbtn:disabled { opacity:.5; cursor:default; }
 .addbtn.done { color:var(--good); border-color:var(--good); }
+.profilewrap { max-width:620px; margin:0 auto; }
 .nowplaying { display:flex; gap:16px; align-items:center; padding:16px 18px;
   border-bottom:1px solid var(--line); background:var(--accent-soft); }
 .nowplaying img { width:64px; height:90px; object-fit:cover; border-radius:6px;
@@ -542,7 +543,7 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str,
             pace = (f'<div class="card"><div class="n">{stats["pace"]:.0f}</div>'
                     f'<div class="l">days per level</div></div>')
         cards = f"""
-      <div class="cards" style="max-width:620px;margin-bottom:20px">
+      <div class="cards" style="margin-bottom:20px">
         <div class="card"><div class="n">{stats["level"]}</div>
           <div class="l">WaniKani level</div></div>
         <div class="card"><div class="n">{stats["kanji"]:,}</div>
@@ -557,10 +558,11 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str,
         asof = f' &middot; as of {esc(stats["as_of"])}'
     banner = ""
     if profile.get("has_banner"):
-        banner = (f'<div class="banner" style="max-width:620px;margin-top:26px;'
+        banner = (f'<div class="banner" style="margin-top:26px;'
                   f'border-radius:14px;background-image:url(/media/banner/'
                   f'{owner["id"]})"></div>')
     body = f"""
+      <div class="profilewrap">
       {banner}
       <div class="hero" style="padding:{"18px" if banner else "48px"} 0 22px">
         <div style="display:flex;gap:14px;align-items:center">
@@ -574,14 +576,14 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str,
         {f'<p class="bio" style="margin-top:10px">{esc(profile["bio"])}</p>' if profile.get("bio") else ""}
       </div>
       {cards}
-      <div class="person" style="max-width:620px">
-        {now_playing(featured)}{inner}</div>
-      <footer style="max-width:620px">Word coverage is how much of each title's
+      <div class="person">{now_playing(featured)}{inner}</div>
+      <footer>Word coverage is how much of each title's
       vocabulary {esc(username)} already knows, measured by
       <a href="https://jiten.moe" target="_blank" rel="noopener">jiten.moe</a>.
       Kanji coverage is how many of its kanji WaniKani has taught them, weighted
       by how often each one appears. This page is shared deliberately and can be
-      withdrawn at any time.</footer>"""
+      withdrawn at any time.</footer>
+      </div>"""
     return shell(f"{username} on jiten.moe", body, extra_css=TOGETHER_CSS)
 
 

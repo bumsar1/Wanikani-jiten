@@ -1855,7 +1855,13 @@ a.go.dl { text-decoration:none; border:1px solid var(--accent);
 a.go.dl:hover { filter:brightness(1.08); color:#fff; }
 .subsbox td:first-child { min-width:16em; font-weight:400; font-size:13px;
   word-break:break-word; }
-td.withcover { display:flex; gap:10px; align-items:center; }
+/* The flex goes on a wrapper inside the cell. Making the <td> itself a flex
+   container drops it out of the table layout, so its row stops lining up with
+   the columns beside it. */
+td.withcover { min-width:15em; }
+.pager { display:flex; gap:12px; align-items:center; justify-content:center;
+  padding:12px; color:var(--muted); font-size:13px; }
+td.withcover .ct { display:flex; gap:10px; align-items:center; }
 img.cover { width:34px; height:48px; object-fit:cover; border-radius:4px;
   flex:none; background:var(--line); }
 """
@@ -1991,11 +1997,12 @@ REACH_JS = """
 
   const planCell = id => `<td class="acts"><button data-track="${id}"
     data-status="1">plan to watch/read</button></td>`;
-  const titleCell = r => `<td class="withcover"><img class="cover" loading="lazy"
-    alt="" src="https://cdn.jiten.moe/${r.deckId}/cover.jpg"
+  const titleCell = r => `<td class="withcover"><span class="ct"><img class="cover"
+    loading="lazy" alt="" src="https://cdn.jiten.moe/${r.deckId}/cover.jpg"
     onerror="this.style.visibility='hidden'">
     <a href="https://jiten.moe/decks/media/${r.deckId}/detail"
-    target="_blank" rel="noopener">${r.originalTitle || r.englishTitle || '?'}</a></td>`;
+    target="_blank" rel="noopener">${r.originalTitle || r.englishTitle || '?'}</a>
+    </span></td>`;
 
   function wire(box){
     box.querySelectorAll('[data-track]').forEach(b =>
@@ -2552,6 +2559,10 @@ const KANJI = /[\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff]/;
 const known = new Set(Array.from(WK.known));
 const $ = s => document.querySelector(s);
 let lastRows = [];
+// Jiten pages at 50; we show 10. Fetched pages are kept so paging back and
+// forth inside the same fifty costs nothing.
+let page = 0, total = 0, fetched = new Map(), lastUrl = '';
+const PER = 10, API_PAGE = 50;
 
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -2569,10 +2580,29 @@ async function search(){
   if (q) url += `&titleFilter=${encodeURIComponent(q)}`;
   if (type) url += `&mediaType=${type}`;
   if (min) url += `&charCountMin=${min}`;
-  try {
-    const r = await fetch(url);
+  lastUrl = url;
+  fetched = new Map();
+  page = 0;
+  await showPage(0);
+}
+
+async function pageRows(p){
+  const apiOffset = Math.floor(p * PER / API_PAGE) * API_PAGE;
+  if (!fetched.has(apiOffset)){
+    const r = await fetch(lastUrl + '&offset=' + apiOffset);
     const data = await r.json();
-    lastRows = data.data || [];
+    total = data.totalItems || 0;
+    fetched.set(apiOffset, data.data || []);
+  }
+  const block = fetched.get(apiOffset);
+  const start = p * PER - apiOffset;
+  return block.slice(start, start + PER);
+}
+
+async function showPage(p){
+  try {
+    page = p;
+    lastRows = await pageRows(p);
     render();
   } catch (e){
     $('#results').innerHTML = '<p class="empty">Search failed: ' + esc(e) + '</p>';
@@ -2585,12 +2615,13 @@ function render(){
   let h = '<table><tr><th>title</th><th>type</th><th class="num">chars</th>' +
           '<th class="num">difficulty</th><th class="num">your coverage</th>' +
           '<th></th></tr>';
-  for (const d of lastRows.slice(0, 40)){
-    h += `<tr><td class="withcover"><img class="cover" loading="lazy" alt=""
+  for (const d of lastRows){
+    h += `<tr><td class="withcover"><span class="ct"><img class="cover"
+            loading="lazy" alt=""
             src="https://cdn.jiten.moe/${d.deckId}/cover.jpg"
             onerror="this.style.visibility='hidden'">
           <a href="https://jiten.moe/decks/media/${d.deckId}/detail"
-          target="_blank" rel="noopener">${esc(title(d))}</a></td>
+          target="_blank" rel="noopener">${esc(title(d))}</a></span></td>
           <td>${esc(WK.types[d.mediaType] || '?')}</td>
           <td class="num">${(d.characterCount||0).toLocaleString()}</td>
           <td class="num">${d.difficulty ?? '—'}</td>
@@ -2600,11 +2631,20 @@ function render(){
             <button data-track="${d.deckId}" data-status="1">plan to watch/read</button>
             </td></tr>`;
   }
-  $('#results').innerHTML = h + '</table>';
+  const pages = Math.max(1, Math.ceil(total / PER));
+  const pager = `<div class="pager">
+      <button ${page === 0 ? 'disabled' : ''} data-page="${page - 1}">Previous</button>
+      <span>Page ${page + 1} of ${pages.toLocaleString()}
+        &middot; ${total.toLocaleString()} titles</span>
+      <button ${page + 1 >= pages ? 'disabled' : ''} data-page="${page + 1}">Next</button>
+    </div>`;
+  $('#results').innerHTML = h + '</table>' + (total > PER ? pager : '');
   document.querySelectorAll('#results [data-when]').forEach(b =>
     b.onclick = () => analyse(+b.dataset.when, b));
   document.querySelectorAll('#results [data-track]').forEach(b =>
     b.onclick = () => track(+b.dataset.track, +b.dataset.status, b));
+  document.querySelectorAll('#results [data-page]').forEach(b =>
+    b.onclick = () => showPage(+b.dataset.page));
 }
 
 // Puts the title on your Jiten list, which is also what makes the next run
@@ -2752,7 +2792,8 @@ button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent);
   background:var(--accent-soft); }
 button:disabled { opacity:.55; cursor:default; }
 button.done { color:var(--good); border-color:var(--good); }
-td.acts { display:flex; gap:5px; justify-content:flex-end; }
+td.acts { white-space:nowrap; text-align:right; }
+td.acts button { margin-left:5px; }
 #detail:not(:empty) { margin-top:34px; padding-top:6px;
   border-top:2px solid var(--accent); }
 """
