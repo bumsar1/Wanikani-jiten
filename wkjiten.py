@@ -1615,11 +1615,186 @@ footer { color:var(--muted); font-size:12px; margin-top:44px;
 """
 
 
-def cmd_report(args) -> None:
-    """Everything the terminal prints, as one self-contained HTML page."""
-    key = jiten_key(args.jiten_key)
-    cache = wk_load(args.wk_token, refresh=args.refresh)
-    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+BROWSE_SLOT = "<!--browse-->"
+
+BROWSE_HTML = """
+<h2>Browse jiten.moe</h2>
+<p class="sub">Search the whole catalogue. Pick a title to work out, right here,
+what level it stops fighting you at.</p>
+<div class="controls">
+  <input id="q" type="search" placeholder="title, romaji or English&hellip;"
+         autocomplete="off">
+  <select id="type">
+    <option value="">any type</option>
+    <option value="1">anime</option><option value="9">manga</option>
+    <option value="4">novel</option><option value="7">visual novel</option>
+    <option value="6">game</option><option value="2">drama</option>
+    <option value="3">movie</option><option value="8">web novel</option>
+  </select>
+  <select id="sort">
+    <option value="coverage">best coverage first</option>
+    <option value="difficulty">easiest first</option>
+    <option value="wordCount">longest first</option>
+    <option value="communityVotes">most popular</option>
+  </select>
+  <input id="minchars" type="number" placeholder="min chars" min="0" step="10000">
+</div>
+<div id="results" class="wrap"></div>
+<div id="detail"></div>
+"""
+
+BROWSE_JS = """
+const KANJI = /[\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff]/;
+const known = new Set(Array.from(WK.known));
+const $ = s => document.querySelector(s);
+let timer, lastRows = [];
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function title(d){ return d.originalTitle || d.englishTitle || d.romajiTitle || '?'; }
+
+async function search(){
+  const q = $('#q').value.trim();
+  const type = $('#type').value, sort = $('#sort').value;
+  const min = $('#minchars').value;
+  if (!q && !type && !min){ $('#results').innerHTML =
+    '<p class="empty">Type something, or pick a filter.</p>'; return; }
+  $('#results').innerHTML = '<p class="empty">Searching&hellip;</p>';
+  let url = `/api/media-deck/get-media-decks?sortBy=${sort}&sortOrder=1`;
+  if (q) url += `&titleFilter=${encodeURIComponent(q)}`;
+  if (type) url += `&mediaType=${type}`;
+  if (min) url += `&charCountMin=${min}`;
+  try {
+    const r = await fetch(url);
+    const data = await r.json();
+    lastRows = data.data || [];
+    render();
+  } catch (e){
+    $('#results').innerHTML = '<p class="empty">Search failed: ' + esc(e) + '</p>';
+  }
+}
+
+function render(){
+  if (!lastRows.length){ $('#results').innerHTML =
+    '<p class="empty">Nothing matched.</p>'; return; }
+  let h = '<table><tr><th>title</th><th>type</th><th class="num">chars</th>' +
+          '<th class="num">difficulty</th><th class="num">your coverage</th>' +
+          '<th></th></tr>';
+  for (const d of lastRows.slice(0, 40)){
+    h += `<tr><td><a href="https://jiten.moe/decks/media/${d.deckId}/detail"
+          target="_blank" rel="noopener">${esc(title(d))}</a></td>
+          <td>${esc(WK.types[d.mediaType] || '?')}</td>
+          <td class="num">${(d.characterCount||0).toLocaleString()}</td>
+          <td class="num">${d.difficulty ?? '—'}</td>
+          <td class="num">${d.coverage != null ? d.coverage + '%' : '—'}</td>
+          <td><button data-id="${d.deckId}">when?</button></td></tr>`;
+  }
+  $('#results').innerHTML = h + '</table>';
+  document.querySelectorAll('#results button').forEach(b =>
+    b.onclick = () => analyse(+b.dataset.id, b));
+}
+
+function levelFor(curve, target){
+  for (let i = 0; i < curve.length; i++) if (curve[i] >= target) return i + 1;
+  return null;
+}
+function when(levels){
+  if (levels <= 0) return 'already there';
+  if (!WK.pace) return levels + ' levels away';
+  const d = levels * WK.pace;
+  const when = new Date(Date.now() + d * 864e5);
+  const span = d < 60 ? `~${Math.round(d/7)} weeks`
+             : d < 730 ? `~${Math.round(d/30.4)} months`
+             : `~${(d/365).toFixed(1)} years`;
+  return `${span}, around ${when.toLocaleString('en', {month:'short', year:'numeric'})}`;
+}
+
+async function analyse(id, btn){
+  btn.disabled = true; btn.textContent = 'reading…';
+  const d = lastRows.find(r => r.deckId === id) || {};
+  try {
+    const r = await fetch(`/api/media-deck/${id}/download`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({format: 4, downloadType: 1, order: 3})});
+    const text = await r.text();
+    const occ = new Map();
+    for (const ch of text) if (KANJI.test(ch)) occ.set(ch, (occ.get(ch)||0) + 1);
+
+    let total = 0, mine = 0, outside = 0;
+    const byLevel = new Array(61).fill(0);
+    for (const [ch, n] of occ){
+      total += n;
+      if (known.has(ch)) mine += n;
+      const lv = WK.levels[ch];
+      if (lv) byLevel[lv] += n; else outside += n;
+    }
+    const curve = []; let run = 0;
+    for (let lv = 1; lv <= 60; lv++){ run += byLevel[lv]; curve.push(run / total * 100); }
+    const now = mine / total * 100;
+
+    let rows = '';
+    for (const t of [80, 90, 95, 98]){
+      const need = levelFor(curve, t);
+      rows += `<tr><td class="num">${t}%</td><td class="num">${need ?? 'never'}</td>
+               <td>${need ? when(need - WK.level)
+                          : 'blocked by kanji WaniKani never teaches'}</td></tr>`;
+    }
+    $('#detail').innerHTML = `
+      <h2>${esc(title(d))}</h2>
+      <p class="sub">${occ.size} distinct kanji ·
+        ${total.toLocaleString()} occurrences ·
+        ceiling ${(100 - outside/total*100).toFixed(1)}%</p>
+      <div class="cards">
+        <div class="card"><div class="n">${now.toFixed(1)}%</div>
+          <div class="l">kanji coverage now</div></div>
+        <div class="card"><div class="n">${curve[WK.level-1].toFixed(1)}%</div>
+          <div class="l">after finishing level ${WK.level}</div>
+          <div class="d">+${(curve[WK.level-1]-now).toFixed(1)}pp</div></div>
+        <div class="card"><div class="n">${d.coverage != null ? d.coverage+'%' : '—'}</div>
+          <div class="l">word coverage (jiten)</div></div>
+      </div>
+      <div class="wrap"><table><tr><th class="num">kanji</th>
+        <th class="num">at level</th><th>which is</th></tr>${rows}</table></div>
+      <p class="sub">Kanji coverage is a floor, not a ceiling — grammar and the
+      words WaniKani never teaches decide the rest.</p>`;
+    $('#detail').scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (e){
+    $('#detail').innerHTML = '<p class="empty">Could not read that title: ' +
+      esc(e) + '</p>';
+  }
+  btn.disabled = false; btn.textContent = 'when?';
+}
+
+$('#q').addEventListener('input', () => { clearTimeout(timer);
+  timer = setTimeout(search, 350); });
+for (const id of ['#type', '#sort', '#minchars'])
+  $(id).addEventListener('change', search);
+"""
+
+BROWSE_CSS = """
+.controls { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
+.controls input, .controls select { font:inherit; padding:7px 10px;
+  border:1px solid var(--line); border-radius:8px; background:var(--card);
+  color:var(--fg); }
+.controls #q { flex:1 1 240px; }
+button { font:inherit; font-size:13px; padding:4px 12px; cursor:pointer;
+  border:1px solid var(--line); border-radius:7px; background:var(--card);
+  color:var(--fg); white-space:nowrap; }
+button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+"""
+
+
+def build_report_html(args, key, cache, known, interactive: bool = False,
+                      both: bool = False):
+    """The dashboard. The interactive variant carries the live browser, which
+    only works when served by `serve` - the Jiten API sends no CORS headers, so
+    a file:// page is not allowed to read its responses.
+
+    both=True returns (static, interactive) from a single pass, so serving and
+    saving a copy does not fetch everything twice.
+    """
     ids = tracked_ids(args, key)
     lvl = cache.get("level") or 0
 
@@ -1662,6 +1837,7 @@ def cmd_report(args) -> None:
         h.append(card(f'{best[1]["kanji_cov_occ"]:.0f}%',
                       f"best: {esc(deck_title(best[0])[:14])}"))
     h.append("</div>")
+    h.append(BROWSE_SLOT)
 
     h.append("<h2>Your tracked titles</h2>")
     h.append(f'<div class="wrap"><table><tr><th>title</th><th>list</th>'
@@ -1763,15 +1939,126 @@ def cmd_report(args) -> None:
              'the jiten column is your account\'s own coverage. '
              'Built by wkjiten.</footer></main>')
 
+    blob = json.dumps({
+        "level": lvl,
+        "pace": round(wk_pace(cache) or 0, 1),
+        "known": "".join(sorted(known["kanji_known"])),
+        "levels": known["kanji_level"],
+        "types": MEDIA_TYPES,
+    }, ensure_ascii=False, separators=(",", ":"))
+
+    def compose(live: bool) -> str:
+        parts, css = list(h), head
+        if live:
+            # The browser panel goes near the top: it is what you came to use.
+            css += f"<style>{BROWSE_CSS}</style>"
+            parts[parts.index(BROWSE_SLOT)] = BROWSE_HTML
+            parts.append(f"<script>const WK={blob};</script>"
+                         f"<script>{BROWSE_JS}</script>")
+        else:
+            parts[parts.index(BROWSE_SLOT)] = ""
+        return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                + css + "</head><body>" + "".join(parts) + "</body></html>")
+
+    if both:
+        return compose(False), compose(True)
+    return compose(interactive)
+
+
+def cmd_report(args) -> None:
+    key = jiten_key(args.jiten_key)
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+    html = build_report_html(args, key, cache, known)
+
     out = args.out or os.path.join(HERE, "report.html")
     with open(out, "w", encoding="utf-8") as f:
-        f.write('<!doctype html><html lang="en"><head><meta charset="utf-8">'
-                '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                + head + "</head><body>" + "".join(h) + "</body></html>")
+        f.write(html)
     print(f"\nwrote {out}")
     if not args.no_open:
         import webbrowser
         webbrowser.open("file://" + os.path.abspath(out).replace("\\", "/"))
+
+
+def cmd_serve(args) -> None:
+    """Serve the dashboard locally, proxying the API so search works.
+
+    api.jiten.moe sends no CORS headers, so a page loaded from file:// is not
+    allowed to read its responses. Putting a tiny local server in front solves
+    that, and keeps the API key on this machine instead of baking it into a
+    file that could be shared by accident.
+    """
+    # Aliased: a plain `import http.server` would shadow this module's own
+    # http() helper inside this function, and the proxy needs it.
+    import http.server as httpserver
+    import webbrowser
+
+    key = jiten_key(args.jiten_key)
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+    print("Building the dashboard...")
+    static, live = build_report_html(args, key, cache, known, both=True)
+    page = live.encode("utf-8")
+    saved = args.out or os.path.join(HERE, "report.html")
+    with open(saved, "w", encoding="utf-8") as f:
+        f.write(static)
+    print(f"saved a static copy to {saved}")
+
+    class Handler(httpserver.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *a):
+            if args.verbose:
+                super().log_message(fmt, *a)
+
+        def _send(self, status, body: bytes, ctype: str):
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionAbortedError):
+                pass
+
+        def _proxy(self, body: bytes | None):
+            # Only the Jiten API, and only under /api/ - this server is a
+            # bridge for the page, not an open relay.
+            path = self.path
+            if not path.startswith("/api/"):
+                return self._send(404, b"not found", "text/plain")
+            status, payload, headers = http(
+                JITEN_API + path,
+                method="POST" if body is not None else "GET",
+                headers=jiten_headers(key), body=body,
+                content_type="application/json" if body is not None else None,
+                timeout=180)
+            self._send(status, payload,
+                       headers.get("Content-Type", "application/json"))
+
+        def do_GET(self):
+            if self.path in ("/", "/index.html"):
+                return self._send(200, page, "text/html; charset=utf-8")
+            self._proxy(None)
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            self._proxy(self.rfile.read(length))
+
+    # Loopback only: nothing on the network can reach the proxy or the key.
+    server = httpserver.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    url = f"http://127.0.0.1:{args.port}/"
+    print(f"\nDashboard with live search: {url}")
+    print("Search box is at the top. Press Ctrl+C here when you are done.")
+    if not args.no_open:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        server.server_close()
 
 
 def cmd_text(args) -> None:
@@ -1960,6 +2247,25 @@ def main() -> None:
     s.add_argument("--soon-limit", type=int, default=6)
     s.add_argument("--soon-pool", type=int, default=4)
     s.set_defaults(func=cmd_report)
+
+    s = subparser("serve", help="dashboard with live jiten.moe search in a browser")
+    s.add_argument("deck_ids", nargs="*", type=int)
+    s.add_argument("--deck-file", help="file of deck ids (default: decks.txt)")
+    s.add_argument("--status", default="ongoing,planning",
+                   help="pull titles from your Jiten lists")
+    s.add_argument("--search", help="use every deck matching this title filter")
+    s.add_argument("--limit", type=int, default=25)
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--out", help="where to save the static copy")
+    s.add_argument("--no-open", action="store_true")
+    s.add_argument("--no-recommend", action="store_true",
+                   help="skip the recommendation sections (starts faster)")
+    s.add_argument("--verbose", action="store_true", help="log every request")
+    s.add_argument("--top-n", type=int, default=5)
+    s.add_argument("--soon-levels", type=int, default=5)
+    s.add_argument("--soon-limit", type=int, default=6)
+    s.add_argument("--soon-pool", type=int, default=4)
+    s.set_defaults(func=cmd_serve)
 
     s = subparser("status", help="progress since last run + what to read next")
     s.add_argument("--top-n", type=int, default=5,

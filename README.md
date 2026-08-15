@@ -17,7 +17,8 @@ different things:
 | `parts` | Per-episode / per-volume breakdown, so you know where a series opens up | in the terminal |
 | `edge` | Titles that are easier for you than their difficulty rating suggests | in the terminal |
 | `gap` | The words in a title you cannot read yet, as a CSV | a file |
-| `report` | All of the above as one self-contained HTML page with charts | in your browser |
+| `serve` | The dashboard **plus a live search box for the whole jiten.moe catalogue** — pick any title and get its verdict on the spot | in your browser |
+| `report` | The same dashboard as one self-contained HTML file | in your browser |
 
 The vocabulary figure will look modest (WaniKani teaches ~6,500 words) while the
 kanji figure runs high. Both are true; they just measure from different angles.
@@ -35,7 +36,8 @@ Once your keys are in place (see below), you never have to touch a terminal:
 
 It re-fetches your WaniKani data, sends the word list to jiten.moe, prints
 coverage for everything you are tracking, lists the leeches that are holding you
-back, and opens both jiten.moe and an HTML dashboard showing:
+back, and finishes by opening jiten.moe and a live dashboard with a **search box
+for the whole catalogue** — plus:
 
 * **how many new kanji and words** you have learned since the last run, and which
 * **coverage per tracked title**, with the trend since you started measuring and
@@ -46,7 +48,8 @@ back, and opens both jiten.moe and an HTML dashboard showing:
 * **what is nearly within reach**: titles just below that list, with kanji
   coverage now vs. five levels from now, sorted by how much they move
 
-Run it whenever you gain a level.
+Run it whenever you gain a level. The last step keeps running so the search box
+works — leave that window open while you browse, and press Ctrl+C when done.
 
 On macOS the file has to be made executable once: open Terminal, type `chmod +x `
 (with a trailing space), drag the file into the window, press return.
@@ -334,18 +337,32 @@ Set the bar with `--alert-at 85`.
 
 ---
 
-## 7) The HTML dashboard
+## 7) The dashboard, and searching jiten.moe from it
 
 ```bash
-python wkjiten.py report              # writes report.html and opens it
+python wkjiten.py serve               # live dashboard, Ctrl+C to stop
+python wkjiten.py report              # static file, no search
 python wkjiten.py report --no-open    # just write the file
 ```
 
-One self-contained page — no external scripts, fonts or trackers, and it follows
-your system's light/dark setting. It holds the tracked-title table with progress
-trends, an SVG curve of what every WaniKani level would give you on each title,
-coverage over time once you have two days of history, the leech table, and the
-recommendations.
+Both give you the tracked-title table with progress trends, an SVG curve of what
+every WaniKani level would give you on each title, coverage over time once you
+have two days of history, the leech table, and the recommendations. No external
+scripts, fonts or trackers, and it follows your system's light/dark setting.
+
+`serve` adds a **search box for the whole jiten.moe catalogue**. Filter by type,
+sort by your own coverage, then hit *when?* on any title and it works out — right
+there — the kanji coverage you have now, what finishing your current level adds,
+and which level and roughly which month each threshold lands on. Same numbers as
+`wkjiten when`, no terminal needed. It also saves the static `report.html` on the
+way up, so you keep a dashboard after stopping the server.
+
+**Why a server at all?** api.jiten.moe sends no CORS headers, so a page opened
+from `file://` is not allowed by the browser to read its responses — live search
+from a plain HTML file is impossible, not merely awkward. A small local server
+in front of the API solves that, and it keeps your API key on the machine rather
+than baking it into a file you might share. It binds to `127.0.0.1` only, and
+proxies nothing except paths beginning with `/api/`.
 
 Coverage history is appended to `cache/history.csv`, one row per title per day.
 

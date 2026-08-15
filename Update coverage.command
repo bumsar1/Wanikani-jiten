@@ -46,15 +46,21 @@ echo
 echo "== 4/5  Leeches blocking your reading =="
 "$PY" wkjiten.py leeches || failed
 
-echo
-echo "== 5/5  Building the dashboard =="
-"$PY" wkjiten.py report || failed
-
 open "https://jiten.moe/decks/media"
 
 echo
-echo "Done. The dashboard and jiten.moe should both have opened in your"
-echo "browser; the dashboard is also saved as report.html, and the full"
-echo "table is in coverage.csv."
+echo "== 5/5  Dashboard with live search =="
+echo
+echo "Your browser will open with the dashboard, including a search box"
+echo "for the whole jiten.moe catalogue. Keep THIS WINDOW OPEN while you"
+echo "use it - closing it stops the search working."
+echo
+echo "Press Ctrl+C here when you are finished."
+echo
+"$PY" wkjiten.py serve || failed
+
+echo
+echo "Done. A static copy of the dashboard is saved as report.html, and"
+echo "the full table is in coverage.csv."
 echo
 read -r -p "Press return to close..."
