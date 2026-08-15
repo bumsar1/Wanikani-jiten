@@ -2014,9 +2014,12 @@ SLIDER_HTML = """
   <label for="lvl">If I were level <b id="lvlout"></b></label>
   <input id="lvl" type="range" min="1" max="60">
   <span id="eta" class="pill"></span>
-  <span class="pace">
+  <span class="pace" title="WaniKani's own floor is 6 days 20 hours on levels 3-42:
+two SRS chains of 3 days 10 hours, radicals to Guru and then the kanji they
+unlock. On the fast levels - 1, 2 and 43-60 - the kanji do not wait for
+radicals, so one chain of 3 days 10 hours is the whole level.">
     <label for="pace">at</label>
-    <input id="pace" type="number" min="1" max="365" step="0.5"
+    <input id="pace" type="number" min="3.4" max="365" step="0.5"
            inputmode="decimal" placeholder="days">
     <label for="pace">days per level</label>
     <button id="paceback" type="button" hidden>back to my <b></b></button>
@@ -2057,8 +2060,12 @@ SLIDER_JS = """
     if (away <= 0) eta.textContent = 'where you are now';
     else if (pace){
       const d = away * pace;
-      eta.textContent = (d < 60 ? `~${Math.round(d/7)} weeks`
-                       : d < 730 ? `~${Math.round(d/30.4)} months`
+      // Days below a fortnight: one level at full speed is 6.8 days, which
+      // rounded to weeks came out as "~0 weeks away".
+      const span = (n, unit) => `~${n} ${unit}${n === 1 ? '' : 's'}`;
+      eta.textContent = (d < 14 ? span(Math.round(d), 'day')
+                       : d < 60 ? span(Math.round(d / 7), 'week')
+                       : d < 730 ? span(Math.round(d / 30.4), 'month')
                        : `~${(d/365).toFixed(1)} years`) + ' away';
     } else eta.textContent = away + ' levels away';
     let rows = '';
@@ -2074,6 +2081,14 @@ SLIDER_JS = """
   }
   slider.addEventListener('input', draw);
   paceIn.addEventListener('input', draw);
+  // Snap on the way out rather than mid-keystroke, so typing "12" is not
+  // fought over at "1". Only what you type is held to the floor - a measured
+  // median stands as it is, because it is what the API says happened.
+  paceIn.addEventListener('change', () => {
+    const v = +paceIn.value, floor = +paceIn.min;
+    if (v && v < floor) paceIn.value = floor;
+    draw();
+  });
   paceBack.addEventListener('click', () => { paceIn.value = mine; draw(); });
   draw();
 })();
