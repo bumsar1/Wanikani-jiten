@@ -38,6 +38,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(HERE, "cache")
 WK_CACHE = os.path.join(CACHE_DIR, "wanikani.json")
 WK_CACHE_PREV = os.path.join(CACHE_DIR, "wanikani.prev.json")
+DECK_CACHE_DIR = os.path.join(CACHE_DIR, "decks")
+HISTORY_CSV = os.path.join(CACHE_DIR, "history.csv")
 
 # CJK ideographs (BMP + compat). Excludes 々 and other iteration/marks on
 # purpose: they are not kanji you learn on WaniKani.
@@ -276,6 +278,33 @@ def jiten_deck_tokens(deck_id: int, api_key: str | None) -> list[str]:
     return [FURIGANA_RE.sub("", line).strip() for line in text.splitlines() if line.strip()]
 
 
+def deck_words(deck_id: int, api_key: str | None, deck: dict | None = None,
+               force: bool = False) -> Counter:
+    """Word -> occurrences for a deck, cached on disk.
+
+    A deck's word list only changes when Jiten re-parses the title, so the
+    cache is keyed on the deck's own lastUpdate stamp. Without this, every
+    command that wants occurrence counts would re-download the same decks,
+    and these are the rate-limited heavy endpoints.
+    """
+    os.makedirs(DECK_CACHE_DIR, exist_ok=True)
+    path = os.path.join(DECK_CACHE_DIR, f"{deck_id}.json")
+    stamp = (deck or {}).get("lastUpdate")
+    if not force and os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                cached = json.load(f)
+            if stamp is None or cached.get("lastUpdate") == stamp:
+                return Counter(cached["words"])
+        except (ValueError, KeyError):
+            pass  # corrupt cache, just refetch
+
+    counts = Counter(jiten_deck_tokens(deck_id, api_key))
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"lastUpdate": stamp, "words": dict(counts)}, f, ensure_ascii=False)
+    return counts
+
+
 def jiten_search(query: str, api_key: str | None, limit: int = 15) -> list[dict]:
     url = (f"{JITEN_API}/api/media-deck/get-media-decks"
            f"?titleFilter={urllib.parse.quote(query)}&sortBy=wordCount&sortOrder=1")
@@ -294,12 +323,13 @@ MEDIA_TYPES = {
 # coverage maths
 # --------------------------------------------------------------------------
 
-def analyse_deck(tokens: list[str], known: dict) -> dict:
+def analyse_deck(tokens, known: dict) -> dict:
+    """tokens may be a list of word occurrences or an already-counted Counter."""
     kanji_known = known["kanji_known"]
     kanji_level = known["kanji_level"]
     words_known = known["words_known_set"]
 
-    word_occ = Counter(tokens)
+    word_occ = tokens if isinstance(tokens, Counter) else Counter(tokens)
     kanji_occ: Counter[str] = Counter()
     for token, n in word_occ.items():
         for ch in KANJI_RE.findall(token):
@@ -350,6 +380,62 @@ def analyse_deck(tokens: list[str], known: dict) -> dict:
         "kanji_level": kanji_level,
         "kanji_known": kanji_known,
     }
+
+
+def log_history(rows: list[dict]) -> None:
+    """Append one dated row per deck so coverage can be tracked over time."""
+    if not rows:
+        return
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    fields = ["date", "deckId", "title", "wkLevel", "kanjiKnown", "wordsKnown",
+              "kanjiCoverage", "jitenCoverage"]
+    # One point per deck per day: running twice in an afternoon should update
+    # today's figure, not stack a second dot on the chart.
+    existing: list[dict] = []
+    if os.path.exists(HISTORY_CSV):
+        replacing = {(r["date"], str(r["deckId"])) for r in rows}
+        with open(HISTORY_CSV, encoding="utf-8", newline="") as f:
+            existing = [r for r in csv.DictReader(f)
+                        if (r.get("date"), str(r.get("deckId"))) not in replacing]
+    with open(HISTORY_CSV, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in existing + rows:
+            w.writerow({k: r.get(k, "") for k in fields})
+
+
+def read_history() -> dict[int, list[dict]]:
+    """deckId -> its rows, oldest first, one per run."""
+    if not os.path.exists(HISTORY_CSV):
+        return {}
+    out: dict[int, list[dict]] = {}
+    with open(HISTORY_CSV, encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                out.setdefault(int(row["deckId"]), []).append(row)
+            except (ValueError, KeyError):
+                continue
+    return out
+
+
+def history_trend(rows: list[dict], field: str = "kanjiCoverage"):
+    """(first value, latest value, days between) for a deck's history."""
+    points = []
+    for r in rows:
+        try:
+            points.append((r["date"], float(r[field])))
+        except (ValueError, KeyError, TypeError):
+            continue
+    if len(points) < 2:
+        return None
+    first, last = points[0], points[-1]
+    try:
+        d0 = time.strptime(first[0][:10], "%Y-%m-%d")
+        d1 = time.strptime(last[0][:10], "%Y-%m-%d")
+        days = round((time.mktime(d1) - time.mktime(d0)) / 86400)
+    except ValueError:
+        days = 0
+    return first[1], last[1], days
 
 
 def level_for(curve: list[tuple[int, float]], target: float) -> int | None:
@@ -520,25 +606,22 @@ def cmd_deck(args) -> None:
     known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
     key = jiten_key(args.jiten_key)
 
-    for deck_id in args.deck_ids:
-        deck = jiten_deck_detail(deck_id, key)
-        tokens = jiten_deck_tokens(deck_id, key)
-        res = analyse_deck(tokens, known)
-        report(deck, res, known, args)
-        if len(args.deck_ids) > 1:
-            time.sleep(args.sleep)
+    for deck, words in load_decks(args.deck_ids, key, args.sleep):
+        report(deck, analyse_deck(words, known), known, args)
 
 
-def cmd_batch(args) -> None:
-    cache = wk_load(args.wk_token, refresh=args.refresh)
-    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
-    key = jiten_key(args.jiten_key)
+def deck_title(deck: dict) -> str:
+    return (deck.get("originalTitle") or deck.get("englishTitle")
+            or deck.get("romajiTitle") or "?")
 
-    ids: list[int] = list(args.deck_ids or [])
-    if args.search:
+
+def tracked_ids(args, key: str | None) -> list[int]:
+    """Deck ids from the command line, a --search, or decks.txt."""
+    ids: list[int] = list(getattr(args, "deck_ids", None) or [])
+    if getattr(args, "search", None):
         for row in jiten_search(args.search, key, limit=args.limit):
             ids.append(row["deckId"])
-    deck_file = args.deck_file or os.path.join(HERE, "decks.txt")
+    deck_file = getattr(args, "deck_file", None) or os.path.join(HERE, "decks.txt")
     if not ids and os.path.exists(deck_file):
         with open(deck_file, encoding="utf-8") as f:
             for line in f:
@@ -546,12 +629,38 @@ def cmd_batch(args) -> None:
                 if line.isdigit():
                     ids.append(int(line))
     if not ids:
-        raise SystemExit(f"nothing to do: pass deck ids, --search, or list them in "
+        raise SystemExit("nothing to do: pass deck ids, --search, or list them in "
                          f"{deck_file}")
-    ids = list(dict.fromkeys(ids))
+    return list(dict.fromkeys(ids))
+
+
+def load_decks(ids: list[int], key: str | None, sleep: float,
+               progress: bool = False):
+    """Yield (deck, word occurrences) per id, hitting the network only for
+    decks that are not cached yet."""
+    for i, deck_id in enumerate(ids):
+        deck = jiten_deck_detail(deck_id, key)
+        cached = os.path.exists(os.path.join(DECK_CACHE_DIR, f"{deck_id}.json"))
+        words = deck_words(deck_id, key, deck)
+        if progress:
+            print(f"[{i+1}/{len(ids)}] {deck_title(deck)}"
+                  + ("" if cached else "  (downloaded)"))
+        yield deck, words
+        if not cached and i < len(ids) - 1:
+            time.sleep(sleep)
+
+
+def cmd_batch(args) -> None:
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+    key = jiten_key(args.jiten_key)
+    ids = tracked_ids(args, key)
 
     out = args.out or os.path.join(HERE, "coverage.csv")
     summary: list[tuple] = []
+    history: list[dict] = []
+    today = time.strftime("%Y-%m-%d")
+
     with open(out, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow(["deckId", "title", "type", "chars", "difficulty",
@@ -559,43 +668,124 @@ def cmd_batch(args) -> None:
                     "jiten_coverage", "jiten_unique_coverage",
                     "vocab_cov_occ_offline", "unique_kanji",
                     "lvl_for_95", "lvl_for_98", "ceiling"])
-        for i, deck_id in enumerate(ids):
-            deck = jiten_deck_detail(deck_id, key)
-            tokens = jiten_deck_tokens(deck_id, key)
-            res = analyse_deck(tokens, known)
-            title = (deck.get("originalTitle") or deck.get("englishTitle")
-                     or deck.get("romajiTitle") or "")
+        for i, (deck, words) in enumerate(load_decks(ids, key, args.sleep)):
+            res = analyse_deck(words, known)
+            title = deck_title(deck)
+            deck_id = deck.get("deckId")
+            live = deck.get("coverage")
             w.writerow([
                 deck_id, title, MEDIA_TYPES.get(deck.get("mediaType"), "?"),
                 deck.get("characterCount") or 0, deck.get("difficulty") or 0,
                 f"{res['kanji_cov_occ']:.2f}", f"{res['kanji_cov_unique']:.2f}",
-                deck.get("coverage") if deck.get("coverage") is not None else "",
-                deck.get("uniqueCoverage") if deck.get("coverage") is not None else "",
+                live if live is not None else "",
+                deck.get("uniqueCoverage") if live is not None else "",
                 f"{res['word_cov_occ']:.2f}",
                 res["unique_kanji"],
                 level_for(res["curve"], 95) or "", level_for(res["curve"], 98) or "",
                 f"{100 - res['not_in_wk_pct']:.2f}",
             ])
-            live = deck.get("coverage")
             summary.append((res["kanji_cov_occ"], live, title,
                             MEDIA_TYPES.get(deck.get("mediaType"), "?"),
                             deck.get("characterCount") or 0,
                             level_for(res["curve"], 95),
                             100 - res["not_in_wk_pct"]))
+            history.append({
+                "date": today, "deckId": deck_id, "title": title,
+                "wkLevel": cache.get("level"),
+                "kanjiKnown": len(known["kanji_known"]),
+                "wordsKnown": len(known["words_known_set"]),
+                "kanjiCoverage": f"{res['kanji_cov_occ']:.2f}",
+                "jitenCoverage": f"{live:.2f}" if live is not None else "",
+            })
             vocab = f"{live:.2f}% (jiten)" if live is not None else \
                     f"{res['word_cov_occ']:.2f}% (offline)"
             print(f"[{i+1}/{len(ids)}] {title}  kanji {res['kanji_cov_occ']:.2f}%  "
                   f"vocab {vocab}")
-            time.sleep(args.sleep)
+
+    log_history(history)
+    past = read_history()
 
     print()
-    print(f"{'kanji':>7} {'jiten':>7} {'loft':>7} {'lvl95':>6}  {'type':<12} "
-          f"{'tegn':>10}  titel")
+    print(f"{'kanji':>7} {'jiten':>7} {'ceiling':>8} {'lvl95':>6} {'trend':>16}  "
+          f"{'type':<12} {'chars':>10}  title")
     for k, live, title, mtype, chars, lvl95, ceiling in sorted(summary, reverse=True):
         j = f"{live:6.2f}%" if live is not None else "     -"
-        print(f"{k:6.2f}% {j} {ceiling:6.2f}% {lvl95 or '--':>6}  {mtype:<12} "
-              f"{chars:>10,}  {title}")
+        did = next((h["deckId"] for h in history if h["title"] == title), None)
+        trend = history_trend(past.get(did, []))
+        t = (f"{trend[1] - trend[0]:+.2f}pp / {trend[2]}d" if trend else "")
+        print(f"{k:6.2f}% {j} {ceiling:7.2f}% {lvl95 or '--':>6} {t:>16}  "
+              f"{mtype:<12} {chars:>10,}  {title}")
     print(f"\nwrote {out}")
+
+
+def cmd_leeches(args) -> None:
+    """Which WaniKani items you are struggling with actually block your reading.
+
+    WaniKani ranks leeches by how often you fail them; that says nothing about
+    whether the item matters for the books you want to read. Crossing SRS stage
+    with occurrences in your tracked titles does.
+    """
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+    key = jiten_key(args.jiten_key)
+    ids = tracked_ids(args, key)
+
+    subjects, assignments = cache["subjects"], cache["assignments"]
+    # Stage 1-4 is Apprentice: started, repeatedly seen, not yet passed.
+    struggling: dict[str, tuple[int, int, str]] = {}   # chars -> (stage, level, type)
+    for sid, s in subjects.items():
+        stage = assignments.get(sid)
+        if stage is not None and 1 <= stage <= args.max_stage:
+            struggling[s["characters"]] = (stage, s["level"], s["type"])
+
+    kanji_occ: Counter[str] = Counter()
+    word_occ: Counter[str] = Counter()
+    titles: dict[str, set] = {}
+    for deck, words in load_decks(ids, key, args.sleep, progress=True):
+        title = deck_title(deck)
+        for word, n in words.items():
+            word_occ[word] += n
+            for ch in set(KANJI_RE.findall(word)):
+                if ch in struggling:
+                    titles.setdefault(ch, set()).add(title)
+            for ch in KANJI_RE.findall(word):
+                kanji_occ[ch] += n
+
+    total_unknown = sum(n for ch, n in kanji_occ.items()
+                        if ch not in known["kanji_known"])
+    rows = [(n, ch) + struggling[ch] for ch, n in kanji_occ.items()
+            if ch in struggling and ch not in known["kanji_known"]]
+    rows.sort(reverse=True)
+
+    print()
+    print("=" * 70)
+    print(f"  Leeches that block your reading  ({len(ids)} tracked titles)")
+    print("=" * 70)
+    if not rows:
+        print("\nNothing in Apprentice appears in your tracked titles. Enjoy it.")
+    else:
+        blocked = sum(r[0] for r in rows)
+        print(f"\nThese {len(rows)} Apprentice kanji account for {blocked:,} of the "
+              f"{total_unknown:,} kanji occurrences")
+        print(f"you cannot read yet - {blocked / total_unknown * 100:.1f}% of the "
+              f"gap, sitting in items you have already unlocked.\n")
+        print(f"{'occur':>7}  {'kanji':<6} {'stage':<16} {'lvl':>4}  appears in")
+        for n, ch, stage, lv, _typ in rows[:args.top]:
+            where = sorted(titles.get(ch, ()))
+            shown = ", ".join(where[:2]) + (f" +{len(where) - 2}" if len(where) > 2 else "")
+            print(f"{n:>7}  {ch:<6} {SRS_STAGE_NAMES.get(stage, '?'):<16} "
+                  f"{lv:>4}  {shown}")
+
+    vocab_rows = [(word_occ.get(w, 0), w) + struggling[w] for w in struggling
+                  if word_occ.get(w, 0) > 0 and w not in known["words_known_set"]]
+    vocab_rows.sort(reverse=True)
+    if vocab_rows:
+        print(f"\n{'occur':>7}  {'word':<12} {'stage':<16} {'lvl':>4}")
+        for n, word, stage, lv, _typ in vocab_rows[:args.top]:
+            print(f"{n:>7}  {word:<12} {SRS_STAGE_NAMES.get(stage, '?'):<16} {lv:>4}")
+
+    print("\nThese are already in your review queue - getting them to Guru is the")
+    print("cheapest coverage you will ever buy.")
 
 
 def jiten_top_by_coverage(media_type: int, api_key: str, *, min_chars: int,
@@ -611,17 +801,17 @@ def jiten_top_by_coverage(media_type: int, api_key: str, *, min_chars: int,
 # media type -> minimum character count worth recommending, so the lists are
 # not topped by one-page shorts and single episodes.
 RECOMMEND_TYPES = [
-    (4, "romaner", 30000),
+    (4, "novels", 30000),
     (7, "visual novels", 50000),
     (1, "anime", 20000),
     (9, "manga", 30000),
-    (6, "spil", 30000),
+    (6, "games", 30000),
 ]
 
 
 def progress_since_last(args) -> None:
     if not os.path.exists(WK_CACHE_PREV):
-        print("Fremgang: ingen tidligere måling endnu - den kommer næste gang.")
+        print("Progress: no earlier snapshot yet - it appears from the next run on.")
         return
     with open(WK_CACHE_PREV, encoding="utf-8") as f:
         prev_cache = json.load(f)
@@ -636,84 +826,407 @@ def progress_since_last(args) -> None:
     new_words = cur["words_known_set"] - prev["words_known_set"]
     lvl_before, lvl_now = prev_cache.get("level"), cur_cache.get("level")
 
-    print(f"Fremgang siden {prev_cache.get('fetched_at', '?')[:10]}")
+    print(f"Progress since {prev_cache.get('fetched_at', '?')[:10]}")
     print(f"  kanji  {len(prev['kanji_known']):>5} -> {len(cur['kanji_known']):<5} "
           f"({len(new_kanji):+d})")
-    print(f"  ord    {len(prev['words_known_set']):>5} -> "
+    print(f"  words  {len(prev['words_known_set']):>5} -> "
           f"{len(cur['words_known_set']):<5} ({len(new_words):+d})")
     if lvl_before != lvl_now:
         print(f"  level  {lvl_before} -> {lvl_now}   nice.")
     if new_kanji:
         shown = sorted(new_kanji, key=lambda c: cur["kanji_level"].get(c, 99))
-        print("  nye kanji: " + " ".join(shown[:40])
-              + (f"  (+{len(shown) - 40} mere)" if len(shown) > 40 else ""))
+        print("  new kanji: " + " ".join(shown[:40])
+              + (f"  (+{len(shown) - 40} more)" if len(shown) > 40 else ""))
+
+
+def collect_status(args, key: str, cache: dict, known: dict) -> dict:
+    """The data behind `status`, shared with the HTML report."""
+    recommendations: list[tuple[str, list[dict]]] = []
+    candidates: list[dict] = []
+    for mtype, label, min_chars in RECOMMEND_TYPES:
+        rows = jiten_top_by_coverage(mtype, key, min_chars=min_chars,
+                                     limit=args.top_n + args.soon_pool)
+        recommendations.append((label, rows[:args.top_n]))
+        candidates.extend(rows[args.top_n:])
+        time.sleep(0.5)
+
+    lvl_now = cache.get("level") or 1
+    target = min(60, lvl_now + args.soon_levels)
+    gains = []
+    if args.soon_limit > 0:
+        for d in candidates[:args.soon_limit]:
+            deck_id = d.get("deckId")
+            try:
+                words = deck_words(deck_id, key, d)
+            except SystemExit as e:
+                print(f"  skipped {deck_id}: {e}")
+                continue
+            res = analyse_deck(words, known)
+            now = res["kanji_cov_occ"]
+            gains.append((res["curve"][target - 1][1] - now, now,
+                          res["curve"][target - 1][1], d))
+            time.sleep(args.sleep)
+    return {"recommendations": recommendations, "gains": sorted(gains, reverse=True),
+            "target_level": target, "candidates": len(candidates)}
 
 
 def cmd_status(args) -> None:
     key = jiten_key(args.jiten_key)
     if not key:
-        raise SystemExit("`status` skal bruge en Jiten API-key - se README.")
+        raise SystemExit("`status` needs a Jiten API key - see the README.")
     cache = wk_load(args.wk_token, refresh=args.refresh)
     known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
 
     print()
     print("=" * 70)
     print(f"  {cache.get('username')} - WaniKani level {cache.get('level')}, "
-          f"{len(known['kanji_known'])} kanji og "
-          f"{len(known['words_known_set'])} ord")
+          f"{len(known['kanji_known'])} kanji and "
+          f"{len(known['words_known_set'])} words")
     print("=" * 70)
     print()
     progress_since_last(args)
 
+    data = collect_status(args, key, cache, known)
+
     print()
     print("-" * 70)
-    print(f"  Bedste titler for dig lige nu (coverage fra din Jiten-konto)")
+    print("  Best titles for you right now (coverage from your Jiten account)")
     print("-" * 70)
-    candidates: list[dict] = []
-    for mtype, label, min_chars in RECOMMEND_TYPES:
-        rows = jiten_top_by_coverage(mtype, key, min_chars=min_chars,
-                                     limit=args.top_n + args.soon_pool)
+    for label, rows in data["recommendations"]:
         print(f"\n{label}:")
-        for d in rows[:args.top_n]:
-            title = d.get("originalTitle") or d.get("englishTitle") or "?"
+        for d in rows:
             print(f"  {d.get('coverage') or 0:>6}%  "
                   f"{d.get('characterCount') or 0:>9,}  "
-                  f"jiten.moe/decks/media/{d.get('deckId')}  {title}")
-        candidates.extend(rows[args.top_n:])
-        time.sleep(0.5)
+                  f"jiten.moe/decks/media/{d.get('deckId')}  "
+                  f"{d.get('originalTitle') or d.get('englishTitle') or '?'}")
 
-    if args.soon_limit <= 0 or not candidates:
+    if not data["gains"]:
         return
-
     print()
     print("-" * 70)
-    print(f"  Snart inden for rækkevidde - kanji-coverage nu vs. level "
-          f"{(cache.get('level') or 0) + args.soon_levels}")
+    print(f"  Nearly within reach - kanji coverage now vs. level "
+          f"{data['target_level']}")
     print("-" * 70)
-    print(f"Undersøger {min(args.soon_limit, len(candidates))} af "
-          f"{len(candidates)} kandidater (hæv med --soon-limit).")
-
-    lvl_now = cache.get("level") or 1
-    target = min(60, lvl_now + args.soon_levels)
-    gains = []
-    for d in candidates[:args.soon_limit]:
-        deck_id = d.get("deckId")
-        try:
-            tokens = jiten_deck_tokens(deck_id, key)
-        except SystemExit as e:
-            print(f"  sprang {deck_id} over: {e}")
-            continue
-        res = analyse_deck(tokens, known)
-        now = res["kanji_cov_occ"]
-        later = res["curve"][target - 1][1]
-        gains.append((later - now, now, later, d))
-        time.sleep(args.sleep)
-
-    print(f"\n{'nu':>7} {'ved lvl':>8} {'gevinst':>8}   titel")
-    for gain, now, later, d in sorted(gains, reverse=True):
-        title = d.get("originalTitle") or d.get("englishTitle") or "?"
-        print(f"{now:6.2f}% {later:7.2f}% {gain:+7.2f}pp   {title}")
+    print(f"Checked {len(data['gains'])} of {data['candidates']} candidates "
+          f"(raise it with --soon-limit).")
+    print(f"\n{'now':>7} {'at lvl':>8} {'gain':>8}   title")
+    for gain, now, later, d in data["gains"]:
+        print(f"{now:6.2f}% {later:7.2f}% {gain:+7.2f}pp   "
+              f"{d.get('originalTitle') or d.get('englishTitle') or '?'}")
         print(f"{'':29}jiten.moe/decks/media/{d.get('deckId')}")
+
+
+def esc(s) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def svg_curves(series: list[tuple[str, list[tuple[int, float]]]], user_level: int,
+               width: int = 760, height: int = 320) -> str:
+    """Kanji coverage against WaniKani level, one line per title."""
+    pad_l, pad_b, pad_t, pad_r = 44, 34, 12, 150
+    pw, ph = width - pad_l - pad_r, height - pad_t - pad_b
+    palette = ["#c2410c", "#0369a1", "#15803d", "#7e22ce", "#b45309",
+               "#0f766e", "#be123c", "#4338ca", "#65a30d", "#a21caf",
+               "#0891b2", "#9f1239", "#1d4ed8"]
+
+    def x(lv):
+        return pad_l + (lv - 1) / 59 * pw
+
+    def y(pct):
+        return pad_t + ph - pct / 100 * ph
+
+    parts = [f'<svg viewBox="0 0 {width} {height}" class="chart" '
+             f'role="img" aria-label="Kanji coverage by WaniKani level">']
+    for pct in range(0, 101, 25):
+        parts.append(f'<line x1="{pad_l}" y1="{y(pct):.1f}" x2="{pad_l + pw}" '
+                     f'y2="{y(pct):.1f}" class="grid"/>')
+        parts.append(f'<text x="{pad_l - 8}" y="{y(pct) + 4:.1f}" '
+                     f'class="tick" text-anchor="end">{pct}%</text>')
+    for lv in (1, 10, 20, 30, 40, 50, 60):
+        parts.append(f'<text x="{x(lv):.1f}" y="{height - 12}" class="tick" '
+                     f'text-anchor="middle">{lv}</text>')
+    if user_level:
+        parts.append(f'<line x1="{x(user_level):.1f}" y1="{pad_t}" '
+                     f'x2="{x(user_level):.1f}" y2="{pad_t + ph}" class="you"/>')
+        parts.append(f'<text x="{x(user_level) + 4:.1f}" y="{pad_t + 10}" '
+                     f'class="tick">you</text>')
+    for i, (label, curve) in enumerate(series):
+        colour = palette[i % len(palette)]
+        pts = " ".join(f"{x(lv):.1f},{y(pct):.1f}" for lv, pct in curve)
+        parts.append(f'<polyline points="{pts}" fill="none" stroke="{colour}" '
+                     f'stroke-width="1.8"/>')
+        ly = pad_t + 12 + i * 15
+        parts.append(f'<line x1="{pad_l + pw + 10}" y1="{ly}" '
+                     f'x2="{pad_l + pw + 26}" y2="{ly}" stroke="{colour}" '
+                     f'stroke-width="2.4"/>')
+        short = label if len(label) <= 16 else label[:15] + "…"
+        parts.append(f'<text x="{pad_l + pw + 31}" y="{ly + 4}" '
+                     f'class="legend">{esc(short)}</text>')
+    parts.append(f'<text x="{pad_l + pw / 2}" y="{height - 1}" class="tick" '
+                 f'text-anchor="middle">WaniKani level</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def svg_history(past: dict[int, list[dict]], titles: dict[int, str],
+                width: int = 760, height: int = 260) -> str:
+    """Coverage per title over time. Needs at least two dated runs."""
+    series = []
+    for deck_id, rows in past.items():
+        pts = []
+        for r in rows:
+            try:
+                pts.append((r["date"][:10], float(r["kanjiCoverage"])))
+            except (ValueError, KeyError, TypeError):
+                continue
+        if len(pts) >= 2:
+            series.append((titles.get(deck_id, str(deck_id)), pts))
+    if not series:
+        return ('<p class="empty">Not enough history yet - this chart appears once '
+                'you have run the update on two different days.</p>')
+
+    dates = sorted({d for _, pts in series for d, _ in pts})
+    lo = min(v for _, pts in series for _, v in pts)
+    hi = max(v for _, pts in series for _, v in pts)
+    lo, hi = max(0, lo - 2), min(100, hi + 2)
+    pad_l, pad_b, pad_t, pad_r = 44, 34, 12, 150
+    pw, ph = width - pad_l - pad_r, height - pad_t - pad_b
+    palette = ["#c2410c", "#0369a1", "#15803d", "#7e22ce", "#b45309",
+               "#0f766e", "#be123c", "#4338ca", "#65a30d", "#a21caf",
+               "#0891b2", "#9f1239", "#1d4ed8"]
+
+    def x(d):
+        i = dates.index(d)
+        return pad_l + (i / max(1, len(dates) - 1)) * pw
+
+    def y(v):
+        return pad_t + ph - (v - lo) / max(0.001, hi - lo) * ph
+
+    parts = [f'<svg viewBox="0 0 {width} {height}" class="chart" role="img" '
+             f'aria-label="Coverage over time">']
+    for frac in (0, 0.5, 1):
+        v = lo + (hi - lo) * frac
+        parts.append(f'<line x1="{pad_l}" y1="{y(v):.1f}" x2="{pad_l + pw}" '
+                     f'y2="{y(v):.1f}" class="grid"/>')
+        parts.append(f'<text x="{pad_l - 8}" y="{y(v) + 4:.1f}" class="tick" '
+                     f'text-anchor="end">{v:.0f}%</text>')
+    for d in (dates[0], dates[-1]) if len(dates) > 1 else dates:
+        parts.append(f'<text x="{x(d):.1f}" y="{height - 12}" class="tick" '
+                     f'text-anchor="middle">{d}</text>')
+    for i, (label, pts) in enumerate(series):
+        colour = palette[i % len(palette)]
+        coords = " ".join(f"{x(d):.1f},{y(v):.1f}" for d, v in pts)
+        parts.append(f'<polyline points="{coords}" fill="none" stroke="{colour}" '
+                     f'stroke-width="1.8"/>')
+        for d, v in pts:
+            parts.append(f'<circle cx="{x(d):.1f}" cy="{y(v):.1f}" r="2.6" '
+                         f'fill="{colour}"/>')
+        ly = pad_t + 12 + i * 15
+        parts.append(f'<line x1="{pad_l + pw + 10}" y1="{ly}" '
+                     f'x2="{pad_l + pw + 26}" y2="{ly}" stroke="{colour}" '
+                     f'stroke-width="2.4"/>')
+        short = label if len(label) <= 16 else label[:15] + "…"
+        parts.append(f'<text x="{pad_l + pw + 31}" y="{ly + 4}" '
+                     f'class="legend">{esc(short)}</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+REPORT_CSS = """
+:root { --bg:#fbfaf8; --fg:#1c1a17; --muted:#6b6660; --line:#e3ded6;
+        --card:#fff; --accent:#c2410c; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#171614; --fg:#eae7e2; --muted:#a09a92; --line:#332f2a;
+          --card:#211f1c; --accent:#fb923c; }
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:32px 20px 64px; background:var(--bg); color:var(--fg);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
+main { max-width:860px; margin:0 auto; }
+h1 { font-size:26px; margin:0 0 4px; letter-spacing:-.01em; }
+h2 { font-size:17px; margin:40px 0 12px; letter-spacing:-.01em; }
+.sub { color:var(--muted); margin:0 0 28px; }
+.cards { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 8px; }
+.card { flex:1 1 150px; background:var(--card); border:1px solid var(--line);
+  border-radius:10px; padding:14px 16px; }
+.card .n { font-size:24px; font-weight:600; letter-spacing:-.02em; }
+.card .l { color:var(--muted); font-size:12px; text-transform:uppercase;
+  letter-spacing:.06em; }
+.card .d { color:var(--accent); font-size:13px; font-weight:600; }
+.wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+table { border-collapse:collapse; width:100%; font-size:14px; min-width:520px; }
+th { text-align:left; font-weight:600; color:var(--muted); font-size:12px;
+  text-transform:uppercase; letter-spacing:.05em; padding:0 10px 6px 0;
+  border-bottom:1px solid var(--line); white-space:nowrap; }
+td { padding:7px 10px 7px 0; border-bottom:1px solid var(--line);
+  vertical-align:middle; }
+td.num, th.num { text-align:right; font-variant-numeric:tabular-nums;
+  white-space:nowrap; }
+a { color:inherit; text-decoration:none; border-bottom:1px solid var(--line); }
+a:hover { border-bottom-color:var(--accent); }
+.meter { display:block; width:110px; height:7px; background:var(--line);
+  border-radius:4px; overflow:hidden; }
+.meter i { display:block; height:100%; background:var(--accent); }
+.up { color:#15803d; font-weight:600; }
+.chart { width:100%; height:auto; display:block; margin:4px 0 8px; }
+.grid { stroke:var(--line); stroke-width:1; }
+.you { stroke:var(--accent); stroke-width:1; stroke-dasharray:3 3; }
+.tick, .legend { fill:var(--muted); font-size:11px; }
+.legend { fill:var(--fg); }
+.kanji { font-size:19px; }
+.empty { color:var(--muted); font-style:italic; }
+footer { color:var(--muted); font-size:12px; margin-top:44px;
+  border-top:1px solid var(--line); padding-top:14px; }
+"""
+
+
+def cmd_report(args) -> None:
+    """Everything the terminal prints, as one self-contained HTML page."""
+    key = jiten_key(args.jiten_key)
+    cache = wk_load(args.wk_token, refresh=args.refresh)
+    known = wk_known(cache, min_stage=args.min_stage, mode=args.mode, level=args.level)
+    ids = tracked_ids(args, key)
+    lvl = cache.get("level") or 0
+
+    rows, curves, titles = [], [], {}
+    for deck, words in load_decks(ids, key, args.sleep, progress=True):
+        res = analyse_deck(words, known)
+        deck_id = deck.get("deckId")
+        titles[deck_id] = deck_title(deck)
+        rows.append((deck, res))
+        curves.append((deck_title(deck), res["curve"]))
+
+    past = read_history()
+    prev_summary = None
+    if os.path.exists(WK_CACHE_PREV):
+        with open(WK_CACHE_PREV, encoding="utf-8") as f:
+            prev = wk_known(json.load(f), min_stage=args.min_stage,
+                            mode=args.mode, level=args.level)
+        prev_summary = (len(known["kanji_known"]) - len(prev["kanji_known"]),
+                        len(known["words_known_set"]) - len(prev["words_known_set"]))
+
+    head = (f"<title>{esc(cache.get('username'))} - WaniKani coverage</title>"
+            f"<style>{REPORT_CSS}</style>")
+    h = ["<main>",
+         f"<h1>{esc(cache.get('username'))} on jiten.moe</h1>",
+         f'<p class="sub">WaniKani level {lvl} &middot; generated '
+         f'{time.strftime("%Y-%m-%d %H:%M")}</p>', '<div class="cards">']
+
+    def card(n, label, delta=None):
+        d = f'<div class="d">{delta:+d} since last run</div>' if delta else ""
+        return (f'<div class="card"><div class="n">{n}</div>'
+                f'<div class="l">{label}</div>{d}</div>')
+
+    h.append(card(lvl, "level"))
+    h.append(card(len(known["kanji_known"]), "kanji known",
+                  prev_summary[0] if prev_summary else None))
+    h.append(card(len(known["words_known_set"]), "words known",
+                  prev_summary[1] if prev_summary else None))
+    if rows:
+        best = max(rows, key=lambda r: r[1]["kanji_cov_occ"])
+        h.append(card(f'{best[1]["kanji_cov_occ"]:.0f}%',
+                      f"best: {esc(deck_title(best[0])[:14])}"))
+    h.append("</div>")
+
+    h.append("<h2>Your tracked titles</h2>")
+    h.append('<div class="wrap"><table><tr><th>title</th><th class="num">kanji</th>'
+             '<th></th><th class="num">jiten</th><th class="num">lvl for 95%</th>'
+             '<th class="num">ceiling</th><th class="num">trend</th></tr>')
+    for deck, res in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"]):
+        deck_id = deck.get("deckId")
+        live = deck.get("coverage")
+        trend = history_trend(past.get(deck_id, []))
+        t = (f'<span class="up">{trend[1] - trend[0]:+.1f}pp</span> / {trend[2]}d'
+             if trend and trend[1] > trend[0] else
+             (f"{trend[1] - trend[0]:+.1f}pp / {trend[2]}d" if trend else "&mdash;"))
+        k = res["kanji_cov_occ"]
+        h.append(
+            f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}">'
+            f'{esc(deck_title(deck))}</a></td>'
+            f'<td class="num">{k:.1f}%</td>'
+            f'<td><span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
+            f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
+            f'<td class="num">{level_for(res["curve"], 95) or "&mdash;"}</td>'
+            f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
+            f'<td class="num">{t}</td></tr>')
+    h.append("</table></div>")
+
+    h.append("<h2>What each level would buy you</h2>")
+    h.append(svg_curves(curves, lvl))
+
+    h.append("<h2>Coverage over time</h2>")
+    h.append(svg_history(past, titles))
+
+    # Leeches: Apprentice items weighted by how often they block your titles.
+    subjects, assignments = cache["subjects"], cache["assignments"]
+    struggling = {s["characters"]: (assignments[sid], s["level"])
+                  for sid, s in subjects.items()
+                  if s["type"] == "kanji" and 1 <= assignments.get(sid, 0) <= 4}
+    occ: Counter[str] = Counter()
+    for _deck, res in rows:
+        occ.update(res["kanji_occ"])
+    leeches = sorted(((n, ch) + struggling[ch] for ch, n in occ.items()
+                      if ch in struggling and ch not in known["kanji_known"]),
+                     reverse=True)[:24]
+    h.append("<h2>Leeches blocking your reading</h2>")
+    if leeches:
+        h.append('<p class="sub">Apprentice kanji, ranked by how often they appear '
+                 'in the titles above. Already in your review queue.</p>')
+        h.append('<div class="wrap"><table><tr><th>kanji</th><th class="num">'
+                 'occurrences</th><th>stage</th><th class="num">wk level</th></tr>')
+        for n, ch, stage, klvl in leeches:
+            h.append(f'<tr><td class="kanji">{esc(ch)}</td>'
+                     f'<td class="num">{n:,}</td>'
+                     f'<td>{SRS_STAGE_NAMES.get(stage, "?")}</td>'
+                     f'<td class="num">{klvl}</td></tr>')
+        h.append("</table></div>")
+    else:
+        h.append('<p class="empty">Nothing in Apprentice shows up in your tracked '
+                 'titles.</p>')
+
+    if key and not args.no_recommend:
+        data = collect_status(args, key, cache, known)
+        h.append("<h2>Best titles for you right now</h2>")
+        h.append('<div class="wrap"><table><tr><th>type</th><th>title</th>'
+                 '<th class="num">coverage</th><th class="num">chars</th></tr>')
+        for label, recs in data["recommendations"]:
+            for d in recs:
+                h.append(
+                    f'<tr><td>{esc(label)}</td>'
+                    f'<td><a href="https://jiten.moe/decks/media/{d.get("deckId")}">'
+                    f'{esc(d.get("originalTitle") or d.get("englishTitle") or "?")}'
+                    f'</a></td>'
+                    f'<td class="num">{d.get("coverage") or 0}%</td>'
+                    f'<td class="num">{d.get("characterCount") or 0:,}</td></tr>')
+        h.append("</table></div>")
+        if data["gains"]:
+            h.append(f'<h2>Nearly within reach at level {data["target_level"]}</h2>')
+            h.append('<div class="wrap"><table><tr><th>title</th><th class="num">now'
+                     '</th><th class="num">then</th><th class="num">gain</th></tr>')
+            for gain, now, later, d in data["gains"]:
+                h.append(
+                    f'<tr><td><a href="https://jiten.moe/decks/media/'
+                    f'{d.get("deckId")}">'
+                    f'{esc(d.get("originalTitle") or d.get("englishTitle") or "?")}'
+                    f'</a></td><td class="num">{now:.1f}%</td>'
+                    f'<td class="num">{later:.1f}%</td>'
+                    f'<td class="num up">{gain:+.1f}pp</td></tr>')
+            h.append("</table></div>")
+
+    h.append('<footer>Kanji figures computed locally from Jiten word lists; '
+             'the jiten column is your account\'s own coverage. '
+             'Built by wkjiten.</footer></main>')
+
+    out = args.out or os.path.join(HERE, "report.html")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                + head + "</head><body>" + "".join(h) + "</body></html>")
+    print(f"\nwrote {out}")
+    if not args.no_open:
+        import webbrowser
+        webbrowser.open("file://" + os.path.abspath(out).replace("\\", "/"))
 
 
 def cmd_text(args) -> None:
@@ -812,6 +1325,30 @@ def main() -> None:
                                        "(default: decks.txt)")
     s.add_argument("--out")
     s.set_defaults(func=cmd_batch)
+
+    s = subparser("leeches", help="Apprentice items ranked by what they block")
+    s.add_argument("deck_ids", nargs="*", type=int)
+    s.add_argument("--deck-file", help="file of deck ids (default: decks.txt)")
+    s.add_argument("--search", help="use every deck matching this title filter")
+    s.add_argument("--limit", type=int, default=25)
+    s.add_argument("--max-stage", type=int, default=4,
+                   help="highest SRS stage still counted as a leech (4=Apprentice IV)")
+    s.set_defaults(func=cmd_leeches)
+
+    s = subparser("report", help="write an HTML dashboard and open it")
+    s.add_argument("deck_ids", nargs="*", type=int)
+    s.add_argument("--deck-file", help="file of deck ids (default: decks.txt)")
+    s.add_argument("--search", help="use every deck matching this title filter")
+    s.add_argument("--limit", type=int, default=25)
+    s.add_argument("--out", help="output path (default: report.html)")
+    s.add_argument("--no-open", action="store_true", help="do not open a browser")
+    s.add_argument("--no-recommend", action="store_true",
+                   help="skip the recommendation sections (faster)")
+    s.add_argument("--top-n", type=int, default=5)
+    s.add_argument("--soon-levels", type=int, default=5)
+    s.add_argument("--soon-limit", type=int, default=6)
+    s.add_argument("--soon-pool", type=int, default=4)
+    s.set_defaults(func=cmd_report)
 
     s = subparser("status", help="progress since last run + what to read next")
     s.add_argument("--top-n", type=int, default=5,

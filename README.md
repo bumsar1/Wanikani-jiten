@@ -10,6 +10,8 @@ different things:
 | `export` + `push` | Your WaniKani words become "known words" on Jiten, so the coverage column, filters and sorting on **jiten.moe work for you** | on the website |
 | `deck` / `batch` | **Kanji** coverage per deck — what wanilog's read-check measures — plus the WaniKani level you need to hit 95% / 98% | in the terminal |
 | `status` | Progress since your last run, the best titles for you right now per media type, and what comes within reach as you level | in the terminal |
+| `leeches` | The Apprentice items you keep failing, ranked by how often they actually block the titles you want to read | in the terminal |
+| `report` | All of the above as one self-contained HTML page with charts | in your browser |
 
 The vocabulary figure will look modest (WaniKani teaches ~6,500 words) while the
 kanji figure runs high. Both are true; they just measure from different angles.
@@ -22,13 +24,16 @@ Python 3.9+ and the standard library. No pip install.
 
 Once your keys are in place (see below), you never have to touch a terminal:
 
-* **Windows** — `Opdater coverage.bat`
-* **macOS** — `Opdater coverage.command`
+* **Windows** — `Update coverage.bat`
+* **macOS** — `Update coverage.command`
 
 It re-fetches your WaniKani data, sends the word list to jiten.moe, prints
-coverage for every title in `decks.txt`, and finishes with a status overview:
+coverage for every title in `decks.txt`, lists the leeches that are holding you
+back, and opens an HTML dashboard showing:
 
 * **how many new kanji and words** you have learned since the last run, and which
+* **coverage per tracked title**, with the trend since you started measuring
+* **what each WaniKani level would buy you** on those titles, as a curve
 * **top 5 titles per media type** — novels, visual novels, anime, manga, games —
   ranked by your actual coverage
 * **what is nearly within reach**: titles just below that list, with kanji
@@ -163,6 +168,48 @@ python wkjiten.py status --soon-limit 0     # skip the projection entirely
 
 ---
 
+## 4) Leeches that actually block your reading
+
+```bash
+python wkjiten.py leeches
+```
+
+WaniKani ranks leeches by how often you fail them, which says nothing about
+whether the item matters for the books you want to read. This crosses your SRS
+stage with occurrence counts in your tracked titles:
+
+```
+These 20 Apprentice kanji account for 35,402 of the 537,994 kanji occurrences
+you cannot read yet - 6.6% of the gap, sitting in items you have already unlocked.
+
+  occur  kanji  stage             lvl  appears in
+  11887  言     Apprentice III      5  ONE PIECE, 進撃の巨人 +11
+   3719  持     Apprentice IV       9  ONE PIECE, 魔女の宅急便 +10
+```
+
+Both APIs are needed for this and neither site can do it alone: WaniKani knows
+your SRS stage, Jiten knows the frequencies, and only the two together tell you
+which review is worth the most reading.
+
+---
+
+## 5) The HTML dashboard
+
+```bash
+python wkjiten.py report              # writes report.html and opens it
+python wkjiten.py report --no-open    # just write the file
+```
+
+One self-contained page — no external scripts, fonts or trackers, and it follows
+your system's light/dark setting. It holds the tracked-title table with progress
+trends, an SVG curve of what every WaniKani level would give you on each title,
+coverage over time once you have two days of history, the leech table, and the
+recommendations.
+
+Coverage history is appended to `cache/history.csv`, one row per title per day.
+
+---
+
 Arbitrary text, like wanilog's read-check:
 
 ```bash
@@ -183,6 +230,9 @@ python wkjiten.py text chapter1.txt
 --top-n N            titles per media type in status (default 5)
 --soon-levels N      how many levels ahead status projects (default 5)
 --soon-limit N       candidate titles status analyses (default 6, 0=off)
+--max-stage N        highest SRS stage still counted as a leech (default 4)
+--no-open            report: do not launch a browser
+--no-recommend       report: skip the recommendation sections (faster)
 ```
 
 Flags work both before and after the subcommand.
@@ -204,6 +254,10 @@ it gives you the occurrence weighting for free.
 `POST /api/user/vocabulary/import-from-anki-txt` takes the txt file, and
 `get-media-decks?sortBy=coverage` ranks the library by your own coverage.
 300 requests/min, 10/min on the heavy endpoints — hence `--sleep`.
+
+Deck word lists are cached in `cache/decks/`, keyed on the deck's own
+`lastUpdate` stamp, so repeat runs cost nothing until Jiten re-parses a title.
+Delete the folder to force a refetch.
 
 ## Caveats
 
