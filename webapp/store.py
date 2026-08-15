@@ -164,7 +164,8 @@ def init() -> None:
         scols = {r["name"] for r in con.execute("PRAGMA table_info(shared_lists)")}
         if "kanji_cov" not in scols:
             con.execute("ALTER TABLE shared_lists ADD COLUMN kanji_cov REAL")
-        for col, decl in (("bio", "TEXT"), ("avatar", "BLOB"),
+        for col, decl in (("bio", "TEXT"), ("currently", "INTEGER"),
+                          ("avatar", "BLOB"),
                           ("avatar_type", "TEXT"), ("banner", "BLOB"),
                           ("banner_type", "TEXT")):
             if col not in cols:
@@ -348,7 +349,7 @@ def all_usernames() -> list[dict]:
 def sharing_users() -> list[dict]:
     with db() as con:
         rows = con.execute(
-            "SELECT u.id, u.username, u.bio,"
+            "SELECT u.id, u.username, u.bio, u.currently,"
             " u.avatar IS NOT NULL AS has_avatar,"
             " u.banner IS NOT NULL AS has_banner,"
             " (SELECT COUNT(*) FROM shared_lists s WHERE s.user_id = u.id) AS titles,"
@@ -597,7 +598,26 @@ def set_bio(user_id: int, bio: str) -> None:
 
 def get_profile(user_id: int) -> dict:
     with db() as con:
-        row = con.execute("SELECT username, bio, avatar IS NOT NULL AS has_avatar,"
+        row = con.execute("SELECT username, bio, currently,"
+                          " avatar IS NOT NULL AS has_avatar,"
                           " banner IS NOT NULL AS has_banner FROM users"
                           " WHERE id = ?", (user_id,)).fetchone()
     return dict(row) if row else {}
+
+
+def set_currently(user_id: int, deck_id) -> None:
+    """The one title you are on right now, shown large. None clears it."""
+    with db() as con:
+        con.execute("UPDATE users SET currently = ? WHERE id = ?",
+                    (int(deck_id) if deck_id else None, user_id))
+
+
+def currently_of(user_id: int):
+    """The featured title, but only while it is still on a shared list -
+    otherwise removing something from jiten.moe would leave it stranded here."""
+    with db() as con:
+        row = con.execute(
+            "SELECT s.* FROM users u JOIN shared_lists s"
+            " ON s.user_id = u.id AND s.deck_id = u.currently"
+            " WHERE u.id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None

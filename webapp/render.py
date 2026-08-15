@@ -217,6 +217,18 @@ TOGETHER_CSS = """
 .addbtn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
 .addbtn:disabled { opacity:.5; cursor:default; }
 .addbtn.done { color:var(--good); border-color:var(--good); }
+.nowplaying { display:flex; gap:16px; align-items:center; padding:16px 18px;
+  border-bottom:1px solid var(--line); background:var(--accent-soft); }
+.nowplaying img { width:64px; height:90px; object-fit:cover; border-radius:6px;
+  flex:none; background:var(--line); box-shadow:var(--shadow); }
+.nowplaying .lbl { font:650 10px/1 var(--sans, sans-serif); letter-spacing:.11em;
+  text-transform:uppercase; color:var(--accent); }
+.nowplaying h4 { margin:5px 0 4px; font-size:19px; line-height:1.25;
+  letter-spacing:-.015em; font-weight:640; }
+.nowplaying .covs { display:flex; gap:10px; }
+.vs { display:inline-flex; gap:6px; align-items:baseline; margin-left:8px;
+  font-size:12px; color:var(--faint); white-space:nowrap; }
+.vs b { color:var(--accent); font-variant-numeric:tabular-nums; }
 .titlelist .both { color:var(--accent); font-weight:600; }
 .overlap { background:var(--accent-soft); border:1px solid var(--line);
   border-radius:14px; padding:4px 18px 14px; margin-bottom:8px; }
@@ -319,8 +331,13 @@ w_labels = {
 }
 
 
-def profile_panel(profile: dict, user) -> str:
-    """Picture, banner and a line about yourself. All optional, all removable."""
+def profile_panel(profile: dict, user, choices=None) -> str:
+    """Picture, banner, a line about yourself and the title you are on now.
+    All optional, all removable."""
+    now = profile.get("currently")
+    options = '<option value="">nothing in particular</option>' + "".join(
+        f'<option value="{c["deck_id"]}"{" selected" if c["deck_id"] == now else ""}>'
+        f'{esc(c["title"])}</option>' for c in (choices or []))
     return f"""
       <div class="sharebox">
         <form method="post" action="/profile" enctype="multipart/form-data"
@@ -335,6 +352,8 @@ def profile_panel(profile: dict, user) -> str:
           </div>
           <input type="text" name="bio" maxlength="160" value="{esc(profile.get("bio") or "")}"
                  placeholder="A line about yourself, if you like">
+          <label class="statsbox" style="gap:10px">Currently
+            <select name="currently">{options}</select></label>
           <div class="row2">
             <label>Picture<br><input type="file" name="avatar"
               accept="image/png,image/jpeg,image/gif,image/webp"></label>
@@ -353,12 +372,14 @@ def profile_panel(profile: dict, user) -> str:
 
 def together_page(user, visibility, token, base_url, people, by_user, overlap,
                   absent, share_stats=False, profile=None, can_add=False,
-                  note="") -> str:
+                  note="", featured=None) -> str:
+    featured = featured or {}
     head = share_panel(visibility, token, base_url, user["username"], share_stats)
-    head += profile_panel(profile or {}, user)
+    head += profile_panel(profile or {}, user,
+                          by_user.get(user["id"], {}).get("ongoing", []))
     if note:
         head = f'<div class="ok">{esc(note)}</div>' + head
-    mine = {r["deck_id"] for st in by_user.get(user["id"], {}).values()
+    mine = {r["deck_id"]: r for st in by_user.get(user["id"], {}).values()
             for r in st}
 
     cards = []
@@ -375,13 +396,20 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
                 # Only worth offering for someone else's titles, and only when
                 # you have a Jiten key to add it with.
                 add = ""
+                # If you have the same title, put the two figures side by side.
+                versus = ""
+                ours = mine.get(it["deck_id"])
+                if ours is not None and p["id"] != user["id"] and ours.get("coverage"):
+                    versus = (f'<span class="vs">you <b>{ours["coverage"]:.0f}%</b>'
+                              f'</span>')
                 if can_add and p["id"] != user["id"] and it["deck_id"] not in mine:
                     add = (f'<button class="addbtn" data-add="{it["deck_id"]}"'
                            f' title="Add to your plan to watch/read">+ my list</button>')
                 lis += (
                     f'<li><span class="{"both" if it["deck_id"] in overlap else ""}">'
                     f'<a href="https://jiten.moe/decks/media/{it["deck_id"]}/detail"'
-                    f' target="_blank" rel="noopener">{esc(it["title"])}</a>{add}</span>'
+                    f' target="_blank" rel="noopener">{esc(it["title"])}</a>'
+                    f'{versus}{add}</span>'
                     f'<span class="covs">{cov_cells(it)}</span></li>')
             more = (f'<li class="who-has">and {len(items) - 30} more</li>'
                     if len(items) > 30 else "")
@@ -401,6 +429,7 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
                  + '</div></div>')
         cards.append(
             f'<div class="person">{top}{idbar}'
+            f'{now_playing(featured.get(p["id"]))}'
             f'{"".join(groups) or "<div class=group><p class=empty>Nothing yet.</p></div>"}</div>')
 
     overlap_html = ""
@@ -460,6 +489,18 @@ def avatar_tag(user_id: int, has: bool, name: str, cls: str = "avatar") -> str:
     return f'<div class="{cls} blank" aria-hidden="true">{esc(name[:1].upper())}</div>'
 
 
+def now_playing(item, label="Currently") -> str:
+    if not item:
+        return ""
+    return (f'<div class="nowplaying">'
+            f'<img loading="lazy" alt="" src="{w.cover_url(item["deck_id"])}"'
+            f' onerror="this.style.visibility=\'hidden\'">'
+            f'<div><div class="lbl">{esc(label)}</div>'
+            f'<h4><a href="https://jiten.moe/decks/media/{item["deck_id"]}/detail"'
+            f' target="_blank" rel="noopener">{esc(item["title"])}</a></h4>'
+            f'<span class="covs">{cov_cells(item)}</span></div></div>')
+
+
 def cov_cells(it) -> str:
     """Words as jiten measures them, kanji as WaniKani reaches them.
 
@@ -472,7 +513,8 @@ def cov_cells(it) -> str:
             f'<span class="cov kanjicov">{kanji} kanji</span>')
 
 
-def public_profile(owner, profile: dict, stats, lists, base_url: str) -> str:
+def public_profile(owner, profile: dict, stats, lists, base_url: str,
+                   featured=None) -> str:
     """The read-only view behind a share link. No login, no navigation."""
     username = owner["username"]
     groups = []
@@ -532,7 +574,8 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str) -> str:
         {f'<p class="bio" style="margin-top:10px">{esc(profile["bio"])}</p>' if profile.get("bio") else ""}
       </div>
       {cards}
-      <div class="person" style="max-width:620px">{inner}</div>
+      <div class="person" style="max-width:620px">
+        {now_playing(featured)}{inner}</div>
       <footer style="max-width:620px">Word coverage is how much of each title's
       vocabulary {esc(username)} already knows, measured by
       <a href="https://jiten.moe" target="_blank" rel="noopener">jiten.moe</a>.

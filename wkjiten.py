@@ -851,6 +851,12 @@ def jimaku_url(deck: dict, key: str | None = None) -> str | None:
     return f"https://jimaku.cc/entry/{entry}" if entry else None
 
 
+def cover_url(deck_id) -> str:
+    """Jiten's cover art for a title. The path is predictable from the id, so a
+    thumbnail costs no extra request."""
+    return f"https://cdn.jiten.moe/{deck_id}/cover.jpg"
+
+
 def deck_title(deck: dict) -> str:
     return (deck.get("originalTitle") or deck.get("englishTitle")
             or deck.get("romajiTitle") or "?")
@@ -1849,6 +1855,9 @@ a.go.dl { text-decoration:none; border:1px solid var(--accent);
 a.go.dl:hover { filter:brightness(1.08); color:#fff; }
 .subsbox td:first-child { min-width:16em; font-weight:400; font-size:13px;
   word-break:break-word; }
+td.withcover { display:flex; gap:10px; align-items:center; }
+img.cover { width:34px; height:48px; object-fit:cover; border-radius:4px;
+  flex:none; background:var(--line); }
 """
 
 # Works in the saved file too: the curves are already embedded, so dragging the
@@ -1982,7 +1991,10 @@ REACH_JS = """
 
   const planCell = id => `<td class="acts"><button data-track="${id}"
     data-status="1">plan to watch/read</button></td>`;
-  const titleCell = r => `<td><a href="https://jiten.moe/decks/media/${r.deckId}/detail"
+  const titleCell = r => `<td class="withcover"><img class="cover" loading="lazy"
+    alt="" src="https://cdn.jiten.moe/${r.deckId}/cover.jpg"
+    onerror="this.style.visibility='hidden'">
+    <a href="https://jiten.moe/decks/media/${r.deckId}/detail"
     target="_blank" rel="noopener">${r.originalTitle || r.englishTitle || '?'}</a></td>`;
 
   function wire(box){
@@ -2574,7 +2586,10 @@ function render(){
           '<th class="num">difficulty</th><th class="num">your coverage</th>' +
           '<th></th></tr>';
   for (const d of lastRows.slice(0, 40)){
-    h += `<tr><td><a href="https://jiten.moe/decks/media/${d.deckId}/detail"
+    h += `<tr><td class="withcover"><img class="cover" loading="lazy" alt=""
+            src="https://cdn.jiten.moe/${d.deckId}/cover.jpg"
+            onerror="this.style.visibility='hidden'">
+          <a href="https://jiten.moe/decks/media/${d.deckId}/detail"
           target="_blank" rel="noopener">${esc(title(d))}</a></td>
           <td>${esc(WK.types[d.mediaType] || '?')}</td>
           <td class="num">${(d.characterCount||0).toLocaleString()}</td>

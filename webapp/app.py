@@ -355,7 +355,9 @@ def together():
                                 store.shares_stats(user["id"]),
                                 store.get_profile(user["id"]),
                                 bool(creds_of(user).get("jiten_key")),
-                                request.args.get("note", ""))
+                                request.args.get("note", ""),
+                                {p["id"]: store.currently_of(p["id"])
+                                 for p in people})
 
 
 @app.post("/together/share")
@@ -378,6 +380,7 @@ def set_sharing():
 def save_profile():
     user = require_login()
     store.set_bio(user["id"], request.form.get("bio", ""))
+    store.set_currently(user["id"], request.form.get("currently") or None)
     problems = []
     for kind in ("avatar", "banner"):
         if request.form.get(f"clear_{kind}") == "1":
@@ -426,7 +429,8 @@ def _public_view(owner):
                      "as_of": (snap.get("fetched_at") or "")[:10]}
     return render.public_profile(owner, profile, stats,
                                  store.lists_of(owner["id"]),
-                                 request.url_root.rstrip("/"))
+                                 request.url_root.rstrip("/"),
+                                 store.currently_of(owner["id"]))
 
 
 @app.get("/s/<token>")
