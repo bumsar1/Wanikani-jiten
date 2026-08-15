@@ -731,10 +731,10 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
     done = extras.get("finished") or []
     h.append(h2("Finished"))
     if done:
-        h.append(f'<p class="sub">{len(done)} titles you have been through. Not '
-                 f'analysed - you are done with them, and each would cost a '
-                 f'word-list download - but they are what <b>Because you know '
-                 f'these</b> works from.</p>')
+        n = len(done)
+        h.append(f'<p class="sub">{n} title{"" if n == 1 else "s"} you have '
+                 f'finished. No coverage is worked out for these &mdash; you are '
+                 f'done with them.</p>')
         h.append('<div class="wrap"><table class="sortable"><tr><th>title</th>'
                  '<th class="num">chars</th>'
                  '<th class="num">jiten coverage</th></tr>')

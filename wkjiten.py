@@ -1967,9 +1967,9 @@ SLIDER_HTML = """
   <input id="lvl" type="range" min="1" max="60">
   <span id="eta" class="pill"></span>
 </div>
-<div class="wrap"><table id="whatif"><tr><th>title</th>
+<div class="wrap"><table id="whatif" class="tight"><tr><th>title</th>
   <th class="num">now</th><th class="num">then</th><th class="num">gain</th>
-  <th></th></tr></table></div>
+  </tr></table></div>
 """
 
 SLIDER_JS = """
@@ -1996,12 +1996,11 @@ SLIDER_JS = """
       const then = t.c[lv-1], gain = then - t.now;
       rows += `<tr><td>${t.t}</td><td class="num">${t.now.toFixed(1)}%</td>
         <td class="num">${then.toFixed(1)}%</td>
-        <td class="num up">+${gain.toFixed(1)}pp</td>
-        <td><span class="meter"><i style="width:${then.toFixed(1)}%"></i></span></td></tr>`;
+        <td class="num up">+${gain.toFixed(1)}pp</td></tr>`;
     }
     document.getElementById('whatif').innerHTML =
       `<tr><th>title</th><th class="num">now</th><th class="num">at that level</th>
-       <th class="num">gain</th><th></th></tr>` + rows;
+       <th class="num">gain</th></tr>` + rows;
   }
   slider.addEventListener('input', draw);
   draw();
@@ -2771,9 +2770,9 @@ async function showPage(p){
 function render(){
   if (!lastRows.length){ $('#results').innerHTML =
     '<p class="empty">Nothing matched.</p>'; return; }
-  let h = '<table><tr><th>title</th><th>type</th><th class="num">chars</th>' +
-          '<th class="num">difficulty</th><th class="num">your coverage</th>' +
-          '<th></th></tr>';
+  let h = '<table class="sortable tight"><tr><th>title</th><th>type</th>' +
+          '<th class="num">chars</th><th class="num">diff</th>' +
+          '<th class="num">coverage</th><th></th></tr>';
   for (const d of lastRows){
     h += `<tr><td class="withcover"><span class="ct"><img class="cover"
             loading="lazy" alt=""
@@ -2786,10 +2785,12 @@ function render(){
           <td class="num">${d.difficulty ?? '—'}</td>
           <td class="num">${d.coverage != null ? d.coverage + '%' : '—'}</td>
           <td class="acts"><button data-when="${d.deckId}">when?</button>
-            <button data-track="${d.deckId}" data-status="2">watching/reading</button>
-            <button data-track="${d.deckId}" data-status="1">plan to watch/read</button>
-            <button data-track="${d.deckId}" data-status="3">finished</button>
-            </td></tr>`;
+            <select class="setlist" data-track="${d.deckId}">
+              <option value="">add to&hellip;</option>
+              <option value="2">watching/reading</option>
+              <option value="1">plan to watch/read</option>
+              <option value="3">finished</option>
+            </select></td></tr>`;
   }
   const pages = Math.max(1, Math.ceil(total / PER));
   const pager = `<div class="pager">
@@ -2801,28 +2802,36 @@ function render(){
   $('#results').innerHTML = h + '</table>' + (total > PER ? pager : '');
   document.querySelectorAll('#results [data-when]').forEach(b =>
     b.onclick = () => analyse(+b.dataset.when, b));
-  document.querySelectorAll('#results [data-track]').forEach(b =>
-    b.onclick = () => track(+b.dataset.track, +b.dataset.status, b));
+  document.querySelectorAll('#results select[data-track]').forEach(sel =>
+    sel.onchange = () => {
+      if (sel.value) track(+sel.dataset.track, +sel.value, sel);
+    });
   document.querySelectorAll('#results [data-page]').forEach(b =>
     b.onclick = () => showPage(+b.dataset.page));
 }
 
 // Puts the title on your Jiten list, which is also what makes the next run
 // pick it up automatically.
-async function track(id, status, btn){
-  const was = btn.textContent;
-  btn.disabled = true; btn.textContent = 'saving…';
+async function track(id, status, el){
+  const isSelect = el.tagName === 'SELECT';
+  const was = isSelect ? '' : el.textContent;
+  const label = txt => {
+    if (isSelect) el.options[0].textContent = txt;
+    else el.textContent = txt;
+  };
+  el.disabled = true; label('saving…');
   try {
     const r = await fetch(`/api/user/deck-preferences/${id}/status`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({status})});
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    btn.textContent = {2: 'watching/reading ✓', 1: 'planned ✓',
-                       3: 'finished ✓'}[status] || 'saved ✓';
-    btn.classList.add('done');
+    label({2: 'watching/reading ✓', 1: 'planned ✓',
+           3: 'finished ✓'}[status] || 'saved ✓');
+    el.classList.add('done');
+    if (isSelect) el.selectedIndex = 0;
   } catch (e){
-    btn.textContent = 'failed'; btn.disabled = false;
-    setTimeout(() => { btn.textContent = was; }, 2000);
+    label('failed'); el.disabled = false;
+    setTimeout(() => { label(isSelect ? 'add to…' : was); }, 2000);
   }
 }
 
@@ -2954,7 +2963,12 @@ button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent);
 button:disabled { opacity:.55; cursor:default; }
 button.done { color:var(--good); border-color:var(--good); }
 td.acts { white-space:nowrap; text-align:right; }
-td.acts button { margin-left:5px; }
+td.acts button, td.acts select { margin-left:5px; }
+select.setlist { font:inherit; font-size:12px; padding:4px 8px; border-radius:99px;
+  border:1px solid var(--line); background:var(--bg); color:var(--muted);
+  max-width:11em; }
+select.setlist:hover { border-color:var(--accent); color:var(--accent); }
+select.setlist.done { color:var(--good); border-color:var(--good); }
 #detail:not(:empty) { margin-top:34px; padding-top:6px;
   border-top:2px solid var(--accent); }
 """
@@ -3073,10 +3087,12 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
 
     if finished:
         h.append(h2("Finished"))
-        h.append(f'<p class="sub">{len(finished)} titles you have been through. '
-                 f'These are not analysed - they cost a word-list download each '
-                 f'and you are done with them - but they are what '
-                 f'<b>Because you know these</b> works from.</p>')
+        n = len(finished)
+        h.append(f'<p class="sub">{n} title{"" if n == 1 else "s"} you have '
+                 f'finished. No coverage is worked out for these &mdash; you are '
+                 f'done with them. They are what <b>Because you know these</b> '
+                 f'compares against, so the more you mark, the better those '
+                 f'suggestions get.</p>')
         h.append('<div class="wrap"><table class="sortable"><tr><th>title</th>'
                  '<th>type</th><th class="num">chars</th>'
                  '<th class="num">jiten coverage</th></tr>')
