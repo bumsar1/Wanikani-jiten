@@ -350,12 +350,22 @@ every WaniKani level would give you on each title, coverage over time once you
 have two days of history, the leech table, and the recommendations. No external
 scripts, fonts or trackers, and it follows your system's light/dark setting.
 
+Both also carry a **level slider**: drag it and every tracked title's coverage
+updates to what it would be at that level, with how far off that is at your pace.
+The curves are embedded in the page, so this works offline in the saved file too.
+
 `serve` adds a **search box for the whole jiten.moe catalogue**. Filter by type,
 sort by your own coverage, then hit *when?* on any title and it works out — right
 there — the kanji coverage you have now, what finishing your current level adds,
 and which level and roughly which month each threshold lands on. Same numbers as
-`wkjiten when`, no terminal needed. It also saves the static `report.html` on the
-way up, so you keep a dashboard after stopping the server.
+`wkjiten when`, no terminal needed.
+
+Each result also has **reading** and **plan** buttons that set the status on your
+Jiten account, which is what makes the next run pick the title up. Find something,
+mark it, done — no config file, no second tab.
+
+`serve` saves the static `report.html` on the way up, so you keep a dashboard
+after stopping the server.
 
 **Why a server at all?** api.jiten.moe sends no CORS headers, so a page opened
 from `file://` is not allowed by the browser to read its responses — live search

@@ -1566,59 +1566,168 @@ def svg_history(past: dict[int, list[dict]], titles: dict[int, str],
 
 
 REPORT_CSS = """
-:root { --bg:#fbfaf8; --fg:#1c1a17; --muted:#6b6660; --line:#e3ded6;
-        --card:#fff; --accent:#c2410c; }
+:root {
+  --bg:#faf8f5; --raise:#fff; --fg:#1a1815; --muted:#6f6961; --faint:#948d84;
+  --line:#e6e0d7; --line-soft:#f0ebe4; --accent:#c2410c; --accent-soft:#fdf1e9;
+  --good:#15803d; --shadow:0 1px 2px rgba(60,50,40,.05),0 4px 16px rgba(60,50,40,.05);
+}
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#171614; --fg:#eae7e2; --muted:#a09a92; --line:#332f2a;
-          --card:#211f1c; --accent:#fb923c; }
+  :root {
+    --bg:#141312; --raise:#1e1c1a; --fg:#ece9e4; --muted:#9c958c; --faint:#736c64;
+    --line:#302c28; --line-soft:#252220; --accent:#fb923c; --accent-soft:#2a1d13;
+    --good:#4ade80; --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);
+  }
 }
 * { box-sizing:border-box; }
-body { margin:0; padding:32px 20px 64px; background:var(--bg); color:var(--fg);
-  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
-main { max-width:860px; margin:0 auto; }
-h1 { font-size:26px; margin:0 0 4px; letter-spacing:-.01em; }
-h2 { font-size:17px; margin:40px 0 12px; letter-spacing:-.01em; }
-.sub { color:var(--muted); margin:0 0 28px; }
-.cards { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 8px; }
-.card { flex:1 1 150px; background:var(--card); border:1px solid var(--line);
-  border-radius:10px; padding:14px 16px; }
-.card .n { font-size:24px; font-weight:600; letter-spacing:-.02em; }
-.card .l { color:var(--muted); font-size:12px; text-transform:uppercase;
-  letter-spacing:.06em; }
-.card .d { color:var(--accent); font-size:13px; font-weight:600; }
-.wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
-table { border-collapse:collapse; width:100%; font-size:14px; min-width:520px; }
-th { text-align:left; font-weight:600; color:var(--muted); font-size:12px;
-  text-transform:uppercase; letter-spacing:.05em; padding:0 10px 6px 0;
-  border-bottom:1px solid var(--line); white-space:nowrap; }
-td { padding:7px 10px 7px 0; border-bottom:1px solid var(--line);
+html { scroll-behavior:smooth; }
+body { margin:0; padding:0 0 80px; background:var(--bg); color:var(--fg);
+  font:15px/1.6 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",
+       system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;
+  -webkit-font-smoothing:antialiased; }
+main { max-width:920px; margin:0 auto; padding:0 22px; }
+
+/* header */
+.hero { border-bottom:1px solid var(--line); margin-bottom:28px;
+  padding:44px 0 26px; position:relative; }
+.hero::before { content:""; position:absolute; top:0; left:0; right:0; height:3px;
+  background:linear-gradient(90deg,var(--accent),transparent 70%); }
+h1 { font-size:clamp(26px,4vw,34px); margin:0 0 6px; letter-spacing:-.022em;
+  font-weight:640; }
+h1 span { color:var(--accent); }
+h2 { font-size:13px; margin:52px 0 14px; letter-spacing:.09em; font-weight:650;
+  text-transform:uppercase; color:var(--muted);
+  border-bottom:1px solid var(--line-soft); padding-bottom:8px; }
+h3 { font-size:20px; margin:0 0 4px; letter-spacing:-.015em; font-weight:620; }
+.sub { color:var(--muted); margin:0 0 20px; font-size:14px; }
+.sub:last-child { margin-bottom:0; }
+
+/* jump nav */
+nav { display:flex; flex-wrap:wrap; gap:6px; margin:-6px 0 6px; }
+nav a { font-size:12.5px; color:var(--muted); padding:5px 11px; border:0;
+  border-radius:99px; background:var(--raise); box-shadow:var(--shadow); }
+nav a:hover { color:var(--accent); }
+
+/* stat cards */
+.cards { display:grid; gap:12px; margin:0 0 10px;
+  grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); }
+.card { background:var(--raise); border:1px solid var(--line); border-radius:14px;
+  padding:16px 18px; box-shadow:var(--shadow); }
+.card .n { font-size:29px; font-weight:640; letter-spacing:-.03em; line-height:1.1;
+  font-variant-numeric:tabular-nums; }
+.card .l { color:var(--faint); font-size:11px; text-transform:uppercase;
+  letter-spacing:.08em; margin-top:3px; font-weight:600; }
+.card .d { color:var(--accent); font-size:12.5px; font-weight:650; margin-top:5px; }
+
+/* tables */
+.wrap { overflow-x:auto; -webkit-overflow-scrolling:touch;
+  background:var(--raise); border:1px solid var(--line); border-radius:14px;
+  box-shadow:var(--shadow); }
+table { border-collapse:collapse; width:100%; font-size:14px; min-width:540px; }
+th { text-align:left; font-weight:650; color:var(--faint); font-size:10.5px;
+  text-transform:uppercase; letter-spacing:.07em; padding:13px 14px 9px;
+  border-bottom:1px solid var(--line); white-space:nowrap;
+  background:var(--raise); position:sticky; top:0; }
+td { padding:11px 14px; border-bottom:1px solid var(--line-soft);
   vertical-align:middle; }
+tr:last-child td { border-bottom:0; }
+tbody tr:hover td, table tr:hover td { background:var(--accent-soft); }
 td.num, th.num { text-align:right; font-variant-numeric:tabular-nums;
   white-space:nowrap; }
-td:first-child { min-width:11em; }
-td.kanji { min-width:auto; }
+td:first-child { min-width:11em; font-weight:520; }
+td.kanji { min-width:auto; font-size:26px; line-height:1; font-weight:400; }
 a { color:inherit; text-decoration:none; border-bottom:1px solid var(--line); }
-a:hover { border-bottom-color:var(--accent); }
-.meter { display:block; width:110px; height:7px; background:var(--line);
-  border-radius:4px; overflow:hidden; }
-.meter i { display:block; height:100%; background:var(--accent); }
-.up { color:#15803d; font-weight:600; }
-.chart { width:100%; height:auto; display:block; margin:4px 0 8px; }
-.grid { stroke:var(--line); stroke-width:1; }
-.you { stroke:var(--accent); stroke-width:1; stroke-dasharray:3 3; }
-.tick, .legend { fill:var(--muted); font-size:11px; }
-.legend { fill:var(--fg); }
-.kanji { font-size:19px; }
-.empty { color:var(--muted); font-style:italic; }
-footer { color:var(--muted); font-size:12px; margin-top:44px;
-  border-top:1px solid var(--line); padding-top:14px; }
+a:hover { border-bottom-color:var(--accent); color:var(--accent); }
+
+/* bits */
+.meter { display:block; width:96px; height:6px; background:var(--line);
+  border-radius:99px; overflow:hidden; }
+.meter i { display:block; height:100%; border-radius:99px;
+  background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 60%,#e879f9)); }
+.up { color:var(--good); font-weight:640; }
+.pill { display:inline-block; font-size:11px; padding:2px 9px; border-radius:99px;
+  background:var(--accent-soft); color:var(--accent); font-weight:620;
+  white-space:nowrap; }
+.chart { width:100%; height:auto; display:block; padding:14px 4px 4px; }
+.grid { stroke:var(--line-soft); stroke-width:1; }
+.you { stroke:var(--accent); stroke-width:1.5; stroke-dasharray:4 4; }
+.tick { fill:var(--faint); font-size:11px; }
+.legend { fill:var(--fg); font-size:11px; }
+.empty { color:var(--faint); font-style:italic; padding:18px; margin:0; }
+footer { color:var(--faint); font-size:12px; margin-top:56px;
+  border-top:1px solid var(--line); padding-top:16px; }
+@media (max-width:640px) {
+  main { padding:0 14px; }
+  .hero { padding:30px 0 20px; }
+  h2 { margin-top:38px; }
+}
 """
 
 
 BROWSE_SLOT = "<!--browse-->"
+NAV_SLOT = "<!--nav-->"
+
+# Works in the saved file too: the curves are already embedded, so dragging the
+# slider needs no network at all.
+SLIDER_HTML = """
+<div class="slider">
+  <label for="lvl">If I were level <b id="lvlout"></b></label>
+  <input id="lvl" type="range" min="1" max="60">
+  <span id="eta" class="pill"></span>
+</div>
+<div class="wrap"><table id="whatif"><tr><th>title</th>
+  <th class="num">now</th><th class="num">then</th><th class="num">gain</th>
+  <th></th></tr></table></div>
+"""
+
+SLIDER_JS = """
+(function(){
+  const slider = document.getElementById('lvl');
+  // TRACK is a top-level `const` in a sibling script: script-scoped, so it is
+  // reachable by name but never a property of window.
+  if (!slider || typeof TRACK === 'undefined' || !TRACK.titles.length) return;
+  slider.min = TRACK.level; slider.value = Math.min(60, TRACK.level + 8);
+  function draw(){
+    const lv = +slider.value;
+    document.getElementById('lvlout').textContent = lv;
+    const away = lv - TRACK.level;
+    const eta = document.getElementById('eta');
+    if (away <= 0) eta.textContent = 'where you are now';
+    else if (TRACK.pace){
+      const d = away * TRACK.pace;
+      eta.textContent = (d < 60 ? `~${Math.round(d/7)} weeks`
+                       : d < 730 ? `~${Math.round(d/30.4)} months`
+                       : `~${(d/365).toFixed(1)} years`) + ' away';
+    } else eta.textContent = away + ' levels away';
+    let rows = '';
+    for (const t of TRACK.titles){
+      const then = t.c[lv-1], gain = then - t.now;
+      rows += `<tr><td>${t.t}</td><td class="num">${t.now.toFixed(1)}%</td>
+        <td class="num">${then.toFixed(1)}%</td>
+        <td class="num up">+${gain.toFixed(1)}pp</td>
+        <td><span class="meter"><i style="width:${then.toFixed(1)}%"></i></span></td></tr>`;
+    }
+    document.getElementById('whatif').innerHTML =
+      `<tr><th>title</th><th class="num">now</th><th class="num">at that level</th>
+       <th class="num">gain</th><th></th></tr>` + rows;
+  }
+  slider.addEventListener('input', draw);
+  draw();
+})();
+"""
+
+SLIDER_CSS = """
+.slider { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  background:var(--raise); border:1px solid var(--line); border-radius:14px;
+  padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow); }
+.slider label { font-size:14px; color:var(--muted); white-space:nowrap; }
+.slider label b { color:var(--accent); font-size:17px;
+  font-variant-numeric:tabular-nums; }
+.slider input[type=range] { flex:1 1 220px; accent-color:var(--accent);
+  height:22px; }
+"""
 
 BROWSE_HTML = """
-<h2>Browse jiten.moe</h2>
+<h2 id="browse">Browse jiten.moe</h2>
 <p class="sub">Search the whole catalogue. Pick a title to work out, right here,
 what level it stops fighting you at.</p>
 <div class="controls">
@@ -1688,11 +1797,33 @@ function render(){
           <td class="num">${(d.characterCount||0).toLocaleString()}</td>
           <td class="num">${d.difficulty ?? '—'}</td>
           <td class="num">${d.coverage != null ? d.coverage + '%' : '—'}</td>
-          <td><button data-id="${d.deckId}">when?</button></td></tr>`;
+          <td class="acts"><button data-when="${d.deckId}">when?</button>
+            <button data-track="${d.deckId}" data-status="2">reading</button>
+            <button data-track="${d.deckId}" data-status="1">plan</button></td></tr>`;
   }
   $('#results').innerHTML = h + '</table>';
-  document.querySelectorAll('#results button').forEach(b =>
-    b.onclick = () => analyse(+b.dataset.id, b));
+  document.querySelectorAll('#results [data-when]').forEach(b =>
+    b.onclick = () => analyse(+b.dataset.when, b));
+  document.querySelectorAll('#results [data-track]').forEach(b =>
+    b.onclick = () => track(+b.dataset.track, +b.dataset.status, b));
+}
+
+// Puts the title on your Jiten list, which is also what makes the next run
+// pick it up automatically.
+async function track(id, status, btn){
+  const was = btn.textContent;
+  btn.disabled = true; btn.textContent = 'saving…';
+  try {
+    const r = await fetch(`/api/user/deck-preferences/${id}/status`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({status})});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    btn.textContent = status === 2 ? 'reading ✓' : 'planned ✓';
+    btn.classList.add('done');
+  } catch (e){
+    btn.textContent = 'failed'; btn.disabled = false;
+    setTimeout(() => { btn.textContent = was; }, 2000);
+  }
 }
 
 function levelFor(curve, target){
@@ -1773,16 +1904,24 @@ for (const id of ['#type', '#sort', '#minchars'])
 """
 
 BROWSE_CSS = """
-.controls { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
-.controls input, .controls select { font:inherit; padding:7px 10px;
-  border:1px solid var(--line); border-radius:8px; background:var(--card);
-  color:var(--fg); }
-.controls #q { flex:1 1 240px; }
-button { font:inherit; font-size:13px; padding:4px 12px; cursor:pointer;
-  border:1px solid var(--line); border-radius:7px; background:var(--card);
-  color:var(--fg); white-space:nowrap; }
-button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
-button:disabled { opacity:.5; cursor:default; }
+.controls { display:flex; flex-wrap:wrap; gap:9px; margin:0 0 14px; }
+.controls input, .controls select { font:inherit; font-size:14px; padding:10px 13px;
+  border:1px solid var(--line); border-radius:11px; background:var(--raise);
+  color:var(--fg); box-shadow:var(--shadow); }
+.controls input:focus, .controls select:focus { outline:2px solid var(--accent);
+  outline-offset:-1px; }
+.controls #q { flex:1 1 260px; }
+.controls #minchars { width:130px; }
+button { font:inherit; font-size:12.5px; font-weight:560; padding:5px 12px;
+  cursor:pointer; border:1px solid var(--line); border-radius:99px;
+  background:var(--bg); color:var(--muted); white-space:nowrap; }
+button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent);
+  background:var(--accent-soft); }
+button:disabled { opacity:.55; cursor:default; }
+button.done { color:var(--good); border-color:var(--good); }
+td.acts { display:flex; gap:5px; justify-content:flex-end; }
+#detail:not(:empty) { margin-top:34px; padding-top:6px;
+  border-top:2px solid var(--accent); }
 """
 
 
@@ -1817,10 +1956,20 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
 
     head = (f"<title>{esc(cache.get('username'))} - WaniKani coverage</title>"
             f"<style>{REPORT_CSS}</style>")
+
+    sections: list[tuple[str, str]] = []
+
+    def h2(label: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+        sections.append((slug, label))
+        return f'<h2 id="{slug}">{esc(label)}</h2>'
+
     h = ["<main>",
-         f"<h1>{esc(cache.get('username'))} on jiten.moe</h1>",
+         f'<div class="hero"><h1>{esc(cache.get("username"))} on '
+         f'<span>jiten.moe</span></h1>'
          f'<p class="sub">WaniKani level {lvl} &middot; generated '
-         f'{time.strftime("%Y-%m-%d %H:%M")}</p>', '<div class="cards">']
+         f'{time.strftime("%d %b %Y, %H:%M")}</p></div>',
+         NAV_SLOT, '<div class="cards">']
 
     def card(n, label, delta=None):
         d = f'<div class="d">{delta:+d} since last run</div>' if delta else ""
@@ -1839,7 +1988,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     h.append("</div>")
     h.append(BROWSE_SLOT)
 
-    h.append("<h2>Your tracked titles</h2>")
+    h.append(h2("Your tracked titles"))
     h.append(f'<div class="wrap"><table><tr><th>title</th><th>list</th>'
              f'<th class="num">kanji</th>'
              f'<th></th><th class="num">finish L{lvl}</th>'
@@ -1869,10 +2018,11 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
             f'<td class="num">{t}</td></tr>')
     h.append("</table></div>")
 
-    h.append("<h2>What each level would buy you</h2>")
+    h.append(h2("What each level would buy you"))
     h.append(svg_curves(curves, lvl))
+    h.append(SLIDER_HTML)
 
-    h.append("<h2>Coverage over time</h2>")
+    h.append(h2("Coverage over time"))
     h.append(svg_history(past, titles))
 
     # Leeches: Apprentice items weighted by how often they block your titles.
@@ -1888,7 +2038,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     leeches = sorted(((n, ch) + struggling[ch] for ch, n in occ.items()
                       if ch in struggling and ch not in known["kanji_known"]),
                      reverse=True)[:24]
-    h.append("<h2>Leeches blocking your reading</h2>")
+    h.append(h2("Leeches blocking your reading"))
     if leeches:
         h.append('<p class="sub">Apprentice kanji, ranked by how often they appear '
                  'in the titles above. Already in your review queue.</p>')
@@ -1908,7 +2058,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
 
     if key and not args.no_recommend:
         data = collect_status(args, key, cache, known)
-        h.append("<h2>Best titles for you right now</h2>")
+        h.append(h2("Best titles for you right now"))
         h.append('<div class="wrap"><table><tr><th>type</th><th>title</th>'
                  '<th class="num">coverage</th><th class="num">chars</th></tr>')
         for label, recs in data["recommendations"]:
@@ -1922,7 +2072,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                     f'<td class="num">{d.get("characterCount") or 0:,}</td></tr>')
         h.append("</table></div>")
         if data["gains"]:
-            h.append(f'<h2>Nearly within reach at level {data["target_level"]}</h2>')
+            h.append(h2(f'Nearly within reach at level {data["target_level"]}'))
             h.append('<div class="wrap"><table><tr><th>title</th><th class="num">now'
                      '</th><th class="num">then</th><th class="num">gain</th></tr>')
             for gain, now, later, d in data["gains"]:
@@ -1939,24 +2089,39 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
              'the jiten column is your account\'s own coverage. '
              'Built by wkjiten.</footer></main>')
 
+    pace = round(wk_pace(cache) or 0, 1)
     blob = json.dumps({
-        "level": lvl,
-        "pace": round(wk_pace(cache) or 0, 1),
+        "level": lvl, "pace": pace,
         "known": "".join(sorted(known["kanji_known"])),
         "levels": known["kanji_level"],
         "types": MEDIA_TYPES,
     }, ensure_ascii=False, separators=(",", ":"))
+    track = json.dumps({
+        "level": lvl, "pace": pace,
+        "titles": [{"t": deck_title(d),
+                    "now": round(r["kanji_cov_occ"], 2),
+                    "c": [round(p, 2) for _lv, p in r["curve"]]}
+                   for d, r in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"])],
+    }, ensure_ascii=False, separators=(",", ":"))
+    head += f"<style>{SLIDER_CSS}</style>"
 
     def compose(live: bool) -> str:
         parts, css = list(h), head
+        parts.append(f"<script>const TRACK={track};</script>"
+                     f"<script>{SLIDER_JS}</script>")
+        links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.
             css += f"<style>{BROWSE_CSS}</style>"
             parts[parts.index(BROWSE_SLOT)] = BROWSE_HTML
             parts.append(f"<script>const WK={blob};</script>"
                          f"<script>{BROWSE_JS}</script>")
+            links.insert(0, ("browse", "Browse jiten.moe"))
         else:
             parts[parts.index(BROWSE_SLOT)] = ""
+        parts[parts.index(NAV_SLOT)] = (
+            "<nav>" + "".join(f'<a href="#{s}">{esc(t)}</a>' for s, t in links)
+            + "</nav>")
         return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 + css + "</head><body>" + "".join(parts) + "</body></html>")
