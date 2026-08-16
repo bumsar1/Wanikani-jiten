@@ -119,12 +119,14 @@ def user_decks(key: str | None):
     """Every title on this account's jiten.moe lists.
 
     Returns the ids to analyse (what they are actually on), the status of each,
-    and the full set including finished titles for the shared page - those are
-    worth showing to a friend but not worth downloading word lists for.
+    the full set including finished titles for the shared page - those are
+    worth showing to a friend but not worth downloading word lists for - and
+    the raw deck dicts, which carry the outside links but are far too big to
+    put in a stored snapshot.
     """
     if not key:
-        return [], {}, []
-    ids, status, everything = [], {}, []
+        return [], {}, [], []
+    ids, status, everything, raw = [], {}, [], []
     for st in SHARED_STATUSES:
         try:
             rows = w.jiten_status_decks(st, key)
@@ -132,6 +134,7 @@ def user_decks(key: str | None):
             continue
         for row in rows:
             did = row["deckId"]
+            raw.append(row)
             everything.append({
                 "deck_id": did, "status": st,
                 "title": (row.get("originalTitle") or row.get("englishTitle")
@@ -142,7 +145,7 @@ def user_decks(key: str | None):
             if st != "completed" and did not in status:
                 status[did] = st
                 ids.append(did)
-    return ids, status, everything
+    return ids, status, everything, raw
 
 
 # -------------------------------------------------------------------- routes
@@ -272,7 +275,7 @@ def dashboard():
 
     known = w.wk_known(cache)
     key = creds.get("jiten_key")
-    ids, status, everything = user_decks(key)
+    ids, status, everything, raw_decks = user_decks(key)
 
     decks = []
     for deck_id in ids[:40]:
@@ -333,6 +336,10 @@ def dashboard():
             extras["nihongo"] = w.nihongo_progress([d for d, _ in decks],
                                                    nkey, who) or {}
             extras["nihongo_totals"] = w.nihongo_totals(nkey, who)
+            # raw_decks rather than the analysed ones: finished titles are on a
+            # list too, so logging them is not "nothing is measuring this".
+            extras["nihongo_unmeasured"] = w.nihongo_unmeasured(
+                w.nihongo_index(who, nkey), raw_decks, key)
 
     return render.dashboard(user, cache, known, decks,
                             store.get_history(user["id"]), extras)
@@ -382,7 +389,7 @@ def set_sharing():
     if level != "private":
         key = creds_of(user).get("jiten_key")
         if key:
-            _ids, _status, everything = user_decks(key)
+            _ids, _status, everything, _raw = user_decks(key)
             if everything:
                 store.put_shared_lists(user["id"], everything)
     return redirect(url_for("together"))

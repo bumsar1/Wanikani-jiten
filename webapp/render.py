@@ -726,6 +726,11 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             h.append("</table></div>")
         h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
+        if extras.get("nihongo_totals"):
+            h.append(h2("Immersion"))
+            h.append(w.immersion_html(extras["nihongo_totals"],
+                                      extras.get("nihongo_unmeasured")))
+
         h.append(h2("What each level would buy you"))
         h.append(w.CHART_HTML)
         h.append(w.SLIDER_HTML)

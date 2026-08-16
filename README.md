@@ -67,7 +67,9 @@ and opens a dashboard showing:
 * the kanji grid — all ~2,100 of them by level, coloured by SRS stage or by how
   much not knowing each costs you
 * leeches, ranked by how often they block the titles you actually read
-* a search box for the whole jiten.moe catalogue
+* what you have logged on NihongoTracker, broken down by medium, and which of
+  it no jiten.moe list is measuring
+* a search box for the whole jiten.moe catalogue, filtered by genre and tag
 
 Leave the window open while you use the dashboard; Ctrl+C stops it. Run it again
 whenever you gain a level.

@@ -973,6 +973,63 @@ def nihongo_progress(decks: Iterable[dict], key: str | None,
     return out
 
 
+# Which of Jiten's link types a NihongoTracker content id is. Videos are
+# YouTube channel ids and games are IGDB ids: nothing Jiten indexes, so those
+# are never looked up.
+NIHONGO_LINK_TYPE = {"anime": 4, "manga": 4, "light-novel": 4, "book": 4,
+                     "movie": 4, "tv show": 4, "vn": 2}
+
+
+def jiten_decks_for_link(link_type: int, ident: str, key: str | None) -> list[int]:
+    """Jiten decks carrying an AniList or VNDB id. Empty means Jiten has none.
+
+    The reverse of the link on a deck, and the only way to answer "could this
+    even be measured" without guessing from the title.
+    """
+    try:
+        data = get_json(f"{JITEN_API}/api/media-deck/by-link-id/{link_type}/"
+                        f"{urllib.parse.quote(str(ident))}",
+                        headers=jiten_headers(key))
+    except SystemExit:
+        return []
+    return [int(x) for x in (data or []) if isinstance(x, int)]
+
+
+def nihongo_unmeasured(index: dict, on_lists: Iterable[dict],
+                       key: str | None) -> list[dict]:
+    """What you log but no jiten.moe list is measuring.
+
+    Split by whether Jiten has a deck at all, because those are two different
+    situations: one you fix with a button, the other is just Jiten not having
+    the title, and a button there would do nothing.
+    """
+    seen = {ref[1] for ref in (nihongo_ref(d) for d in on_lists) if ref}
+    out = []
+    for cid, entries in index.items():
+        if cid in seen:
+            continue
+        kind, item = entries[0]
+        titles = item.get("title") or {}
+        row = {"kind": kind, "deck": None,
+               "title": (titles.get("contentTitleNative")
+                         or titles.get("contentTitleEnglish") or "?"),
+               "logs": item.get("logCount") or 0,
+               "last": (item.get("lastLogDate") or "")[:10]}
+        link_type = NIHONGO_LINK_TYPE.get(kind)
+        if link_type:
+            for deck_id in jiten_decks_for_link(link_type, cid, key):
+                deck = jiten_deck_detail(deck_id, key)
+                ref = nihongo_ref(deck)
+                # An AniList anime id and manga id can be the same number, so
+                # the deck has to agree about which one it is.
+                if ref and ref[1] == cid and kind in NIHONGO_KINDS.get(ref[0], ()):
+                    row["deck"] = deck
+                    break
+        out.append(row)
+    out.sort(key=lambda r: (r["deck"] is None, -r["logs"], r["title"]))
+    return out
+
+
 def nihongo_totals(key: str | None, username: str | None = None) -> dict | None:
     """Hours, streak and level across everything you have logged."""
     if not key:
@@ -988,6 +1045,14 @@ def nihongo_totals(key: str | None, username: str | None = None) -> dict | None:
     totals = (data or {}).get("totals") or {}
     if not totals:
         return None
+    by_type = [{"type": t.get("type") or "?",
+                "logs": t.get("count") or 0,
+                "hours": t.get("totalTimeHours") or 0,
+                "episodes": t.get("totalEpisodes") or 0,
+                "chars": t.get("totalChars") or 0,
+                "pages": t.get("totalPages") or 0}
+               for t in (data or {}).get("statsByType") or [] if t.get("count")]
+    by_type.sort(key=lambda t: -t["hours"])
     return {"username": username,
             "hours": totals.get("totalTimeHours") or 0,
             "reading": totals.get("readingHours") or 0,
@@ -995,7 +1060,8 @@ def nihongo_totals(key: str | None, username: str | None = None) -> dict | None:
             "logs": totals.get("totalLogs") or 0,
             "chars": totals.get("totalChars") or 0,
             "streak": ((data or {}).get("streaks") or {}).get("currentStreak") or 0,
-            "days": totals.get("dayCount") or 0}
+            "days": totals.get("dayCount") or 0,
+            "by_type": by_type}
 
 
 def nihongo_cell(entry: dict | None) -> tuple[str, str]:
@@ -1016,6 +1082,77 @@ def nihongo_cell(entry: dict | None) -> tuple[str, str]:
     else:
         detail = f'{entry["logs"]} log{"" if entry["logs"] == 1 else "s"}'
     return f"{hours:.4f}", f'{head}<div class="und">{esc(detail)}</div>'
+
+
+def immersion_html(totals: dict | None, unmeasured: list[dict] | None) -> str:
+    """The NihongoTracker section, shared by the report and the hosted version.
+
+    Everything NihongoTracker knows that this tool can do something with, in
+    one place - rather than a second copy of their own stats page, which is
+    one click away and better.
+    """
+    if not totals:
+        return ""
+    h = [f'<p class="sub">From <a href="https://nihongotracker.app/user/'
+         f'{urllib.parse.quote(totals["username"])}" target="_blank"'
+         f' rel="noopener">nihongotracker.app</a> &middot; '
+         f'{totals["logs"]:,} logs over {totals["days"]:,} days.</p>']
+
+    if totals.get("by_type"):
+        h.append('<div class="wrap"><table class="sortable tight">'
+                 '<tr><th>type</th><th class="num">hours</th>'
+                 '<th class="num">how much</th><th class="num">logs</th></tr>')
+        for t in totals["by_type"]:
+            if t["episodes"]:
+                amount = f'{t["episodes"]:,} episodes'
+            elif t["chars"]:
+                amount = f'{t["chars"]:,} characters'
+            elif t["pages"]:
+                amount = f'{t["pages"]:,} pages'
+            else:
+                amount = "&mdash;"
+            h.append(f'<tr><td>{esc(t["type"])}</td>'
+                     f'<td class="num" data-sort="{t["hours"]:.4f}">'
+                     f'{t["hours"]:.1f}h</td>'
+                     f'<td class="num">{amount}</td>'
+                     f'<td class="num">{t["logs"]:,}</td></tr>')
+        h.append("</table></div>")
+
+    addable = [r for r in (unmeasured or []) if r["deck"]]
+    missing = [r for r in (unmeasured or []) if not r["deck"]]
+
+    if addable:
+        h.append('<h3 class="subhead">Logged, but nothing is measuring it</h3>')
+        # Deliberately does not promise a button: the saved report strips the
+        # ones that write to your account, because there is no server there.
+        h.append('<p class="sub">You are putting hours into these and no '
+                 'jiten.moe list has them, so no coverage is worked out for '
+                 'them. Once one is on a list, it joins the table above.</p>')
+        h.append('<div class="wrap"><table class="sortable tight">'
+                 '<tr><th>title</th><th>type</th><th class="num">logs</th>'
+                 '<th class="num">last</th><th></th></tr>')
+        for r in addable:
+            did = r["deck"].get("deckId")
+            h.append(
+                f'<tr><td><a href="https://jiten.moe/decks/media/{did}/detail"'
+                f' target="_blank" rel="noopener">{esc(deck_title(r["deck"]))}</a></td>'
+                f'<td>{esc(MEDIA_TYPES.get(r["deck"].get("mediaType"), r["kind"]))}</td>'
+                f'<td class="num">{r["logs"]}</td>'
+                f'<td class="num">{esc(r["last"]) or "&mdash;"}</td>'
+                f'<td class="acts">'
+                f'<button class="subs setst" data-deck="{did}" data-st="2"'
+                f' data-done="watching ✓">watching</button>'
+                f'<button class="subs setst" data-deck="{did}" data-st="1"'
+                f' data-done="planned ✓">plan</button></td></tr>')
+        h.append("</table></div>")
+
+    if missing:
+        names = ", ".join(f'{esc(r["title"])} <span class="faint">'
+                          f'({esc(r["kind"])})</span>' for r in missing)
+        h.append(f'<p class="sub" style="margin-top:16px">jiten.moe has no deck '
+                 f'for {names} &mdash; so there is nothing to measure them '
+                 f'against, however much you log. YouTube never will have one.</p>')
+    return "".join(h)
 
 
 JIMAKU_API = "https://jimaku.cc/api"
@@ -2175,6 +2312,8 @@ table.grouped td:first-child { word-break:break-word; }
 /* The immersion column only exists when there is a NihongoTracker key. */
 table.nt { min-width:744px; }
 .und { font-size:11px; font-weight:500; color:var(--faint); margin-top:1px; }
+.faint { color:var(--faint); }
+.subhead { font-size:15px; font-weight:640; margin:28px 0 6px; }
 .mediahead span { font-size:11.5px; font-weight:600; color:var(--faint);
   background:var(--line-soft); border-radius:99px; padding:2px 8px;
   margin-left:6px; vertical-align:2px; }
@@ -3541,13 +3680,17 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     # mean the column does not appear.
     nprog: dict[int, dict] = {}
     ntotals = None
+    nunmeasured: list[dict] = []
     if nkey:
         who = nihongo_whoami(nkey)
         if who:
             ntotals = nihongo_totals(nkey, who)
+            nindex = nihongo_index(who, nkey)
             nprog = nihongo_progress([d for d, _ in rows], nkey, who)
-            print(f"NihongoTracker: {who}, {len(nprog)} of {len(rows)} "
-                  f"tracked titles have logs")
+            nunmeasured = nihongo_unmeasured(
+                nindex, [d for d, _ in rows] + finished, key)
+            print(f"NihongoTracker: {who}, {len(nprog)} of {len(rows)} tracked "
+                  f"titles have logs, {len(nunmeasured)} logged but untracked")
 
     head = (f"<title>{esc(cache.get('username'))} - WaniKani coverage</title>"
             f"<style>{REPORT_CSS}</style>")
@@ -3653,6 +3796,10 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         h.append("</table></div>")
 
     h.append('<div id="subsbox" class="subsbox" hidden></div>')
+
+    if ntotals:
+        h.append(h2("Immersion"))
+        h.append(immersion_html(ntotals, nunmeasured))
 
     if finished:
         h.append(h2("Finished"))
