@@ -1,3 +1,5 @@
+<img src="assets/logo.png" alt="" width="112" align="right">
+
 # wkjiten — WaniKani coverage for jiten.moe
 
 Jiten works out how much of a title you can read from *your* known words, but it

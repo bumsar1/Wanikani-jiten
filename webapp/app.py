@@ -396,6 +396,19 @@ def save_profile():
     return redirect(url_for("together", note=note))
 
 
+@app.get("/icon.png")
+@app.get("/favicon.ico")
+def icon():
+    """The site logo. Shipped with the code, so it can be cached hard."""
+    try:
+        with open(w.ICON_FILE, "rb") as f:
+            data = f.read()
+    except OSError:
+        abort(404)
+    return Response(data, mimetype="image/png", headers={
+        "Cache-Control": "public, max-age=604800"})
+
+
 @app.get("/media/<kind>/<int:user_id>")
 def media(kind, user_id):
     """User-supplied images, served with the type read from their own bytes and

@@ -17,6 +17,7 @@ Stdlib only. Python 3.9+.
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import os
@@ -42,6 +43,11 @@ WK_CACHE = os.path.join(CACHE_DIR, "wanikani.json")
 WK_CACHE_PREV = os.path.join(CACHE_DIR, "wanikani.prev.json")
 DECK_CACHE_DIR = os.path.join(CACHE_DIR, "decks")
 HISTORY_CSV = os.path.join(CACHE_DIR, "history.csv")
+
+ASSET_DIR = os.path.join(HERE, "assets")
+LOGO_FILE = os.path.join(ASSET_DIR, "logo.png")   # 512px, the whole character
+ICON_FILE = os.path.join(ASSET_DIR, "icon.png")   # 128px, just the head: legible
+                                                  # at the 16px a browser tab uses
 
 # CJK ideographs (BMP + compat). Excludes 々 and other iteration/marks on
 # purpose: they are not kanji you learn on WaniKani.
@@ -1771,6 +1777,38 @@ def svg_history(past: dict[int, list[dict]], titles: dict[int, str],
     return "".join(parts)
 
 
+_ASSET_URI: dict[str, str] = {}
+
+
+def asset_uri(path: str = ICON_FILE) -> str:
+    """A PNG as a data: URI, so a saved report carries its own artwork.
+
+    Missing assets are not an error - the tool is one file plus a folder, and
+    it should still run if someone copies only the script.
+    """
+    if path not in _ASSET_URI:
+        try:
+            with open(path, "rb") as f:
+                _ASSET_URI[path] = ("data:image/png;base64,"
+                                    + base64.b64encode(f.read()).decode("ascii"))
+        except OSError:
+            _ASSET_URI[path] = ""
+    return _ASSET_URI[path]
+
+
+def favicon_link(src: str = "") -> str:
+    """Tab icon. An empty src inlines the file, for a report that travels."""
+    src = src or asset_uri()
+    return f'<link rel="icon" type="image/png" href="{src}">' if src else ""
+
+
+def brand_mark(src: str = "", cls: str = "mark") -> str:
+    """The logo beside a heading. Decorative, so it carries no alt text."""
+    src = src or asset_uri()
+    return (f'<img class="{cls}" src="{src}" alt="" width="128" height="128">'
+            if src else "")
+
+
 REPORT_CSS = """
 :root {
   --bg:#faf8f5; --raise:#fff; --fg:#1a1815; --muted:#6f6961; --faint:#948d84;
@@ -1794,9 +1832,13 @@ main { max-width:920px; margin:0 auto; padding:0 22px; }
 
 /* header */
 .hero { border-bottom:1px solid var(--line); margin-bottom:28px;
-  padding:44px 0 26px; position:relative; }
+  padding:44px 0 26px; position:relative;
+  display:flex; align-items:center; gap:16px; }
 .hero::before { content:""; position:absolute; top:0; left:0; right:0; height:3px;
   background:linear-gradient(90deg,var(--accent),transparent 70%); }
+.hero .hd { min-width:0; }
+.mark { width:52px; height:52px; flex:none; border-radius:14px;
+  box-shadow:var(--shadow); }
 h1 { font-size:clamp(26px,4vw,34px); margin:0 0 6px; letter-spacing:-.022em;
   font-weight:640; }
 h1 span { color:var(--accent); }
@@ -1882,7 +1924,8 @@ footer { color:var(--faint); font-size:12px; margin-top:56px;
   border-top:1px solid var(--line); padding-top:16px; }
 @media (max-width:640px) {
   main { padding:0 14px; }
-  .hero { padding:30px 0 20px; }
+  .hero { padding:30px 0 20px; gap:12px; }
+  .mark { width:40px; height:40px; border-radius:11px; }
   h2 { margin-top:38px; }
 }
 """
@@ -3094,10 +3137,11 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         return f'<h2 id="{slug}">{esc(label)}</h2>'
 
     h = ["<main>",
-         f'<div class="hero"><h1>{esc(cache.get("username"))} on '
+         f'<div class="hero">{brand_mark()}<div class="hd">'
+         f'<h1>{esc(cache.get("username"))} on '
          f'<span>jiten.moe</span></h1>'
          f'<p class="sub">WaniKani level {lvl} &middot; generated '
-         f'{time.strftime("%d %b %Y, %H:%M")}</p></div>',
+         f'{time.strftime("%d %b %Y, %H:%M")}</p></div></div>',
          NAV_SLOT, '<div class="cards">']
 
     def card(n, label, delta=None):
@@ -3364,7 +3408,8 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
             + "</nav>")
         return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                + css + "</head><body>" + "".join(parts) + "</body></html>")
+                + favicon_link() + css + "</head><body>"
+                + "".join(parts) + "</body></html>")
 
     if both:
         return compose(False), compose(True)

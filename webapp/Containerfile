@@ -13,6 +13,7 @@ COPY webapp/requirements.txt /app/webapp/requirements.txt
 RUN pip install --no-cache-dir -r /app/webapp/requirements.txt gunicorn
 
 COPY wkjiten.py /app/wkjiten.py
+COPY assets/ /app/assets/
 COPY webapp/ /app/webapp/
 
 # Runs unprivileged. /data is the only thing that needs to persist.

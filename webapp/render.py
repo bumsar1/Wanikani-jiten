@@ -18,6 +18,10 @@ import wkjiten as w
 STATUS_LABELS = w.STATUS_LABELS
 MEDIA_TYPES = w.MEDIA_TYPES
 
+# Served as a real file rather than inlined: the local tool writes one page that
+# has to stand alone, this one serves dozens and can let the browser cache it.
+ICON = "/icon.png"
+
 
 def esc(s) -> str:
     return w.esc(s)
@@ -28,6 +32,9 @@ AUTH_CSS = """
   border:1px solid var(--line); border-radius:16px; padding:28px;
   box-shadow:var(--shadow); }
 .authbox h1 { font-size:24px; margin-bottom:18px; }
+.authbox .mark { width:60px; height:60px; display:block; margin:0 auto 12px;
+  border-radius:17px; }
+.authbox .mark + h1 { text-align:center; }   /* only where there is a mark */
 .field { margin-bottom:14px; }
 .field label { display:block; font-size:12px; color:var(--faint); margin-bottom:5px;
   text-transform:uppercase; letter-spacing:.07em; font-weight:600; }
@@ -60,7 +67,7 @@ def shell(title: str, body: str, *, user=None, extra_css: str = "",
                  f'<a href="/logout">log out</a></span></div>')
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{esc(title)}</title>'
+            f'<title>{esc(title)}</title>{w.favicon_link(ICON)}'
             f'<style>{w.REPORT_CSS}{AUTH_CSS}{extra_css}</style></head><body>'
             f'<main>{bar}{body}</main>{scripts}</body></html>')
 
@@ -70,7 +77,7 @@ def login_page(error: str = "", note: str = "") -> str:
     if note:
         msg += f'<div class="ok">{esc(note)}</div>'
     return shell("Sign in", f"""
-      <div class="authbox"><h1>wkjiten</h1>{msg}
+      <div class="authbox">{w.brand_mark(ICON)}<h1>wkjiten</h1>{msg}
       <form method="post">
         <div class="field"><label for="u">username</label>
           <input id="u" name="username" autocomplete="username" autofocus required></div>
@@ -86,7 +93,7 @@ def login_page(error: str = "", note: str = "") -> str:
 def register_page(code: str, error: str = "") -> str:
     msg = f'<div class="err">{esc(error)}</div>' if error else ""
     return shell("Create account", f"""
-      <div class="authbox"><h1>Create your account</h1>{msg}
+      <div class="authbox">{w.brand_mark(ICON)}<h1>Create your account</h1>{msg}
       <form method="post">
         <input type="hidden" name="code" value="{esc(code)}">
         <div class="field"><label for="u">username</label>
@@ -577,7 +584,7 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str,
       <div class="profilewrap">
       {back}
       {banner}""" + f"""
-      <div class="hero" style="padding:{"18px" if banner else "48px"} 0 22px">
+      <div class="hero" style="display:block;padding:{"18px" if banner else "48px"} 0 22px">
         <div style="display:flex;gap:14px;align-items:center">
           {avatar_tag(owner["id"], profile.get("has_avatar"), username)}
           <div>
@@ -613,10 +620,11 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         sections.append((slug, label))
         return f'<h2 id="{slug}">{esc(label)}</h2>'
 
-    h = [f'<div class="hero"><h1>{esc(user["username"])} on '
+    h = [f'<div class="hero">{w.brand_mark(ICON)}<div class="hd">'
+         f'<h1>{esc(user["username"])} on '
          f'<span>jiten.moe</span></h1><p class="sub">WaniKani level {lvl} &middot; '
          f'data from {esc((cache.get("fetched_at") or "")[:16].replace("T", " "))}'
-         f'</p></div>', w.NAV_SLOT, '<div class="cards">']
+         f'</p></div></div>', w.NAV_SLOT, '<div class="cards">']
 
     def card(n, label, delta=None):
         d = f'<div class="d">{delta:+d} since last refresh</div>' if delta else ""
