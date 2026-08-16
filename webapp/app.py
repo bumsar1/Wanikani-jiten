@@ -36,6 +36,33 @@ STALE_HOURS = float(os.environ.get("WKJITEN_STALE_HOURS", "18"))
 _refreshing: set[int] = set()
 _lock = threading.Lock()
 
+# Third-party answers worth a second look now and then, but not on every page
+# load. The word lists are already cached in the database; what was left was
+# twenty-odd round trips to jiten.moe and nihongotracker.app per render, which
+# is where nearly all of the wait came from.
+TAGS_TTL = 24 * 3600        # a fixed vocabulary of 252 names
+NIHONGO_TTL = 300           # your own hours, which do not move by the second
+_memo: dict[tuple, tuple[float, object]] = {}
+_memo_lock = threading.Lock()
+
+
+def cached(key: tuple, ttl: float, build):
+    """Memo with a deadline. `build` runs outside the lock, so one slow call
+    cannot hold up everybody else - at the cost of two of them occasionally
+    running at once, which is harmless here."""
+    now = time.time()
+    with _memo_lock:
+        hit = _memo.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    value = build()
+    with _memo_lock:
+        if len(_memo) > 64:
+            for k in [k for k, (until, _) in _memo.items() if until <= now]:
+                _memo.pop(k, None)
+        _memo[key] = (now + ttl, value)
+    return value
+
 
 # ------------------------------------------------------------------- helpers
 
@@ -277,10 +304,16 @@ def dashboard():
     key = creds.get("jiten_key")
     ids, status, everything, raw_decks = user_decks(key)
 
+    # The rows the list endpoints already returned carry exactly the fields
+    # /detail does - links, coverage, character counts, the lot - so asking for
+    # each title again was one request per tracked title for nothing.
+    by_id = {row["deckId"]: row for row in raw_decks}
     decks = []
     for deck_id in ids[:40]:
+        deck = by_id.get(deck_id)
+        if deck is None:
+            continue
         try:
-            deck = w.jiten_deck_detail(deck_id, key)
             words = deck_words_shared(deck_id, key, deck)
         except SystemExit:
             continue
@@ -327,26 +360,41 @@ def dashboard():
             and cache["assignments"].get(sid, 0) > old_stage.get(sid, 0)
             and sid in prev.get("subjects", {})}
     if key:
-        try:
-            extras["tags"] = w.get_json(f"{w.JITEN_API}/api/media-deck/tags",
-                                        headers=w.jiten_headers(key))
-        except SystemExit:
-            pass
+        def fetch_tags():
+            try:
+                return w.get_json(f"{w.JITEN_API}/api/media-deck/tags",
+                                  headers=w.jiten_headers(key))
+            except SystemExit:
+                return []
+        extras["tags"] = cached(("tags",), TAGS_TTL, fetch_tags)
 
     # NihongoTracker, if this account brought a key. Every step is allowed to
     # come back empty; the column simply does not appear then.
     nkey = creds.get("nihongo_key")
     extras["has_nihongo_key"] = bool(nkey)
     if nkey:
-        who = w.nihongo_whoami(nkey)
-        if who:
-            extras["nihongo"] = w.nihongo_progress([d for d, _ in decks],
-                                                   nkey, who) or {}
-            extras["nihongo_totals"] = w.nihongo_totals(nkey, who)
-            # raw_decks rather than the analysed ones: finished titles are on a
-            # list too, so logging them is not "nothing is measuring this".
-            extras["nihongo_unmeasured"] = w.nihongo_unmeasured(
-                w.nihongo_index(who, nkey), raw_decks, key)
+        def fetch_nihongo():
+            who = w.nihongo_whoami(nkey)
+            if not who:
+                return None
+            index = w.nihongo_index(who, nkey)
+            return {
+                "progress": w.nihongo_progress([d for d, _ in decks], nkey,
+                                               who, index) or {},
+                "totals": w.nihongo_totals(nkey, who),
+                # raw_decks rather than the analysed ones: finished titles are
+                # on a list too, so logging them is not "nothing measures this".
+                "unmeasured": w.nihongo_unmeasured(index, raw_decks, key)}
+
+        # Keyed on which titles are on the lists, so pressing a track button
+        # shows up at once rather than after the timeout - it is the change
+        # that would make a stale answer look broken.
+        listed = tuple(sorted(row["deckId"] for row in raw_decks))
+        nt = cached(("nihongo", user["id"], listed), NIHONGO_TTL, fetch_nihongo)
+        if nt:
+            extras["nihongo"] = nt["progress"]
+            extras["nihongo_totals"] = nt["totals"]
+            extras["nihongo_unmeasured"] = nt["unmeasured"]
 
     return render.dashboard(user, cache, known, decks,
                             store.get_history(user["id"]), extras)

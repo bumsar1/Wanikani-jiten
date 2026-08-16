@@ -937,20 +937,25 @@ def nihongo_media_stats(kind: str, content_id: str, key: str) -> dict | None:
 
 
 def nihongo_progress(decks: Iterable[dict], key: str | None,
-                     username: str | None = None) -> dict[int, dict]:
+                     username: str | None = None,
+                     index: dict | None = None) -> dict[int, dict]:
     """deckId -> what you have logged on it, for the titles you have logged.
 
     The immersion list comes first so the per-title calls only go out for
     titles that are on both sides. Nothing here is fatal: an account with no
     logs, a title with no AniList link, a site that is down - each just means
     no number beside that row.
+
+    Pass `index` when the caller already has one - the unmeasured list needs
+    the same request, and fetching it twice per page was pure waste.
     """
     if not key:
         return {}
     username = username or nihongo_whoami(key)
     if not username:
         return {}
-    index = nihongo_index(username, key)
+    if index is None:
+        index = nihongo_index(username, key)
     if not index:
         return {}
     out: dict[int, dict] = {}
@@ -3698,7 +3703,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         if who:
             ntotals = nihongo_totals(nkey, who)
             nindex = nihongo_index(who, nkey)
-            nprog = nihongo_progress([d for d, _ in rows], nkey, who)
+            nprog = nihongo_progress([d for d, _ in rows], nkey, who, nindex)
             nunmeasured = nihongo_unmeasured(
                 nindex, [d for d, _ in rows] + finished, key)
             print(f"NihongoTracker: {who}, {len(nprog)} of {len(rows)} tracked "
