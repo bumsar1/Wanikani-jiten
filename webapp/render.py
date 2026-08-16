@@ -648,36 +648,48 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                  'jiten.moe, or use the search above, then refresh.</p>')
     else:
         h.append(h2("Your tracked titles"))
-        h.append(f'<div class="wrap"><table class="sortable tight"><tr>'
-                 f'<th>title</th><th class="num">kanji</th>'
-                 f'<th class="num">finish L{lvl}</th><th class="num">jiten</th>'
-                 f'<th class="num">lvl 95%</th><th class="num">ceiling</th>'
-                 f'<th class="num">trend</th></tr>')
-        for deck, res in sorted(decks, key=lambda r: -r[1]["kanji_cov_occ"]):
-            did = deck.get("deckId")
-            live = deck.get("coverage")
-            k = res["kanji_cov_occ"]
-            subs = w.jimaku_url(deck, extras.get("jimaku_key"))
-            fin = w.finishing_level(res, lvl)
-            trend = _trend(history.get(did, []))
-            h.append(
-                f'<tr><td><a href="https://jiten.moe/decks/media/{did}/detail"'
-                f' target="_blank" rel="noopener">{esc(w.deck_title(deck))}</a>'
-                + (f' <button class="subs" data-entry="{subs.rsplit("/", 1)[-1]}"'
-                   f' data-title="{esc(w.deck_title(deck))}"'
-                   f' title="Japanese subtitles on jimaku.cc">subs</button>'
-                   if subs else "")
-                + f' <button class="subs setst" data-deck="{did}" data-st="3"'
-                  f' title="Mark as finished on jiten.moe">finished</button>'
-                + f'</td>'
-                f'<td class="num">{k:.1f}%'
-                f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
-                f'<td class="num">{f"{fin:.1f}% <span class=\'up\'>{fin-k:+.1f}</span>" if fin else "&mdash;"}</td>'
-                f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
-                f'<td class="num">{w.level_for(res["curve"], 95) or "&mdash;"}</td>'
-                f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
-                f'<td class="num">{trend}</td></tr>')
-        h.append("</table></div>")
+        groups = w.by_media_type(decks)
+        split = len(groups) > 1
+        tcls = "sortable tight grouped" if split else "sortable tight"
+        for mtype, group in groups:
+            if split:
+                h.append(f'<h3 class="mediahead">'
+                         f'{esc(w.MEDIA_TYPES.get(mtype, "other"))}'
+                         f' <span>{len(group)}</span></h3>')
+            h.append(f'<div class="wrap"><table class="{tcls}"><tr>'
+                     f'<th>title</th><th class="num">kanji</th>'
+                     f'<th class="num">finish L{lvl}</th><th class="num">jiten</th>'
+                     f'<th class="num">lvl 95%</th><th class="num">ceiling</th>'
+                     f'<th class="num">trend</th></tr>')
+            for deck, res in group:
+                did = deck.get("deckId")
+                live = deck.get("coverage")
+                k = res["kanji_cov_occ"]
+                subs = w.jimaku_url(deck, extras.get("jimaku_key"))
+                out = w.outside_link(deck)
+                fin = w.finishing_level(res, lvl)
+                trend = _trend(history.get(did, []))
+                h.append(
+                    f'<tr><td><a href="https://jiten.moe/decks/media/{did}/detail"'
+                    f' target="_blank" rel="noopener">{esc(w.deck_title(deck))}</a>'
+                    + (f' <a class="subs" href="{esc(out[1])}" target="_blank"'
+                       f' rel="noopener" title="Look it up on {esc(out[0])}">'
+                       f'{esc(out[0])}</a>' if out else "")
+                    + (f' <button class="subs" data-entry="{subs.rsplit("/", 1)[-1]}"'
+                       f' data-title="{esc(w.deck_title(deck))}"'
+                       f' title="Japanese subtitles on jimaku.cc">subs</button>'
+                       if subs else "")
+                    + f' <button class="subs setst" data-deck="{did}" data-st="3"'
+                      f' title="Mark as finished on jiten.moe">finished</button>'
+                    + f'</td>'
+                    f'<td class="num">{k:.1f}%'
+                    f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
+                    f'<td class="num">{f"{fin:.1f}% <span class=\'up\'>{fin-k:+.1f}</span>" if fin else "&mdash;"}</td>'
+                    f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
+                    f'<td class="num">{w.level_for(res["curve"], 95) or "&mdash;"}</td>'
+                    f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
+                    f'<td class="num">{trend}</td></tr>')
+            h.append("</table></div>")
         h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
         h.append(h2("What each level would buy you"))

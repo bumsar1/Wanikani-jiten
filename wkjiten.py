@@ -412,6 +412,56 @@ GENRES = {
 }
 
 
+# Jiten records where a title lives elsewhere, typed by site. Which one is
+# worth offering depends on the medium: someone reading a visual novel wants
+# VNDB, someone watching anime wants AniList.
+LINK_SITES = {2: "vndb", 3: "tmdb", 4: "anilist", 5: "mal", 6: "books",
+              7: "imdb", 8: "igdb", 9: "syosetu"}
+LINK_PREFERENCE = {
+    1: (4, 5, 3),     # anime
+    2: (3, 7, 4),     # drama
+    3: (7, 3, 4),     # movie
+    4: (6, 4, 5),     # novel
+    6: (8, 4),        # video game
+    7: (2, 4, 5),     # visual novel
+    8: (9, 6, 4),     # web novel
+    9: (4, 5, 6),     # manga
+}
+
+
+def outside_link(deck: dict) -> tuple[str, str] | None:
+    """(label, url) for the site people actually look this medium up on."""
+    links = {l.get("linkType"): l.get("url")
+             for l in (deck.get("links") or []) if l.get("url")}
+    if not links:
+        return None
+    order = list(LINK_PREFERENCE.get(deck.get("mediaType"), ())) + sorted(links)
+    for kind in order:
+        url = links.get(kind)
+        if not url:
+            continue
+        if kind == 6 and "googleapis.com/books/v1/volumes/" in url:
+            # Stored as the API endpoint, which is not a page anyone can read.
+            url = "https://books.google.com/books?id=" + url.rsplit("/", 1)[-1]
+        return LINK_SITES.get(kind, "link"), url
+    return None
+
+
+def by_media_type(rows: list) -> list[tuple[int, list]]:
+    """Tracked titles split per medium, biggest group first.
+
+    One visual novel among twenty anime was a row you had to hunt for, and the
+    numbers do not really compare across media anyway - a 60% manga and a 60%
+    anime are different amounts of work.
+    """
+    groups: dict[int, list] = {}
+    for deck, res in rows:
+        groups.setdefault(deck.get("mediaType") or 0, []).append((deck, res))
+    for group in groups.values():
+        group.sort(key=lambda r: -r[1]["kanji_cov_occ"])
+    return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+
 def genre_ids(names: str | None) -> str | None:
     """Genre names to the ids the API filters on.
 
@@ -1938,6 +1988,22 @@ table.tight td:first-child:not(.num) { min-width:9em; }
 .subs { display:inline-block; font-size:10.5px; font-weight:650; padding:1px 7px;
   border-radius:99px; border:1px solid var(--line); color:var(--faint);
   vertical-align:2px; margin-left:6px; letter-spacing:.03em; }
+.mediahead { font-size:14px; font-weight:640; letter-spacing:-.005em;
+  margin:26px 0 8px; text-transform:capitalize; }
+/* One table per medium means each would size its own columns, so a one-row
+   visual novel would not line up with five anime above it. Fixed widths make
+   the stack read as one table; the title column takes whatever is left. */
+table.grouped { table-layout:fixed; min-width:640px; }
+table.grouped th:nth-child(2) { width:118px; }
+table.grouped th:nth-child(3) { width:100px; }
+table.grouped th:nth-child(4) { width:66px; }
+table.grouped th:nth-child(5) { width:74px; }
+table.grouped th:nth-child(6) { width:74px; }
+table.grouped th:nth-child(7) { width:68px; }
+table.grouped td:first-child { word-break:break-word; }
+.mediahead span { font-size:11.5px; font-weight:600; color:var(--faint);
+  background:var(--line-soft); border-radius:99px; padding:2px 8px;
+  margin-left:6px; vertical-align:2px; }
 .subs:hover { border-color:var(--accent); color:var(--accent); }
 button.subs { font-family:inherit; cursor:pointer; background:var(--bg); }
 button.subs:disabled { opacity:.55; cursor:default; }
@@ -2169,6 +2235,10 @@ SLIDER_JS = """
 """
 
 REACH_HTML = """
+<p class="sub">Kanji coverage at a level you have not reached yet. Word
+coverage cannot be asked that question &mdash; WaniKani teaches ~6,500 words,
+so the rest of it comes from reading rather than levelling &mdash; which is why
+it sits here as a column and not as a target.</p>
 <div class="controls levelbar">
   <label for="rlevel">Judge everything as if I were level</label>
   <input id="rlevel" type="number" min="1" max="60">
@@ -2183,14 +2253,13 @@ REACH_HTML = """
       <option value="3">movie</option><option value="8">web novel</option>
     </select>
     <select id="rtag"></select>
-    <select id="rmetric">
-      <option value="jiten">jiten word coverage</option>
-      <option value="kanji">WaniKani kanji coverage</option>
-    </select>
+    <label for="rpct">reaching</label>
     <input id="rpct" type="number" min="0" max="100" step="1" value="70"
-           title="Only show titles at or above this percentage">
+           title="The kanji coverage you want once you are at that level">
+    <label for="rpct">% kanji, from</label>
     <input id="rmin" type="number" placeholder="min chars" min="0" step="10000"
            value="20000" title="Without this the list fills up with one-page entries">
+    <label for="rmin">characters up</label>
     <button id="rgo" class="go">Find</button>
   </div>
   <div id="reach-results"></div>
@@ -2244,7 +2313,6 @@ REACH_JS = """
     const type = document.getElementById('rtype').value;
     const tag = document.getElementById('rtag').value;
     const min = document.getElementById('rmin').value;
-    const metric = document.getElementById('rmetric').value;
     const pct = +document.getElementById('rpct').value || 0;
     const lv = target();
 
@@ -2252,9 +2320,10 @@ REACH_JS = """
     if (type) url += '&mediaType=' + type;
     if (tag) url += '&tags=' + tag;
     if (min) url += '&charCountMin=' + min;
-    // For the kanji metric, jiten coverage is only a pre-filter: cast wider,
-    // because the two measures diverge by ten points or more either way.
-    const floor = metric === 'jiten' ? pct : Math.max(0, pct - 20);
+    // Jiten's word coverage is only a pre-filter here, to pick which titles are
+    // worth downloading: cast wider, because the two measures diverge by ten
+    // points or more in either direction.
+    const floor = Math.max(0, pct - 20);
     if (floor) url += '&coverageMin=' + floor;
 
     box.innerHTML = '<p class="empty">Looking&hellip;</p>';
@@ -2263,24 +2332,8 @@ REACH_JS = """
     catch (e){ box.innerHTML = '<p class="empty">Lookup failed.</p>'; return; }
     const rows = d.data || [];
     if (!rows.length){
-      box.innerHTML = `<p class="empty">Nothing reaches ${pct}%. Lower the bar,
-        widen the filters, or come back a few levels from now.</p>`;
-      return;
-    }
-
-    if (metric === 'jiten'){
-      box.innerHTML = `<p class="sub">${d.totalItems.toLocaleString()} titles are at
-        ${pct}% word coverage or better. Word coverage cannot be projected forward:
-        WaniKani teaches ~6,500 words, so the rest comes from reading, not levelling.
-        Switch to kanji coverage to see level ${lv}.</p>
-        <div class="wrap"><table class="sortable"><tr><th>title</th><th>type</th>
-        <th class="num">chars</th><th class="num">word coverage</th><th></th></tr>` +
-        rows.slice(0, 25).map(r => `<tr>${titleCell(r)}
-          <td>${WK.types[r.mediaType] || '?'}</td>
-          <td class="num">${(r.characterCount||0).toLocaleString()}</td>
-          <td class="num">${r.coverage != null ? r.coverage + '%' : '—'}</td>
-          ${planCell(r.deckId)}</tr>`).join('') + '</table></div>';
-      wire(box);
+      box.innerHTML = `<p class="empty">Nothing here comes near ${pct}%. Lower the
+        bar, widen the filters, or come back a few levels from now.</p>`;
       return;
     }
 
@@ -2390,9 +2443,15 @@ function sortable(){
 REACH_CSS = """
 .reachtabs { margin-bottom:12px; }
 .levelbar { align-items:center; margin-bottom:12px; }
-.levelbar label { font-size:14px; color:var(--muted); }
+/* Direct children only: the tag menu's checkbox labels sit inside a .controls
+   too, and they are not part of the row. */
+.controls > label { font-size:14px; color:var(--muted); align-self:center; }
 .levelbar input { width:82px; }
-#rpct { width:86px; }
+#rpct { width:76px; }
+#rmin { width:104px; }
+/* A select is as wide as its longest option, and one of the 252 tags is
+   "Cute Girls Doing Cute Things". Cap it so the row still fits on one line. */
+#rtag { max-width:170px; }
 .sortcol { cursor:pointer; user-select:none; }
 .sortcol:hover { color:var(--accent); }
 .sorted::after { content:" \\2193"; color:var(--accent); }
@@ -3317,40 +3376,52 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     h.append(BROWSE_SLOT)
 
     h.append(h2("Your tracked titles"))
-    h.append(f'<div class="wrap"><table class="sortable tight"><tr><th>title</th>'
-             f'<th class="num">kanji</th><th class="num">finish L{lvl}</th>'
-             f'<th class="num">jiten</th><th class="num">lvl 95%</th>'
-             f'<th class="num">ceiling</th><th class="num">trend</th></tr>')
-    for deck, res in sorted(rows, key=lambda r: -r[1]["kanji_cov_occ"]):
-        deck_id = deck.get("deckId")
-        live = deck.get("coverage")
-        trend = history_trend(past.get(deck_id, []))
-        t = (f'<span class="up">{trend[1] - trend[0]:+.1f}pp</span> / {trend[2]}d'
-             if trend and trend[1] > trend[0] else
-             (f"{trend[1] - trend[0]:+.1f}pp / {trend[2]}d" if trend else "&mdash;"))
-        k = res["kanji_cov_occ"]
-        subs = jimaku_url(deck, jkey)
-        fin = finishing_level(res, lvl)
-        fin_cell = ("&mdash;" if fin is None else
-                    f'{fin:.1f}% <span class="up">{fin - k:+.1f}</span>')
-        h.append(
-            f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}/detail">'
-            f'{esc(deck_title(deck))}</a>'
-            + (f' <button class="subs" data-entry="{subs.rsplit("/", 1)[-1]}"'
-               f' data-title="{esc(deck_title(deck))}"'
-               f' title="Japanese subtitles on jimaku.cc">subs</button>'
-               if subs else "")
-            + f' <button class="subs setst" data-deck="{deck_id}" data-st="3"'
-              f' title="Mark as finished on jiten.moe">finished</button>'
-            + f'</td>'
-            f'<td class="num">{k:.1f}%'
-            f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
-            f'<td class="num">{fin_cell}</td>'
-            f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
-            f'<td class="num">{level_for(res["curve"], 95) or "&mdash;"}</td>'
-            f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
-            f'<td class="num">{t}</td></tr>')
-    h.append("</table></div>")
+    groups = by_media_type(rows)
+    split = len(groups) > 1
+    tcls = "sortable tight grouped" if split else "sortable tight"
+    for mtype, group in groups:
+        if split:
+            h.append(f'<h3 class="mediahead">'
+                     f'{esc(MEDIA_TYPES.get(mtype, "other"))}'
+                     f' <span>{len(group)}</span></h3>')
+        h.append(f'<div class="wrap"><table class="{tcls}"><tr><th>title</th>'
+                 f'<th class="num">kanji</th><th class="num">finish L{lvl}</th>'
+                 f'<th class="num">jiten</th><th class="num">lvl 95%</th>'
+                 f'<th class="num">ceiling</th><th class="num">trend</th></tr>')
+        for deck, res in group:
+            deck_id = deck.get("deckId")
+            live = deck.get("coverage")
+            trend = history_trend(past.get(deck_id, []))
+            t = (f'<span class="up">{trend[1] - trend[0]:+.1f}pp</span> / {trend[2]}d'
+                 if trend and trend[1] > trend[0] else
+                 (f"{trend[1] - trend[0]:+.1f}pp / {trend[2]}d" if trend else "&mdash;"))
+            k = res["kanji_cov_occ"]
+            subs = jimaku_url(deck, jkey)
+            out = outside_link(deck)
+            fin = finishing_level(res, lvl)
+            fin_cell = ("&mdash;" if fin is None else
+                        f'{fin:.1f}% <span class="up">{fin - k:+.1f}</span>')
+            h.append(
+                f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}/detail">'
+                f'{esc(deck_title(deck))}</a>'
+                + (f' <a class="subs" href="{esc(out[1])}" target="_blank"'
+                   f' rel="noopener" title="Look it up on {esc(out[0])}">'
+                   f'{esc(out[0])}</a>' if out else "")
+                + (f' <button class="subs" data-entry="{subs.rsplit("/", 1)[-1]}"'
+                   f' data-title="{esc(deck_title(deck))}"'
+                   f' title="Japanese subtitles on jimaku.cc">subs</button>'
+                   if subs else "")
+                + f' <button class="subs setst" data-deck="{deck_id}" data-st="3"'
+                  f' title="Mark as finished on jiten.moe">finished</button>'
+                + f'</td>'
+                f'<td class="num">{k:.1f}%'
+                f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
+                f'<td class="num">{fin_cell}</td>'
+                f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
+                f'<td class="num">{level_for(res["curve"], 95) or "&mdash;"}</td>'
+                f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
+                f'<td class="num">{t}</td></tr>')
+        h.append("</table></div>")
 
     h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
@@ -3371,12 +3442,17 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
             cov = d.get("coverage")
             cov_txt = f"{cov}%" if cov is not None else "&mdash;"
             hide = "this.style.visibility='hidden'"
+            out = outside_link(d)
             h.append(
                 f'<tr><td class="withcover"><span class="ct">'
                 f'<img class="cover" loading="lazy" alt="" src="{cover_url(did)}"'
                 f' onerror="{hide}">'
-                f'<a href="https://jiten.moe/decks/media/{did}/detail"'
-                f' target="_blank" rel="noopener">{esc(name)}</a></span></td>'
+                f'<span><a href="https://jiten.moe/decks/media/{did}/detail"'
+                f' target="_blank" rel="noopener">{esc(name)}</a>'
+                + (f' <a class="subs" href="{esc(out[1])}" target="_blank"'
+                   f' rel="noopener" title="Look it up on {esc(out[0])}">'
+                   f'{esc(out[0])}</a>' if out else "")
+                + '</span></span></td>'
                 f'<td>{MEDIA_TYPES.get(d.get("mediaType"), "?")}</td>'
                 f'<td class="num">{d.get("characterCount") or 0:,}</td>'
                 f'<td class="num">{cov_txt}</td></tr>')
