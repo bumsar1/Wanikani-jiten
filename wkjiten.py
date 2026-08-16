@@ -401,6 +401,37 @@ MEDIA_TYPES = {
     6: "video game", 7: "visual novel", 8: "web novel", 9: "manga", 10: "audio",
 }
 
+# Jiten's Genre enum. Genres and tags are separate filters over there: Romance
+# is a genre, Boarding School is one of ~250 tags. Both take ids, and both
+# intersect - two of either means titles carrying both.
+GENRES = {
+    1: "action", 2: "adventure", 3: "comedy", 4: "drama", 5: "ecchi",
+    6: "fantasy", 7: "horror", 8: "mecha", 9: "music", 10: "mystery",
+    11: "psychological", 12: "romance", 13: "sci-fi", 14: "slice of life",
+    15: "sports", 16: "supernatural", 17: "thriller", 18: "adults only",
+}
+
+
+def genre_ids(names: str | None) -> str | None:
+    """Genre names to the ids the API filters on.
+
+    It ignores a name it does not recognise instead of complaining, which made
+    `--genre romance` look like it worked while returning the whole catalogue.
+    """
+    if not names:
+        return None
+    out = []
+    for raw in names.split(","):
+        want = raw.strip().lower().replace("-", "").replace(" ", "")
+        for num, label in GENRES.items():
+            if label.replace("-", "").replace(" ", "") == want:
+                out.append(str(num))
+                break
+        else:
+            raise SystemExit(f"unknown genre {raw.strip()!r}; pick from: "
+                             + ", ".join(GENRES.values()))
+    return ",".join(out)
+
 
 # --------------------------------------------------------------------------
 # coverage maths
@@ -671,7 +702,7 @@ def cmd_search(args) -> None:
     key = jiten_key(args.jiten_key)
     rows = jiten_search(args.query or "", key, limit=args.limit,
                         media_type=media_type_id(args.type),
-                        genres=args.genre, min_chars=args.min_chars,
+                        genres=genre_ids(args.genre), min_chars=args.min_chars,
                         sort_by=args.sort, descending=not args.ascending)
     if not rows:
         print("no decks found")
@@ -2813,6 +2844,18 @@ what level it stops fighting you at.</p>
     <option value="6">game</option><option value="2">drama</option>
     <option value="3">movie</option><option value="8">web novel</option>
   </select>
+  <details class="tagpick" id="tagpick">
+    <summary id="tagsum">tags</summary>
+    <div class="tagmenu">
+      <input id="tagq" type="search" placeholder="filter the list" autocomplete="off">
+      <div id="taglist" class="taglist"></div>
+      <p class="tagnote">Jiten narrows: a title has to carry every box you tick.</p>
+      <div class="tagfoot">
+        <button type="button" id="tagclear">clear</button>
+        <button type="button" id="tagdone" class="go">Search</button>
+      </div>
+    </div>
+  </details>
   <select id="sort">
     <option value="coverage">best coverage first</option>
     <option value="difficulty">easiest first</option>
@@ -2840,16 +2883,85 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g,
 
 function title(d){ return d.originalTitle || d.englishTitle || d.romajiTitle || '?'; }
 
+// Genres and tags are two different filters on Jiten's side - Romance is a
+// genre, Boarding School is a tag - but nobody picking one thinks in that
+// distinction, so one menu drives both. The genre list is a fixed enum, so it
+// is spelled out here rather than fetched.
+const GENRES = [[1,'Action'],[2,'Adventure'],[3,'Comedy'],[4,'Drama'],
+  [5,'Ecchi'],[6,'Fantasy'],[7,'Horror'],[8,'Mecha'],[9,'Music'],[10,'Mystery'],
+  [11,'Psychological'],[12,'Romance'],[13,'Sci-Fi'],[14,'Slice of Life'],
+  [15,'Sports'],[16,'Supernatural'],[17,'Thriller'],[18,'Adults only']];
+
+// Both parameters intersect: two ticks asks for titles carrying both, not
+// either. 270 boxes in all, so the menu needs a filter of its own.
+const chosen = new Set();          // "g:12" for a genre, "t:87" for a tag
+const picked = kind => [...chosen].filter(k => k[0] === kind)
+                                  .map(k => k.slice(2)).join(',');
+
+(function tagpicker(){
+  const pick = $('#tagpick');
+  if (!pick) return;
+  const list = $('#taglist'), sum = $('#tagsum');
+  const box = (kind, id, name) =>
+    `<label data-name="${esc(String(name).toLowerCase())}">
+       <input type="checkbox" value="${kind}:${id}">${esc(name)}</label>`;
+  const group = (title, rows) =>
+    `<div class="taggroup"><h5>${title}</h5>${rows.join('')}</div>`;
+
+  let html = group('Genres', GENRES.map(([id, n]) => box('g', id, n)));
+  if (typeof TAGS !== 'undefined' && TAGS.length)
+    html += group('Tags', TAGS.map(t => box('t', t.tagId, t.name)));
+  list.innerHTML = html;
+
+  function summarise(){
+    sum.textContent = chosen.size ? `${chosen.size} tag${chosen.size > 1 ? 's' : ''}`
+                                  : 'tags';
+    pick.classList.toggle('on', chosen.size > 0);
+  }
+  list.addEventListener('change', e => {
+    const b = e.target;
+    if (b.checked) chosen.add(b.value); else chosen.delete(b.value);
+    summarise();
+  });
+  $('#tagq').addEventListener('input', e => {
+    const needle = e.target.value.trim().toLowerCase();
+    list.querySelectorAll('label').forEach(l =>
+      l.classList.toggle('off', !!needle && !l.dataset.name.includes(needle)));
+    // A heading with nothing under it left "Tags" floating over empty space.
+    list.querySelectorAll('.taggroup').forEach(g =>
+      g.classList.toggle('off', !g.querySelector('label:not(.off)')));
+    list.classList.toggle('blank', !list.querySelector('label:not(.off)'));
+  });
+  $('#tagq').addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); pick.open = false; search(); }
+  });
+  $('#tagclear').addEventListener('click', () => {
+    chosen.clear();
+    list.querySelectorAll('input').forEach(b => b.checked = false);
+    summarise();
+  });
+  summarise();
+  $('#tagdone').addEventListener('click', () => { pick.open = false; search(); });
+  // A <details> stays open until told otherwise; ticking boxes must not close
+  // it, clicking anywhere else must.
+  document.addEventListener('click', e => {
+    if (pick.open && !pick.contains(e.target)) pick.open = false;
+  });
+})();
+
 async function search(){
   const q = $('#q').value.trim();
   const type = $('#type').value, sort = $('#sort').value;
   const min = $('#minchars').value;
-  if (!q && !type && !min){ $('#results').innerHTML =
+  const genres = picked('g'), tags = picked('t');
+  if (!q && !type && !min && !genres && !tags){ $('#results').innerHTML =
     '<p class="empty">Type a title and press Enter, or pick a filter.</p>'; return; }
   $('#results').innerHTML = '<p class="empty">Searching&hellip;</p>';
   let url = `/api/media-deck/get-media-decks?sortBy=${sort}&sortOrder=1`;
   if (q) url += `&titleFilter=${encodeURIComponent(q)}`;
   if (type) url += `&mediaType=${type}`;
+  if (genres) url += `&genres=${genres}`;
+  if (tags) url += `&tags=${tags}`;
   if (min) url += `&charCountMin=${min}`;
   lastUrl = url;
   fetched = new Map();
@@ -2882,7 +2994,9 @@ async function showPage(p){
 
 function render(){
   if (!lastRows.length){ $('#results').innerHTML =
-    '<p class="empty">Nothing matched.</p>'; return; }
+    '<p class="empty">Nothing matched.' + (chosen.size > 1 ?
+      ' Every box you tick has to sit on the same title &mdash; try fewer.' : '')
+    + '</p>'; return; }
   let h = '<table class="sortable tight"><tr><th>title</th><th>type</th>' +
           '<th class="num">chars</th><th class="num">diff</th>' +
           '<th class="num">coverage</th><th></th></tr>';
@@ -3053,7 +3167,7 @@ $('#q').addEventListener('keydown', e => {
 $('#go').addEventListener('click', search);
 for (const id of ['#type', '#sort', '#minchars'])
   $(id).addEventListener('change', () => { if ($('#q').value.trim() ||
-    $('#type').value || $('#minchars').value) search(); });
+    $('#type').value || $('#minchars').value || chosen.size) search(); });
 """
 
 BROWSE_CSS = """
@@ -3063,8 +3177,49 @@ BROWSE_CSS = """
   color:var(--fg); box-shadow:var(--shadow); }
 .controls input:focus, .controls select:focus { outline:2px solid var(--accent);
   outline-offset:-1px; }
-.controls #q { flex:1 1 260px; }
-.controls #minchars { width:130px; }
+/* Basis, not width: six controls have to share one row at the 876px the
+   page gives them, and the search box absorbs whatever is left over. */
+.controls #q { flex:1 1 200px; }
+.controls #minchars { width:120px; }
+
+/* tag picker: a <details> pretending to be a multi-select */
+.tagpick { position:relative; }
+.tagpick > summary { list-style:none; cursor:pointer; user-select:none;
+  font-size:14px; padding:10px 13px; border:1px solid var(--line);
+  border-radius:11px; background:var(--raise); color:var(--fg);
+  box-shadow:var(--shadow); white-space:nowrap; min-width:76px; }
+.tagpick > summary::-webkit-details-marker { display:none; }
+.tagpick > summary::after { content:" \\25be"; color:var(--faint); }
+.tagpick[open] > summary, .tagpick.on > summary { border-color:var(--accent);
+  color:var(--accent); }
+.tagmenu { position:absolute; z-index:30; top:calc(100% + 6px); left:0;
+  width:296px; max-width:82vw; padding:12px; background:var(--raise);
+  border:1px solid var(--line); border-radius:14px;
+  box-shadow:0 12px 34px rgba(0,0,0,.24); }
+.tagmenu #tagq { width:100%; margin:0 0 9px; padding:8px 11px; }
+.taglist { max-height:238px; overflow:auto; margin:0 -4px; }
+.taglist label { display:flex; align-items:center; gap:9px; font-size:13.5px;
+  padding:4px 7px; border-radius:8px; cursor:pointer; }
+.taglist label:hover { background:var(--accent-soft); color:var(--accent); }
+.taglist label.off, .taggroup.off { display:none; }
+.taglist.blank::after { content:"No genre or tag by that name."; display:block;
+  color:var(--faint); font-size:13px; font-style:italic; padding:8px 7px; }
+.taggroup h5 { font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--faint); font-weight:650; margin:10px 0 3px; padding:0 7px; }
+.taggroup:first-child h5 { margin-top:0; }
+.taglist input { accent-color:var(--accent); margin:0; }
+.tagnote { color:var(--faint); font-size:11.5px; line-height:1.45;
+  margin:9px 0 0; }
+.tagfoot { display:flex; align-items:center; justify-content:space-between;
+  gap:9px; margin-top:10px; }
+.tagfoot button.go { padding:7px 16px; }
+/* Narrow screens: hang the menu off the whole row rather than off the button,
+   which otherwise pushes 296px of menu past the right edge. */
+@media (max-width:640px) {
+  .controls { position:relative; }
+  .tagpick { position:static; }
+  .tagmenu { left:0; right:0; width:auto; max-width:none; }
+}
 button.go { padding:10px 20px; border-radius:11px; font-size:14px;
   background:var(--accent); border-color:var(--accent); color:#fff; }
 button.go:hover { background:var(--accent); color:#fff; filter:brightness(1.08); }
@@ -3324,14 +3479,17 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     others: list[dict] = []
     tags: list[dict] = []
     target_level = min(60, lvl + getattr(args, "soon_levels", 5))
-    if key and not args.no_recommend:
-        data = collect_status(args, key, cache, known)
-        target_level = data["target_level"]
+    if key:
+        # Both the browse and the reach panel filter on these, so they are worth
+        # one request even when the recommendations are switched off.
         try:
             tags = get_json(f"{JITEN_API}/api/media-deck/tags",
                             headers=jiten_headers(key))
         except SystemExit:
             tags = []
+    if key and not args.no_recommend:
+        data = collect_status(args, key, cache, known)
+        target_level = data["target_level"]
         h.append(h2("Best titles for you right now"))
         h.append('<div class="wrap"><table class="sortable"><tr><th>type</th><th>title</th>'
                  '<th class="num">coverage</th><th class="num">chars</th></tr>')
@@ -3699,7 +3857,8 @@ def main() -> None:
     s.add_argument("query", nargs="?", default="",
                    help="title fragment; omit to browse by filter alone")
     s.add_argument("--type", help="anime, manga, novel, visual novel, game, ...")
-    s.add_argument("--genre", help="comma-separated genres")
+    s.add_argument("--genre", help="comma-separated genres, e.g. romance,comedy "
+                                   "(a title has to have all of them)")
     s.add_argument("--min-chars", type=int, help="skip anything shorter")
     s.add_argument("--sort", default="wordCount",
                    help="title, difficulty, charCount, wordCount, coverage, "
