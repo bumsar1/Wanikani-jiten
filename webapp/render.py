@@ -726,9 +726,9 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             h.append("</table></div>")
         h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
-        if extras.get("nihongo_totals"):
+        if extras.get("has_nihongo_key"):
             h.append(h2("Immersion"))
-            h.append(w.immersion_html(extras["nihongo_totals"],
+            h.append(w.immersion_html(extras.get("nihongo_totals"),
                                       extras.get("nihongo_unmeasured")))
 
         h.append(h2("What each level would buy you"))
@@ -806,12 +806,17 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         for d in done:
             did = d["deck_id"]
             cov = d.get("coverage")
+            out = d.get("link")
             h.append(
                 f'<tr><td class="withcover"><span class="ct">'
                 f'<img class="cover" loading="lazy" alt="" src="{w.cover_url(did)}"'
                 f' onerror="{hide}">'
-                f'<a href="https://jiten.moe/decks/media/{did}/detail"'
-                f' target="_blank" rel="noopener">{esc(d["title"])}</a></span></td>'
+                f'<span><a href="https://jiten.moe/decks/media/{did}/detail"'
+                f' target="_blank" rel="noopener">{esc(d["title"])}</a>'
+                + (f' <a class="subs" href="{esc(out[1])}" target="_blank"'
+                   f' rel="noopener" title="Look it up on {esc(out[0])}">'
+                   f'{esc(out[0])}</a>' if out else "")
+                + '</span></span></td>'
                 f'<td class="num">{d.get("chars") or 0:,}</td>'
                 f'<td class="num">{f"{cov:.0f}%" if cov else "&mdash;"}</td></tr>')
         h.append("</table></div>")

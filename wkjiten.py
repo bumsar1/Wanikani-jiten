@@ -859,6 +859,11 @@ def cmd_deck(args) -> None:
 # the same ids Jiten stores in a deck's `links`.
 
 NIHONGO_API = "https://nihongotracker.app/api"
+# An optional garnish must not be able to hold up a page. The default policy is
+# four tries at a two-minute timeout, which is right for the calls a run cannot
+# do without and badly wrong for one that only adds a column: a host that
+# accepts the connection and then says nothing would stall for minutes.
+OPTIONAL = {"timeout": 15, "retries": 2}
 ANILIST_LINK_RE = re.compile(r"anilist\.co/(anime|manga)/(\d+)")
 VNDB_LINK_RE = re.compile(r"vndb\.org/(v\d+)")
 # AniList files light novels under /manga/, and NihongoTracker splits them out
@@ -882,7 +887,8 @@ def nihongo_headers(key: str | None) -> dict:
 def nihongo_whoami(key: str) -> str | None:
     """Whose account the key is. Saves asking for a username as well."""
     try:
-        data = get_json(f"{NIHONGO_API}/auth/verify", headers=nihongo_headers(key))
+        data = get_json(f"{NIHONGO_API}/auth/verify", headers=nihongo_headers(key),
+                        **OPTIONAL)
     except SystemExit:
         return None
     return ((data or {}).get("user") or {}).get("username")
@@ -905,7 +911,8 @@ def nihongo_index(username: str, key: str) -> dict[str, list[tuple[str, dict]]]:
     """content id -> the entries logged under it. One request for everything."""
     try:
         data = get_json(f"{NIHONGO_API}/users/{urllib.parse.quote(username)}"
-                        f"/immersionlist", headers=nihongo_headers(key))
+                        f"/immersionlist", headers=nihongo_headers(key),
+                        **OPTIONAL)
     except SystemExit:
         return {}
     index: dict[str, list[tuple[str, dict]]] = {}
@@ -923,7 +930,7 @@ def nihongo_media_stats(kind: str, content_id: str, key: str) -> dict | None:
         data = get_json(f"{NIHONGO_API}/logs/stats/media"
                         f"?mediaId={urllib.parse.quote(content_id)}"
                         f"&type={urllib.parse.quote(kind)}",
-                        headers=nihongo_headers(key))
+                        headers=nihongo_headers(key), **OPTIONAL)
     except SystemExit:
         return None
     return (data or {}).get("total")
@@ -989,7 +996,7 @@ def jiten_decks_for_link(link_type: int, ident: str, key: str | None) -> list[in
     try:
         data = get_json(f"{JITEN_API}/api/media-deck/by-link-id/{link_type}/"
                         f"{urllib.parse.quote(str(ident))}",
-                        headers=jiten_headers(key))
+                        headers=jiten_headers(key), **OPTIONAL)
     except SystemExit:
         return []
     return [int(x) for x in (data or []) if isinstance(x, int)]
@@ -1039,7 +1046,7 @@ def nihongo_totals(key: str | None, username: str | None = None) -> dict | None:
         return None
     try:
         data = get_json(f"{NIHONGO_API}/users/{urllib.parse.quote(username)}/stats",
-                        headers=nihongo_headers(key))
+                        headers=nihongo_headers(key), **OPTIONAL)
     except SystemExit:
         return None
     totals = (data or {}).get("totals") or {}
@@ -1090,9 +1097,15 @@ def immersion_html(totals: dict | None, unmeasured: list[dict] | None) -> str:
     Everything NihongoTracker knows that this tool can do something with, in
     one place - rather than a second copy of their own stats page, which is
     one click away and better.
+
+    totals=None with a key set means the key was refused or the site did not
+    answer; say so rather than leaving a section-shaped hole.
     """
     if not totals:
-        return ""
+        return ('<p class="empty">Your NihongoTracker key did not get an answer '
+                '&mdash; either it has been revoked, or the site is not '
+                'reachable right now. Everything else on this page is '
+                'unaffected.</p>')
     h = [f'<p class="sub">From <a href="https://nihongotracker.app/user/'
          f'{urllib.parse.quote(totals["username"])}" target="_blank"'
          f' rel="noopener">nihongotracker.app</a> &middot; '
@@ -1195,7 +1208,7 @@ def jimaku_entry(anilist: int, key: str) -> int | None:
         return hit
 
     status, body, _ = http(f"{JIMAKU_API}/entries/search?anilist_id={anilist}",
-                           headers={"Authorization": key}, timeout=30)
+                           headers={"Authorization": key}, **OPTIONAL)
     entry = None
     if status < 400:
         try:
@@ -2775,7 +2788,6 @@ function sortable(){
 """
 
 REACH_CSS = """
-.reachtabs { margin-bottom:12px; }
 .levelbar { align-items:center; margin-bottom:12px; }
 /* Direct children only: the tag menu's checkbox labels sit inside a .controls
    too, and they are not part of the row. */
@@ -3797,7 +3809,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
 
     h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
-    if ntotals:
+    if nkey:
         h.append(h2("Immersion"))
         h.append(immersion_html(ntotals, nunmeasured))
 

@@ -306,9 +306,15 @@ def dashboard():
         for d, r in decks])
 
     prev = store.get_snapshot(user["id"], "previous")
+    # The outside links live on the raw rows, which are too big to keep in a
+    # stored snapshot - so they are attached here, for this render only.
+    links = {row["deckId"]: w.outside_link(row) for row in raw_decks}
+    finished = []
+    for r in everything:
+        if r["status"] == "completed":
+            finished.append(dict(r, link=links.get(r["deck_id"])))
     extras = {"status": status, "tags": [], "moved_up": set(),
-              "jimaku_key": creds.get("jimaku_key"),
-              "finished": [r for r in everything if r["status"] == "completed"]}
+              "jimaku_key": creds.get("jimaku_key"), "finished": finished}
     if prev:
         old = w.wk_known(prev)
         extras["d_kanji"] = len(known["kanji_known"]) - len(old["kanji_known"])
@@ -330,6 +336,7 @@ def dashboard():
     # NihongoTracker, if this account brought a key. Every step is allowed to
     # come back empty; the column simply does not appear then.
     nkey = creds.get("nihongo_key")
+    extras["has_nihongo_key"] = bool(nkey)
     if nkey:
         who = w.nihongo_whoami(nkey)
         if who:
