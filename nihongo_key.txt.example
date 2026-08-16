@@ -1,0 +1,12 @@
+# NihongoTracker API key - https://nihongotracker.app -> settings -> API keys
+#
+# Optional. Adds the hours and episodes you have actually logged beside each
+# tracked title. The match is on the AniList and VNDB ids both sites already
+# store, so nothing is guessed from titles. Without it you lose that column
+# and nothing else.
+#
+# NOT read-only: this key is accepted on every endpoint your account can
+# reach, including the ones that delete logs. Treat it like your password.
+#
+# Paste the key on its own line below. Lines starting with # are ignored.
+

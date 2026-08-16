@@ -113,11 +113,12 @@ def settings_page(user, creds, note: str = "", error: str = "") -> str:
     has_wk = "stored" if creds.get("wk_token") else "not set"
     has_jt = "stored" if creds.get("jiten_key") else "not set"
     has_jm = "stored" if creds.get("jimaku_key") else "not set"
+    has_nt = "stored" if creds.get("nihongo_key") else "not set"
     return shell("Settings", f"""
       <h1>Settings</h1>{msg}
       <h2>API keys</h2>
-      <p class="sub">Both are encrypted before they touch the database. Leave a
-      field blank to keep what is already stored.</p>
+      <p class="sub">All of them are encrypted before they touch the database.
+      Leave a field blank to keep what is already stored.</p>
       <form method="post" class="authbox" style="margin:0 0 24px;max-width:560px">
         <div class="field">
           <label for="wk">WaniKani token &mdash; currently {has_wk}</label>
@@ -149,6 +150,18 @@ def settings_page(user, creds, note: str = "", error: str = "") -> str:
             drama and film, straight to that title's Japanese subtitles. Yours
             is at <a href="https://jimaku.cc/account" target="_blank"
                rel="noopener">jimaku.cc/account</a>.</div>
+        </div>
+        <div class="field">
+          <label for="nt">NihongoTracker API key &mdash; currently {has_nt}</label>
+          <input id="nt" name="nihongo_key" placeholder="paste to replace"
+                 autocomplete="off">
+          <div class="hint">Optional. Adds the hours and episodes you have
+            logged beside each title, matched on the AniList and VNDB ids both
+            sites already use. Yours is at
+            <a href="https://nihongotracker.app" target="_blank" rel="noopener"
+               >nihongotracker.app</a>. This one is <b>not read-only</b>
+            either &mdash; it is accepted everywhere your account can reach,
+            including deleting logs.</div>
         </div>
         <button class="go" type="submit">Save</button>
       </form>
@@ -638,6 +651,14 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         best = max(decks, key=lambda r: r[1]["kanji_cov_occ"])
         h.append(card(f'{best[1]["kanji_cov_occ"]:.0f}%',
                       f'best: {esc(w.deck_title(best[0])[:14])}'))
+    ntot = extras.get("nihongo_totals")
+    if ntot:
+        h.append(f'<div class="card"><div class="n">{ntot["hours"]:.0f}h</div>'
+                 f'<div class="l">immersion logged</div>'
+                 f'<div class="d">{ntot["listening"]:.0f}h listening &middot; '
+                 f'{ntot["reading"]:.0f}h reading'
+                 + (f' &middot; {ntot["streak"]}d streak' if ntot["streak"] else "")
+                 + '</div></div>')
     h.append("</div>")
     h.append(w.BROWSE_SLOT)
 
@@ -650,7 +671,10 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         h.append(h2("Your tracked titles"))
         groups = w.by_media_type(decks)
         split = len(groups) > 1
+        nprog = extras.get("nihongo") or {}
         tcls = "sortable tight grouped" if split else "sortable tight"
+        if nprog:
+            tcls += " nt"
         for mtype, group in groups:
             if split:
                 h.append(f'<h3 class="mediahead">'
@@ -660,7 +684,9 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                      f'<th>title</th><th class="num">kanji</th>'
                      f'<th class="num">finish L{lvl}</th><th class="num">jiten</th>'
                      f'<th class="num">lvl 95%</th><th class="num">ceiling</th>'
-                     f'<th class="num">trend</th></tr>')
+                     f'<th class="num">trend</th>'
+                     + ('<th class="num">immersion</th>' if nprog else "")
+                     + '</tr>')
             for deck, res in group:
                 did = deck.get("deckId")
                 live = deck.get("coverage")
@@ -669,6 +695,7 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                 out = w.outside_link(deck)
                 fin = w.finishing_level(res, lvl)
                 trend = _trend(history.get(did, []))
+                nsort, ncell = w.nihongo_cell(nprog.get(did))
                 h.append(
                     f'<tr><td><a href="https://jiten.moe/decks/media/{did}/detail"'
                     f' target="_blank" rel="noopener">{esc(w.deck_title(deck))}</a>'
@@ -692,7 +719,10 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                     f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
                     f'<td class="num">{w.level_for(res["curve"], 95) or "&mdash;"}</td>'
                     f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
-                    f'<td class="num">{trend}</td></tr>')
+                    f'<td class="num">{trend}</td>'
+                    + (f'<td class="num" data-sort="{nsort}">{ncell}</td>'
+                       if nprog else "")
+                    + '</tr>')
             h.append("</table></div>")
         h.append('<div id="subsbox" class="subsbox" hidden></div>')
 

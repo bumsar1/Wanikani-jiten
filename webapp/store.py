@@ -171,8 +171,9 @@ def init() -> None:
             if col not in cols:
                 con.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
         ccols = {r["name"] for r in con.execute("PRAGMA table_info(creds)")}
-        if "jimaku_key" not in ccols:
-            con.execute("ALTER TABLE creds ADD COLUMN jimaku_key BLOB")
+        for col in ("jimaku_key", "nihongo_key"):
+            if col not in ccols:
+                con.execute(f"ALTER TABLE creds ADD COLUMN {col} BLOB")
 
 
 def now() -> str:
@@ -394,20 +395,25 @@ def list_invites():
 # --------------------------------------------------------------- credentials
 
 def set_creds(user_id: int, wk_token: str | None, jiten_key: str | None,
-              jimaku_key: str | None = None) -> None:
+              jimaku_key: str | None = None,
+              nihongo_key: str | None = None) -> None:
     """Keys are only overwritten when a new value is supplied, so a blank field
     on the settings form leaves the stored one alone."""
     current = get_creds(user_id)
     wk = wk_token if wk_token else current.get("wk_token")
     jt = jiten_key if jiten_key else current.get("jiten_key")
     jm = jimaku_key if jimaku_key else current.get("jimaku_key")
+    nt = nihongo_key if nihongo_key else current.get("nihongo_key")
     with db() as con:
         con.execute(
             "INSERT INTO creds (user_id, wk_token, jiten_key, jimaku_key,"
-            " updated_at) VALUES (?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET"
+            " nihongo_key, updated_at) VALUES (?,?,?,?,?,?)"
+            " ON CONFLICT(user_id) DO UPDATE SET"
             " wk_token = excluded.wk_token, jiten_key = excluded.jiten_key,"
-            " jimaku_key = excluded.jimaku_key, updated_at = excluded.updated_at",
-            (user_id, encrypt(wk), encrypt(jt), encrypt(jm), now()))
+            " jimaku_key = excluded.jimaku_key,"
+            " nihongo_key = excluded.nihongo_key,"
+            " updated_at = excluded.updated_at",
+            (user_id, encrypt(wk), encrypt(jt), encrypt(jm), encrypt(nt), now()))
 
 
 def clear_jiten_key(user_id: int) -> None:
@@ -422,10 +428,13 @@ def get_creds(user_id: int) -> dict:
                           (user_id,)).fetchone()
     if not row:
         return {}
+    cols = row.keys()
     return {"wk_token": decrypt(row["wk_token"]),
             "jiten_key": decrypt(row["jiten_key"]),
-            "jimaku_key": decrypt(row["jimaku_key"]) if "jimaku_key"
-                          in row.keys() else None,
+            "jimaku_key": decrypt(row["jimaku_key"])
+                          if "jimaku_key" in cols else None,
+            "nihongo_key": decrypt(row["nihongo_key"])
+                           if "nihongo_key" in cols else None,
             "updated_at": row["updated_at"]}
 
 

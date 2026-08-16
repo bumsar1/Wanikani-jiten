@@ -1,8 +1,8 @@
 # wkjiten, hosted
 
 The same analysis as the command-line tool, with accounts. Everyone brings their
-own WaniKani token and (optionally) their own Jiten key, and sees their own
-numbers. The local tool in the parent directory is untouched and keeps working
+own WaniKani token and (optionally) their own Jiten, jimaku.cc and
+NihongoTracker keys, and sees their own numbers. The local tool in the parent directory is untouched and keeps working
 exactly as before — this imports it rather than forking it, so both stay in step.
 
 Deck word lists are cached **once for the whole instance**, because a word list
@@ -40,6 +40,10 @@ from WaniKani.
 your known words and delete cards. Treat it like your password." If you ask a
 friend to paste theirs into your server, you are asking for something
 password-shaped, and you become responsible for keeping it.
+
+The NihongoTracker key is the same shape — it is accepted on every endpoint
+that account can reach, including the ones that delete logs — and this only
+ever reads with it.
 
 So: keys are encrypted with Fernet before they are written, the key lives
 outside the database, and the Jiten key is optional — without it a user still

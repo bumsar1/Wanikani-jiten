@@ -33,6 +33,7 @@ inside it:
 wanikani_token.txt     waiting for your key
 jiten_key.txt          waiting for your key
 jimaku_key.txt         waiting for your key
+nihongo_key.txt        waiting for your key
 ```
 
 Paste each key on its own line — comments starting with `#` are ignored, so the
@@ -43,6 +44,7 @@ notes can stay.
 | `wanikani_token.txt` | [wanikani.com/settings/personal_access_tokens](https://www.wanikani.com/settings/personal_access_tokens) — **read-only** is enough | everything |
 | `jiten_key.txt` | [jiten.moe/settings](https://jiten.moe/settings) → API Key, shown once | your account's word coverage, uploading known words, the list buttons |
 | `jimaku_key.txt` | [jimaku.cc/account](https://jimaku.cc/account) | the **subs** link beside anime |
+| `nihongo_key.txt` | [nihongotracker.app](https://nihongotracker.app) → settings → API keys | the hours you have logged, beside each title |
 
 Only the first is required. Then run the launcher again and it does the rest.
 
@@ -59,8 +61,8 @@ coverage for everything you are tracking, lists the leeches holding you back,
 and opens a dashboard showing:
 
 * how many kanji and words you have learned since last time, and which
-* coverage per tracked title, its trend, and what finishing your current level
-  would add on its own
+* coverage per tracked title, its trend, the hours you have actually put into
+  it, and what finishing your current level would add on its own
 * a curve of what every WaniKani level would give you, with a slider to try one
 * the kanji grid — all ~2,100 of them by level, coloured by SRS stage or by how
   much not knowing each costs you
@@ -154,6 +156,13 @@ them.
 * **The Jiten key is not read-only.** Their own docs say it carries every
   permission your account has, including rewriting known words and deleting
   cards. `push` writes to your account — run `export` and look at the file first.
+  The NihongoTracker key is the same shape: it is accepted everywhere your
+  account can reach. Nothing here writes to either of those two, but the keys
+  themselves are password-shaped.
+* **The immersion figures are matched, not guessed.** NihongoTracker keys its
+  media on AniList ids and VNDB ids, and Jiten stores those same ids on a deck,
+  so the two are joined on the id rather than on the title. A title with no such
+  link, or one you have never logged, simply has no number.
 * Without a Jiten key the word-coverage figures fall back to a local estimate
   that matches on exact spelling and reads far too low. The kanji figures are
   unaffected.

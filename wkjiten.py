@@ -639,7 +639,8 @@ def bar(pct: float, width: int = 32) -> str:
 # commands
 # --------------------------------------------------------------------------
 
-KEY_FILES = ("wanikani_token.txt", "jiten_key.txt", "jimaku_key.txt")
+KEY_FILES = ("wanikani_token.txt", "jiten_key.txt", "jimaku_key.txt",
+             "nihongo_key.txt")
 
 
 def ensure_key_files() -> list[str]:
@@ -846,6 +847,175 @@ def cmd_deck(args) -> None:
 
     for deck, words in load_decks(args.deck_ids, key, args.sleep):
         report(deck, analyse_deck(words, known), known, args)
+
+
+# --------------------------------------------------------------------------
+# nihongotracker.app - what you have actually watched and read
+# --------------------------------------------------------------------------
+# The three sites answer different questions: WaniKani what you can read,
+# Jiten how hard a title is, NihongoTracker what you have actually sat
+# through. The join is exact rather than by title, because NihongoTracker
+# keys its media on AniList ids (anime, manga) and VNDB ids (visual novels) -
+# the same ids Jiten stores in a deck's `links`.
+
+NIHONGO_API = "https://nihongotracker.app/api"
+ANILIST_LINK_RE = re.compile(r"anilist\.co/(anime|manga)/(\d+)")
+VNDB_LINK_RE = re.compile(r"vndb\.org/(v\d+)")
+# AniList files light novels under /manga/, and NihongoTracker splits them out
+# again, so a manga-shaped id has to be looked for under all three.
+NIHONGO_KINDS = {"anime": ("anime",),
+                 "manga": ("manga", "light-novel", "book"),
+                 "vn": ("vn",)}
+
+
+def nihongo_key(cli_key: str | None = None) -> str | None:
+    key = cli_key or os.environ.get("NIHONGO_API_KEY")
+    if not key:
+        key = read_key_file(os.path.join(HERE, "nihongo_key.txt"))
+    return key or None
+
+
+def nihongo_headers(key: str | None) -> dict:
+    return {"x-api-key": key} if key else {}
+
+
+def nihongo_whoami(key: str) -> str | None:
+    """Whose account the key is. Saves asking for a username as well."""
+    try:
+        data = get_json(f"{NIHONGO_API}/auth/verify", headers=nihongo_headers(key))
+    except SystemExit:
+        return None
+    return ((data or {}).get("user") or {}).get("username")
+
+
+def nihongo_ref(deck: dict) -> tuple[str, str] | None:
+    """(kind, content id) for a Jiten deck, read off its own outside links."""
+    for link in deck.get("links") or []:
+        url = link.get("url") or ""
+        m = VNDB_LINK_RE.search(url)
+        if m:
+            return "vn", m.group(1)
+        m = ANILIST_LINK_RE.search(url)
+        if m:
+            return m.group(1), m.group(2)
+    return None
+
+
+def nihongo_index(username: str, key: str) -> dict[str, list[tuple[str, dict]]]:
+    """content id -> the entries logged under it. One request for everything."""
+    try:
+        data = get_json(f"{NIHONGO_API}/users/{urllib.parse.quote(username)}"
+                        f"/immersionlist", headers=nihongo_headers(key))
+    except SystemExit:
+        return {}
+    index: dict[str, list[tuple[str, dict]]] = {}
+    for kind, items in (data or {}).items():
+        for item in items or []:
+            cid = str(item.get("contentId") or "")
+            if cid:
+                index.setdefault(cid, []).append((kind, item))
+    return index
+
+
+def nihongo_media_stats(kind: str, content_id: str, key: str) -> dict | None:
+    """Episodes, characters, hours and dates for one title."""
+    try:
+        data = get_json(f"{NIHONGO_API}/logs/stats/media"
+                        f"?mediaId={urllib.parse.quote(content_id)}"
+                        f"&type={urllib.parse.quote(kind)}",
+                        headers=nihongo_headers(key))
+    except SystemExit:
+        return None
+    return (data or {}).get("total")
+
+
+def nihongo_progress(decks: Iterable[dict], key: str | None,
+                     username: str | None = None) -> dict[int, dict]:
+    """deckId -> what you have logged on it, for the titles you have logged.
+
+    The immersion list comes first so the per-title calls only go out for
+    titles that are on both sides. Nothing here is fatal: an account with no
+    logs, a title with no AniList link, a site that is down - each just means
+    no number beside that row.
+    """
+    if not key:
+        return {}
+    username = username or nihongo_whoami(key)
+    if not username:
+        return {}
+    index = nihongo_index(username, key)
+    if not index:
+        return {}
+    out: dict[int, dict] = {}
+    for deck in decks:
+        ref = nihongo_ref(deck)
+        if not ref:
+            continue
+        hint, cid = ref
+        entries = index.get(cid) or []
+        wanted = NIHONGO_KINDS.get(hint, (hint,))
+        match = next((e for e in entries if e[0] in wanted), None)
+        if not match:
+            continue
+        kind, item = match
+        total = nihongo_media_stats(kind, cid, key)
+        if not total:
+            continue
+        out[deck.get("deckId")] = {
+            "hours": total.get("hours") or 0,
+            "episodes": total.get("episodes") or 0,
+            "chars": total.get("characters") or 0,
+            "logs": total.get("logs") or 0,
+            "last": (total.get("lastLogDate") or "")[:10],
+            "kind": kind,
+            "done": bool(item.get("isCompleted")),
+        }
+    return out
+
+
+def nihongo_totals(key: str | None, username: str | None = None) -> dict | None:
+    """Hours, streak and level across everything you have logged."""
+    if not key:
+        return None
+    username = username or nihongo_whoami(key)
+    if not username:
+        return None
+    try:
+        data = get_json(f"{NIHONGO_API}/users/{urllib.parse.quote(username)}/stats",
+                        headers=nihongo_headers(key))
+    except SystemExit:
+        return None
+    totals = (data or {}).get("totals") or {}
+    if not totals:
+        return None
+    return {"username": username,
+            "hours": totals.get("totalTimeHours") or 0,
+            "reading": totals.get("readingHours") or 0,
+            "listening": totals.get("listeningHours") or 0,
+            "logs": totals.get("totalLogs") or 0,
+            "chars": totals.get("totalChars") or 0,
+            "streak": ((data or {}).get("streaks") or {}).get("currentStreak") or 0,
+            "days": totals.get("dayCount") or 0}
+
+
+def nihongo_cell(entry: dict | None) -> tuple[str, str]:
+    """(sort value, cell html) for one title's logged immersion.
+
+    The sort value is separate because the cell carries two numbers, and the
+    table sorter strips non-digits from the whole cell - "0.3h2 ep" would
+    otherwise sort as 0.32 against "2h5 ep" as 25.
+    """
+    if not entry:
+        return "", "&mdash;"
+    hours = entry["hours"]
+    head = f"{hours:.1f}h" if hours < 10 else f"{hours:.0f}h"
+    if entry["episodes"]:
+        detail = f'{entry["episodes"]} ep'
+    elif entry["chars"]:
+        detail = f'{entry["chars"]:,} chars'
+    else:
+        detail = f'{entry["logs"]} log{"" if entry["logs"] == 1 else "s"}'
+    return f"{hours:.4f}", f'{head}<div class="und">{esc(detail)}</div>'
 
 
 JIMAKU_API = "https://jimaku.cc/api"
@@ -2000,7 +2170,11 @@ table.grouped th:nth-child(4) { width:66px; }
 table.grouped th:nth-child(5) { width:74px; }
 table.grouped th:nth-child(6) { width:74px; }
 table.grouped th:nth-child(7) { width:68px; }
+table.grouped th:nth-child(8) { width:104px; }
 table.grouped td:first-child { word-break:break-word; }
+/* The immersion column only exists when there is a NihongoTracker key. */
+table.nt { min-width:744px; }
+.und { font-size:11px; font-weight:500; color:var(--faint); margin-top:1px; }
 .mediahead span { font-size:11.5px; font-weight:600; color:var(--faint);
   background:var(--line-soft); border-radius:99px; padding:2px 8px;
   margin-left:6px; vertical-align:2px; }
@@ -2439,7 +2613,10 @@ function sortable(){
         th.dataset.dir = dir; th.classList.add('sorted');
         const rows = [...tbl.rows].slice(1);
         const val = r => {
-          const t = (r.cells[i]?.textContent || '').trim();
+          // data-sort wins: a cell holding two numbers cannot be read by
+          // stripping the non-digits out of all of its text.
+          const cell = r.cells[i];
+          const t = (cell?.dataset.sort ?? cell?.textContent ?? '').trim();
           const n = parseFloat(t.replace(/[^0-9.+-]/g, ''));
           return isNaN(n) ? null : n;
         };
@@ -3331,6 +3508,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     ids = tracked_ids(args, key)
     lvl = cache.get("level") or 0
     jkey = jimaku_key(getattr(args, "jimaku_key", None))
+    nkey = nihongo_key(getattr(args, "nihongo_key", None))
 
     # Listed but never analysed: you are done with these, and each would cost a
     # word-list download to measure.
@@ -3357,6 +3535,19 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                             mode=args.mode, level=args.level)
         prev_summary = (len(known["kanji_known"]) - len(prev["kanji_known"]),
                         len(known["words_known_set"]) - len(prev["words_known_set"]))
+
+    # What you have actually watched and read. Optional, and quiet when it is
+    # not configured: no key, no logs, or no AniList link on a title all just
+    # mean the column does not appear.
+    nprog: dict[int, dict] = {}
+    ntotals = None
+    if nkey:
+        who = nihongo_whoami(nkey)
+        if who:
+            ntotals = nihongo_totals(nkey, who)
+            nprog = nihongo_progress([d for d, _ in rows], nkey, who)
+            print(f"NihongoTracker: {who}, {len(nprog)} of {len(rows)} "
+                  f"tracked titles have logs")
 
     head = (f"<title>{esc(cache.get('username'))} - WaniKani coverage</title>"
             f"<style>{REPORT_CSS}</style>")
@@ -3390,6 +3581,14 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         best = max(rows, key=lambda r: r[1]["kanji_cov_occ"])
         h.append(card(f'{best[1]["kanji_cov_occ"]:.0f}%',
                       f"best: {esc(deck_title(best[0])[:14])}"))
+    if ntotals:
+        streak = ntotals["streak"]
+        h.append(f'<div class="card"><div class="n">{ntotals["hours"]:.0f}h</div>'
+                 f'<div class="l">immersion logged</div>'
+                 f'<div class="d">{ntotals["listening"]:.0f}h listening &middot; '
+                 f'{ntotals["reading"]:.0f}h reading'
+                 + (f' &middot; {streak}d streak' if streak else "")
+                 + '</div></div>')
     h.append("</div>")
     h.append(BROWSE_SLOT)
 
@@ -3397,6 +3596,8 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     groups = by_media_type(rows)
     split = len(groups) > 1
     tcls = "sortable tight grouped" if split else "sortable tight"
+    if nprog:
+        tcls += " nt"
     for mtype, group in groups:
         if split:
             h.append(f'<h3 class="mediahead">'
@@ -3405,7 +3606,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         h.append(f'<div class="wrap"><table class="{tcls}"><tr><th>title</th>'
                  f'<th class="num">kanji</th><th class="num">finish L{lvl}</th>'
                  f'<th class="num">jiten</th><th class="num">lvl 95%</th>'
-                 f'<th class="num">ceiling</th><th class="num">trend</th></tr>')
+                 f'<th class="num">ceiling</th><th class="num">trend</th>'
+                 + ('<th class="num">immersion</th>' if nprog else "")
+                 + '</tr>')
         for deck, res in group:
             deck_id = deck.get("deckId")
             live = deck.get("coverage")
@@ -3419,6 +3622,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
             fin = finishing_level(res, lvl)
             fin_cell = ("&mdash;" if fin is None else
                         f'{fin:.1f}% <span class="up">{fin - k:+.1f}</span>')
+            nsort, ncell = nihongo_cell(nprog.get(deck_id))
             h.append(
                 f'<tr><td><a href="https://jiten.moe/decks/media/{deck_id}/detail">'
                 f'{esc(deck_title(deck))}</a>'
@@ -3442,7 +3646,10 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                 f'<td class="num">{f"{live:.1f}%" if live is not None else "&mdash;"}</td>'
                 f'<td class="num">{level_for(res["curve"], 95) or "&mdash;"}</td>'
                 f'<td class="num">{100 - res["not_in_wk_pct"]:.1f}%</td>'
-                f'<td class="num">{t}</td></tr>')
+                f'<td class="num">{t}</td>'
+                + (f'<td class="num" data-sort="{nsort}">{ncell}</td>'
+                   if nprog else "")
+                + '</tr>')
         h.append("</table></div>")
 
     h.append('<div id="subsbox" class="subsbox" hidden></div>')
@@ -3914,6 +4121,9 @@ def main() -> None:
                             help="Jiten API key (optional for public reads)")
         parser.add_argument("--jimaku-key", default=d(None),
                             help="jimaku.cc API key, for subtitle links")
+        parser.add_argument("--nihongo-key", default=d(None),
+                            help="nihongotracker.app API key, for the hours "
+                                 "you have logged on each title")
         parser.add_argument("--refresh", action="store_true",
                             default=d(False), help="re-fetch WaniKani data")
         parser.add_argument("--mode", choices=["srs", "level"], default=d("srs"),

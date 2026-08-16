@@ -211,7 +211,8 @@ def save_settings():
     store.set_creds(user["id"],
                     request.form.get("wk_token", "").strip() or None,
                     request.form.get("jiten_key", "").strip() or None,
-                    request.form.get("jimaku_key", "").strip() or None)
+                    request.form.get("jimaku_key", "").strip() or None,
+                    request.form.get("nihongo_key", "").strip() or None)
     creds = creds_of(user)
     if creds.get("wk_token") and not store.get_snapshot(user["id"]):
         threading.Thread(target=refresh_wanikani,
@@ -322,6 +323,16 @@ def dashboard():
                                         headers=w.jiten_headers(key))
         except SystemExit:
             pass
+
+    # NihongoTracker, if this account brought a key. Every step is allowed to
+    # come back empty; the column simply does not appear then.
+    nkey = creds.get("nihongo_key")
+    if nkey:
+        who = w.nihongo_whoami(nkey)
+        if who:
+            extras["nihongo"] = w.nihongo_progress([d for d, _ in decks],
+                                                   nkey, who) or {}
+            extras["nihongo_totals"] = w.nihongo_totals(nkey, who)
 
     return render.dashboard(user, cache, known, decks,
                             store.get_history(user["id"]), extras)
