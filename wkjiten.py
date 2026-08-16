@@ -2008,6 +2008,9 @@ table.grouped td:first-child { word-break:break-word; }
 button.subs { font-family:inherit; cursor:pointer; background:var(--bg); }
 button.subs:disabled { opacity:.55; cursor:default; }
 button.subs.done { color:var(--good); border-color:var(--good); }
+button.subs.arm { color:var(--accent); border-color:var(--accent);
+  background:var(--accent-soft); }
+tr.gone { opacity:.42; }
 .pill { display:inline-block; font-size:11px; padding:2px 9px; border-radius:99px;
   background:var(--accent-soft); color:var(--accent); font-weight:620;
   white-space:nowrap; }
@@ -2105,8 +2108,20 @@ STATUS_JS = """
     return;
   }
   document.querySelectorAll('.setst').forEach(function (btn) {
+    const was = btn.textContent;
+    let timer = 0;
     btn.addEventListener('click', async function () {
-      const was = btn.textContent;
+      // Taking a title off your lists is one stray click from being an
+      // accident, so it asks first. Setting a status is not - you can just
+      // set another one.
+      if (btn.dataset.confirm && !timer){
+        btn.textContent = 'sure?'; btn.classList.add('arm');
+        timer = setTimeout(function (){
+          timer = 0; btn.textContent = was; btn.classList.remove('arm');
+        }, 4000);
+        return;
+      }
+      clearTimeout(timer); timer = 0; btn.classList.remove('arm');
       btn.disabled = true; btn.textContent = 'saving…';
       try {
         const r = await fetch('/api/user/deck-preferences/' + btn.dataset.deck +
@@ -2114,8 +2129,11 @@ STATUS_JS = """
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({status: +btn.dataset.st})});
         if (!r.ok) throw new Error(r.status);
-        btn.textContent = 'finished ✓';
+        btn.textContent = btn.dataset.done || 'done ✓';
         btn.classList.add('done');
+        // The row is stale from here on: it stays visible so you can see what
+        // you did, and is gone on the next refresh.
+        if (btn.dataset.drop) btn.closest('tr')?.classList.add('gone');
       } catch (e){
         btn.textContent = 'failed'; btn.disabled = false;
         setTimeout(() => { btn.textContent = was; }, 2000);
@@ -3412,7 +3430,11 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                    f' title="Japanese subtitles on jimaku.cc">subs</button>'
                    if subs else "")
                 + f' <button class="subs setst" data-deck="{deck_id}" data-st="3"'
+                  f' data-done="finished ✓"'
                   f' title="Mark as finished on jiten.moe">finished</button>'
+                + f' <button class="subs setst" data-deck="{deck_id}" data-st="0"'
+                  f' data-done="removed ✓" data-confirm="1" data-drop="1"'
+                  f' title="Take it off your jiten.moe lists">remove</button>'
                 + f'</td>'
                 f'<td class="num">{k:.1f}%'
                 f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'

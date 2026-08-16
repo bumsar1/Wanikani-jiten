@@ -680,7 +680,11 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                        f' title="Japanese subtitles on jimaku.cc">subs</button>'
                        if subs else "")
                     + f' <button class="subs setst" data-deck="{did}" data-st="3"'
+                      f' data-done="finished ✓"'
                       f' title="Mark as finished on jiten.moe">finished</button>'
+                    + f' <button class="subs setst" data-deck="{did}" data-st="0"'
+                      f' data-done="removed ✓" data-confirm="1" data-drop="1"'
+                      f' title="Take it off your jiten.moe lists">remove</button>'
                     + f'</td>'
                     f'<td class="num">{k:.1f}%'
                     f'<span class="meter"><i style="width:{k:.1f}%"></i></span></td>'
