@@ -726,6 +726,40 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             h.append("</table></div>")
         h.append('<div id="subsbox" class="subsbox" hidden></div>')
 
+    done = extras.get("finished") or []
+    h.append(h2("Finished"))
+    if done:
+        n = len(done)
+        h.append(f'<p class="sub">{n} title{"" if n == 1 else "s"} you have '
+                 f'finished. No coverage is worked out for these &mdash; you are '
+                 f'done with them.</p>')
+        h.append('<div class="wrap"><table class="sortable"><tr><th>title</th>'
+                 '<th class="num">chars</th>'
+                 '<th class="num">jiten coverage</th></tr>')
+        hide = "this.style.visibility='hidden'"
+        for d in done:
+            did = d["deck_id"]
+            cov = d.get("coverage")
+            out = d.get("link")
+            h.append(
+                f'<tr><td class="withcover"><span class="ct">'
+                f'<img class="cover" loading="lazy" alt="" src="{w.cover_url(did)}"'
+                f' onerror="{hide}">'
+                f'<span><a href="https://jiten.moe/decks/media/{did}/detail"'
+                f' target="_blank" rel="noopener">{esc(d["title"])}</a>'
+                + (f' <a class="subs" href="{esc(out[1])}" target="_blank"'
+                   f' rel="noopener" title="Look it up on {esc(out[0])}">'
+                   f'{esc(out[0])}</a>' if out else "")
+                + '</span></span></td>'
+                f'<td class="num">{d.get("chars") or 0:,}</td>'
+                f'<td class="num">{f"{cov:.0f}%" if cov else "&mdash;"}</td></tr>')
+        h.append("</table></div>")
+    else:
+        h.append('<p class="empty">Nothing marked finished yet. Search above for '
+                 'something you have already seen and press <b>finished</b>, or '
+                 'use the button beside a title you are tracking.</p>')
+
+    if decks:
         if extras.get("has_nihongo_key"):
             h.append(h2("Immersion"))
             h.append(w.immersion_html(extras.get("nihongo_totals"),
@@ -791,39 +825,6 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                      f'<td>{w.SRS_STAGE_NAMES.get(stage, "?")}</td>'
                      f'<td class="num">{klvl}</td></tr>')
         h.append("</table></div></details>")
-
-    done = extras.get("finished") or []
-    h.append(h2("Finished"))
-    if done:
-        n = len(done)
-        h.append(f'<p class="sub">{n} title{"" if n == 1 else "s"} you have '
-                 f'finished. No coverage is worked out for these &mdash; you are '
-                 f'done with them.</p>')
-        h.append('<div class="wrap"><table class="sortable"><tr><th>title</th>'
-                 '<th class="num">chars</th>'
-                 '<th class="num">jiten coverage</th></tr>')
-        hide = "this.style.visibility='hidden'"
-        for d in done:
-            did = d["deck_id"]
-            cov = d.get("coverage")
-            out = d.get("link")
-            h.append(
-                f'<tr><td class="withcover"><span class="ct">'
-                f'<img class="cover" loading="lazy" alt="" src="{w.cover_url(did)}"'
-                f' onerror="{hide}">'
-                f'<span><a href="https://jiten.moe/decks/media/{did}/detail"'
-                f' target="_blank" rel="noopener">{esc(d["title"])}</a>'
-                + (f' <a class="subs" href="{esc(out[1])}" target="_blank"'
-                   f' rel="noopener" title="Look it up on {esc(out[0])}">'
-                   f'{esc(out[0])}</a>' if out else "")
-                + '</span></span></td>'
-                f'<td class="num">{d.get("chars") or 0:,}</td>'
-                f'<td class="num">{f"{cov:.0f}%" if cov else "&mdash;"}</td></tr>')
-        h.append("</table></div>")
-    else:
-        h.append('<p class="empty">Nothing marked finished yet. Search above for '
-                 'something you have already seen and press <b>finished</b>, or '
-                 'use the button beside a title you are tracking.</p>')
 
     h.append(h2("Nearly within reach"))
     h.append(w.REACH_HTML)
