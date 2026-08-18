@@ -106,13 +106,22 @@ def register_page(code: str, error: str = "") -> str:
       </form></div>""")
 
 
-def settings_page(user, creds, note: str = "", error: str = "") -> str:
+def settings_page(user, creds, note: str = "", error: str = "",
+                  age_hours: float | None = None) -> str:
     msg = f'<div class="err">{esc(error)}</div>' if error else ""
     if note:
         msg += f'<div class="ok">{esc(note)}</div>'
     has_wk = "stored" if creds.get("wk_token") else "not set"
     has_jt = "stored" if creds.get("jiten_key") else "not set"
     has_jm = "stored" if creds.get("jimaku_key") else "not set"
+    if age_hours is None:
+        fetched = "Nothing fetched from WaniKani yet."
+    elif age_hours < 1:
+        fetched = f"Fetched from WaniKani {age_hours * 60:.0f} minutes ago."
+    elif age_hours < 48:
+        fetched = f"Fetched from WaniKani {age_hours:.0f} hours ago."
+    else:
+        fetched = f"Fetched from WaniKani {age_hours / 24:.0f} days ago."
     has_nt = "stored" if creds.get("nihongo_key") else "not set"
     return shell("Settings", f"""
       <h1>Settings</h1>{msg}
@@ -166,13 +175,20 @@ def settings_page(user, creds, note: str = "", error: str = "") -> str:
         <button class="go" type="submit">Save</button>
       </form>
       <h2>Data</h2>
+      <p class="sub">{fetched} The counters on the dashboard compare that
+      against the fetch before it.</p>
       <form method="post" action="/refresh" class="inline">
         <button>Refresh from WaniKani now</button></form>
+      <form method="post" action="/settings/baseline" class="inline">
+        <button>Count changes from now</button></form>
       <form method="post" action="/settings/drop-jiten" class="inline">
         <button>Forget my Jiten key</button></form>
       <form method="post" action="/settings/delete" class="inline"
             onsubmit="return confirm('Delete your account and all of its data?')">
         <button>Delete my account</button></form>
+      <p class="sub" style="margin-top:10px"><b>Count changes from now</b> moves
+      that comparison point to this moment, so a session you are about to do
+      shows up on its own. Press it before you study, then refresh afterwards.</p>
       """, user=user)
 
 

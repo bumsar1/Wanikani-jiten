@@ -232,7 +232,8 @@ def do_register(code):
 def settings():
     user = require_login()
     return render.settings_page(user, creds_of(user),
-                                note=request.args.get("note", ""))
+                                note=request.args.get("note", ""),
+                                age_hours=store.snapshot_age_hours(user["id"]))
 
 
 @app.post("/settings")
@@ -274,6 +275,17 @@ def refresh():
     threading.Thread(target=refresh_wanikani,
                      args=(user["id"], creds["wk_token"]), daemon=True).start()
     return redirect(url_for("settings", note="Refreshing in the background."))
+
+
+@app.post("/settings/baseline")
+def baseline():
+    """Start the since-last-refresh counters from where you are now."""
+    user = require_login()
+    if not store.mark_baseline(user["id"]):
+        return redirect(url_for("settings",
+                                note="Nothing to count from yet - refresh first."))
+    return redirect(url_for("settings", note="Counting from now. Do your session, "
+                                             "then refresh to see what it added."))
 
 
 @app.get("/")

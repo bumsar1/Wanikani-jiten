@@ -462,6 +462,28 @@ def save_snapshot(user_id: int, payload: dict) -> None:
              json.dumps(payload, ensure_ascii=False)))
 
 
+def mark_baseline(user_id: int) -> bool:
+    """Copy the current snapshot over 'previous' so the counters start here.
+
+    The since-last-refresh figures diff current against previous, and every
+    refresh rotates one into the other - so a background refresh can quietly
+    move the mark and swallow a session. This pins it to right now instead.
+    """
+    with db() as con:
+        cur = con.execute(
+            "SELECT payload, fetched_at FROM snapshots"
+            " WHERE user_id = ? AND slot = 'current'", (user_id,)).fetchone()
+        if not cur:
+            return False
+        con.execute(
+            "INSERT INTO snapshots (user_id, slot, fetched_at, payload)"
+            " VALUES (?,'previous',?,?) ON CONFLICT(user_id, slot)"
+            " DO UPDATE SET fetched_at = excluded.fetched_at,"
+            " payload = excluded.payload",
+            (user_id, cur["fetched_at"], cur["payload"]))
+    return True
+
+
 def get_snapshot(user_id: int, slot: str = "current"):
     with db() as con:
         row = con.execute("SELECT payload, fetched_at FROM snapshots"
