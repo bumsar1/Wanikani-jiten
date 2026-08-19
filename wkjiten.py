@@ -1336,21 +1336,25 @@ def counters_html(t: dict) -> str:
     def row(label, month, year, allt):
         return (f'<tr><td>{esc(label)}</td><td class="num">{month:,}</td>'
                 f'<td class="num">{year:,}</td><td class="num">{allt:,}</td></tr>')
-    acc = (f'{t["accuracy"]:.1f}%' if t["accuracy"] is not None else "&mdash;")
-    return (
-        '<div class="wrap"><table class="tight"><tr><th></th>'
-        '<th class="num">this month</th><th class="num">this year</th>'
-        '<th class="num">all time</th></tr>'
-        + row("lessons", t["lessons_month"], t["lessons_year"], t["lessons_all"])
-        + row("items passed to Guru", t["passed_month"], t["passed_year"],
-              t["passed_all"])
-        + '</table></div>'
-        f'<p class="sub">Reviews per month are not something the API will say: '
-        f'WaniKani retired that endpoint and it answers an empty list for every '
-        f'account now. What survives is the lifetime total &mdash; '
-        f'<b>{t["answers"]:,} answers</b> at <b>{acc}</b> correct &mdash; and '
-        f'the two counts above, which come from when each item was actually '
-        f'unlocked and passed.</p>')
+    acc = (f'{t["accuracy"]:.1f}% correct' if t["accuracy"] is not None else "")
+    # The month and year cells are empty on purpose - WaniKani retired the
+    # endpoint that dated reviews - so the reason lives in a tooltip rather
+    # than in a paragraph nobody reads twice.
+    why = ("WaniKani retired the endpoint that dated reviews, so only the "
+           "lifetime total is left")
+    answers = (f'<tr><td>review answers</td>'
+               f'<td class="num faint" title="{esc(why)}">&mdash;</td>'
+               f'<td class="num faint" title="{esc(why)}">&mdash;</td>'
+               f'<td class="num">{t["answers"]:,}'
+               + (f'<div class="und">{acc}</div>' if acc else "")
+               + '</td></tr>')
+    return ('<div class="wrap"><table class="tight"><tr><th></th>'
+            '<th class="num">this month</th><th class="num">this year</th>'
+            '<th class="num">all time</th></tr>'
+            + row("lessons", t["lessons_month"], t["lessons_year"], t["lessons_all"])
+            + row("items passed to Guru", t["passed_month"], t["passed_year"],
+                  t["passed_all"])
+            + answers + '</table></div>')
 
 
 def immersion_html(totals: dict | None, unmeasured: list[dict] | None) -> str:
@@ -4088,12 +4092,6 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
 
     if finished:
         h.append(h2("Finished"))
-        n = len(finished)
-        h.append(f'<p class="sub">{n} title{"" if n == 1 else "s"} you have '
-                 f'finished. No coverage is worked out for these &mdash; you are '
-                 f'done with them. They are what <b>Because you know these</b> '
-                 f'compares against, so the more you mark, the better those '
-                 f'suggestions get.</p>')
         h.append('<div class="wrap"><table class="sortable"><tr><th>title</th>'
                  '<th>type</th><th class="num">chars</th>'
                  '<th class="num">jiten coverage</th></tr>')
