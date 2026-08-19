@@ -921,6 +921,36 @@ def multipart(field: str, filename: str, content: bytes) -> tuple[bytes, str]:
     return body, f"multipart/form-data; boundary={boundary}"
 
 
+def known_words_txt(known: dict, normalize: bool = False) -> bytes:
+    """The known-word list in the shape Jiten's importer reads: one per line."""
+    words = list(known["words_known"])
+    if normalize:
+        words = [unicodedata.normalize("NFKC", w) for w in words]
+    return ("\n".join(sorted(set(words))) + "\n").encode("utf-8")
+
+
+def jiten_push_words(content: bytes, key: str, *, overwrite: bool = False,
+                     parse_words: bool = False) -> tuple[int, str]:
+    """Upload known words to a Jiten account. Adds to what is there.
+
+    overwrite is off by default and nothing in here turns it on: the account
+    may know words from JPDB or from reading that WaniKani never taught, and
+    replacing the list wholesale would throw those away.
+    """
+    body, ctype = multipart("file", "wanikani-known-words.txt", content)
+    url = (f"{JITEN_API}/api/user/vocabulary/import-from-anki-txt"
+           f"?parseWords={'true' if parse_words else 'false'}"
+           f"&overwriteExisting={'true' if overwrite else 'false'}")
+    status, resp, _ = http(url, method="POST", headers=jiten_headers(key),
+                           body=body, content_type=ctype, timeout=300)
+    if status < 400:
+        # Jiten does not recount on its own, so an import with no refresh
+        # leaves every coverage figure at the answer from before it.
+        http(f"{JITEN_API}/api/user/coverage/refresh", method="POST",
+             headers=jiten_headers(key), **OPTIONAL)
+    return status, resp.decode("utf-8", "replace")[:300]
+
+
 def cmd_push(args) -> None:
     key = jiten_key(args.jiten_key)
     if not key:
@@ -934,14 +964,8 @@ def cmd_push(args) -> None:
         raise SystemExit(f"{path} not found - run `python wkjiten.py export` first.")
 
     content = open(path, "rb").read()
-    body, ctype = multipart("file", os.path.basename(path), content)
-    url = (f"{JITEN_API}/api/user/vocabulary/import-from-anki-txt"
-           f"?parseWords={'true' if args.parse_words else 'false'}"
-           f"&overwriteExisting={'true' if args.overwrite else 'false'}")
-
-    status, resp, _ = http(url, method="POST", headers=jiten_headers(key),
-                           body=body, content_type=ctype, timeout=300)
-    text = resp.decode("utf-8", "replace")
+    status, text = jiten_push_words(content, key, overwrite=args.overwrite,
+                                    parse_words=args.parse_words)
     if status in (401, 403):
         raise SystemExit(
             f"Jiten rejected the key for this write endpoint (HTTP {status}).\n"
@@ -953,9 +977,7 @@ def cmd_push(args) -> None:
         raise SystemExit(f"import failed (HTTP {status}): {text[:500]}")
 
     print(f"imported ({status}): {text[:500]}")
-    st, _, _ = http(f"{JITEN_API}/api/user/coverage/refresh", method="POST",
-                    headers=jiten_headers(key))
-    print(f"coverage refresh queued ({st})")
+    print("coverage recount asked for")
 
 
 def cmd_search(args) -> None:

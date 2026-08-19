@@ -9,6 +9,12 @@ Deck word lists are cached **once for the whole instance**, because a word list
 belongs to a title rather than an account. The second person to look at a series
 gets an instant answer, and Jiten sees one download instead of one per user.
 
+**Refresh stats** in settings does both halves of the round trip: it pulls
+your WaniKani data and then sends your known words on to jiten.moe, which
+is what its coverage column is computed from. It adds to that list and never
+replaces it, so anything the account knows from elsewhere survives. The
+automatic refresh does the same, so the figure cannot quietly fall behind.
+
 There is also a **Together** page: what everyone is watching, reading and has
 finished, with the titles more than one of you has picked out.
 

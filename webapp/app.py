@@ -83,8 +83,12 @@ def creds_of(user) -> dict:
     return store.get_creds(user["id"])
 
 
-def refresh_wanikani(user_id: int, token: str) -> None:
+def refresh_wanikani(user_id: int, token: str,
+                     push_key: str | None = None) -> None:
     """Pull the account's subjects and assignments and store the snapshot.
+
+    With push_key, the fresh vocabulary is then sent on to jiten.moe, because
+    the coverage column over there is only as new as the last upload.
 
     A refresh already in flight wins; the caller should wait for it rather
     than start a second one against the same rate limit.
@@ -98,9 +102,46 @@ def refresh_wanikani(user_id: int, token: str) -> None:
         store.save_snapshot(user_id, payload)
     except SystemExit as e:
         app.logger.warning("wanikani refresh failed for %s: %s", user_id, e)
+        return
     finally:
         with _lock:
             _refreshing.discard(user_id)
+    if push_key:
+        push_known_words(user_id, payload, push_key)
+
+
+def push_known_words(user_id: int, snapshot: dict, key: str) -> None:
+    """Send this account's WaniKani vocabulary to its jiten.moe account.
+
+    This is what makes jiten.moe's own coverage column reflect WaniKani, and it
+    is the one thing here that writes to somebody else's service - so it adds
+    to the list rather than replacing it, and what happened is recorded.
+    """
+    try:
+        known = w.wk_known(snapshot)
+        content = w.known_words_txt(known)
+        status, text = w.jiten_push_words(content, key)
+    except SystemExit as e:
+        store.log_push(user_id, 0, False, str(e))
+        return
+    ok = status < 400
+    if not ok:
+        app.logger.warning("jiten push failed for %s: %s %s", user_id, status, text)
+        # Jiten answers 401 with an empty body, and "failed:" followed by
+        # nothing is worse than no message at all.
+        store.log_push(user_id, 0, False,
+                       f"HTTP {status}" + (f" {text}" if text else ""))
+        return
+    # Jiten says what it did with the file - how many it recognised and how
+    # many were new. That is worth more than a count of what we sent, which
+    # says nothing about whether the account learned anything.
+    try:
+        said = json.loads(text)
+    except (ValueError, TypeError):
+        said = {}
+    store.log_push(user_id, said.get("parsed") or len(set(known["words_known"])),
+                   True, json.dumps({k: said.get(k) for k in ("added", "updated")}
+                                    ) if said else f"HTTP {status}")
 
 
 def await_snapshot(user_id: int, timeout: float = 120.0):
@@ -233,7 +274,8 @@ def settings():
     user = require_login()
     return render.settings_page(user, creds_of(user),
                                 note=request.args.get("note", ""),
-                                age_hours=store.snapshot_age_hours(user["id"]))
+                                age_hours=store.snapshot_age_hours(user["id"]),
+                                push=store.get_push(user["id"]))
 
 
 @app.post("/settings")
@@ -247,7 +289,8 @@ def save_settings():
     creds = creds_of(user)
     if creds.get("wk_token") and not store.get_snapshot(user["id"]):
         threading.Thread(target=refresh_wanikani,
-                         args=(user["id"], creds["wk_token"]), daemon=True).start()
+                         args=(user["id"], creds["wk_token"],
+                               creds.get("jiten_key")), daemon=True).start()
     return redirect(url_for("settings", note="Saved."))
 
 
@@ -273,8 +316,12 @@ def refresh():
     if not creds.get("wk_token"):
         return redirect(url_for("settings", note="Add a WaniKani token first."))
     threading.Thread(target=refresh_wanikani,
-                     args=(user["id"], creds["wk_token"]), daemon=True).start()
-    return redirect(url_for("settings", note="Refreshing in the background."))
+                     args=(user["id"], creds["wk_token"],
+                           creds.get("jiten_key")), daemon=True).start()
+    note = ("Refreshing from WaniKani, then sending your words to jiten.moe. "
+            "Reload in a moment." if creds.get("jiten_key")
+            else "Refreshing from WaniKani in the background.")
+    return redirect(url_for("settings", note=note))
 
 
 @app.post("/settings/baseline")
@@ -298,7 +345,8 @@ def dashboard():
 
     cache = store.get_snapshot(user["id"])
     if not cache:
-        # First visit: fetch inline, or wait out the one already running.
+        # First visit: fetch inline, or wait out the one already running. No
+        # upload here - this one is holding up the page as it is.
         refresh_wanikani(user["id"], creds["wk_token"])
         cache = store.get_snapshot(user["id"]) or await_snapshot(user["id"])
         if not cache:
@@ -309,8 +357,11 @@ def dashboard():
                      "check the token."))
     age = store.snapshot_age_hours(user["id"]) or 0
     if age > STALE_HOURS:
+        # The upload rides along, so the jiten column does not quietly fall
+        # behind what WaniKani has taught you since. It only ever adds words.
         threading.Thread(target=refresh_wanikani,
-                         args=(user["id"], creds["wk_token"]), daemon=True).start()
+                         args=(user["id"], creds["wk_token"],
+                               creds.get("jiten_key")), daemon=True).start()
 
     known = w.wk_known(cache)
     key = creds.get("jiten_key")

@@ -107,7 +107,7 @@ def register_page(code: str, error: str = "") -> str:
 
 
 def settings_page(user, creds, note: str = "", error: str = "",
-                  age_hours: float | None = None) -> str:
+                  age_hours: float | None = None, push: dict | None = None) -> str:
     msg = f'<div class="err">{esc(error)}</div>' if error else ""
     if note:
         msg += f'<div class="ok">{esc(note)}</div>'
@@ -123,6 +123,30 @@ def settings_page(user, creds, note: str = "", error: str = "",
     else:
         fetched = f"Fetched from WaniKani {age_hours / 24:.0f} days ago."
     has_nt = "stored" if creds.get("nihongo_key") else "not set"
+    # Whether the words actually reached jiten.moe. "Sent in the background"
+    # looks identical whether it worked or was refused, so say which.
+    if not creds.get("jiten_key"):
+        sent = ("Without a Jiten key nothing is uploaded, so the "
+                "<b>jiten</b> column stays at whatever that account already knew.")
+    elif not push:
+        sent = "Your words have not been sent to jiten.moe from here yet."
+    elif push["ok"]:
+        import json as _json
+        try:
+            did = _json.loads(push["note"])
+        except (ValueError, TypeError):
+            did = {}
+        new = did.get("added")
+        tail = ("" if new is None else
+                (f' &mdash; <b>{new:,} of them new to it</b>.' if new
+                 else ' &mdash; it already knew every one.'))
+        sent = (f'Last sent to jiten.moe on '
+                f'{esc(push["at"][:16].replace("T", " "))}: '
+                f'<b>{push["words"]:,} words</b> recognised{tail}')
+    else:
+        sent = (f'The last upload to jiten.moe <b>failed</b> on '
+                f'{esc(push["at"][:16].replace("T", " "))}: '
+                f'<span class="code">{esc(push["note"][:120])}</span>')
     return shell("Settings", f"""
       <h1>Settings</h1>{msg}
       <h2>API keys</h2>
@@ -176,9 +200,9 @@ def settings_page(user, creds, note: str = "", error: str = "",
       </form>
       <h2>Data</h2>
       <p class="sub">{fetched} The counters on the dashboard compare that
-      against the fetch before it.</p>
+      against the fetch before it. {sent}</p>
       <form method="post" action="/refresh" class="inline">
-        <button>Refresh from WaniKani now</button></form>
+        <button>Refresh stats</button></form>
       <form method="post" action="/settings/baseline" class="inline">
         <button>Count changes from now</button></form>
       <form method="post" action="/settings/drop-jiten" class="inline">
@@ -186,7 +210,11 @@ def settings_page(user, creds, note: str = "", error: str = "",
       <form method="post" action="/settings/delete" class="inline"
             onsubmit="return confirm('Delete your account and all of its data?')">
         <button>Delete my account</button></form>
-      <p class="sub" style="margin-top:10px"><b>Count changes from now</b> moves
+      <p class="sub" style="margin-top:10px"><b>Refresh stats</b> pulls your
+      WaniKani data and then sends your known words on to jiten.moe, which is
+      what its coverage column is worked out from. It adds to that list and
+      never replaces it, so anything you know from elsewhere stays.
+      <b>Count changes from now</b> moves
       that comparison point to this moment, so a session you are about to do
       shows up on its own. Press it before you study, then refresh afterwards.</p>
       """, user=user)

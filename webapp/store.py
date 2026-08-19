@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS snapshots (
   payload TEXT NOT NULL,
   PRIMARY KEY (user_id, slot)
 );
+CREATE TABLE IF NOT EXISTS pushes (
+  user_id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  words INTEGER NOT NULL,
+  ok INTEGER NOT NULL,
+  note TEXT             -- what jiten.moe said, so a failure is not silent
+);
 CREATE TABLE IF NOT EXISTS history (
   user_id INTEGER NOT NULL,
   day TEXT NOT NULL,
@@ -482,6 +489,26 @@ def mark_baseline(user_id: int) -> bool:
             " payload = excluded.payload",
             (user_id, cur["fetched_at"], cur["payload"]))
     return True
+
+
+def log_push(user_id: int, words: int, ok: bool, note: str = "") -> None:
+    """Remember the last upload to jiten.moe, so settings can say how it went."""
+    with db() as con:
+        con.execute(
+            "INSERT INTO pushes (user_id, at, words, ok, note) VALUES (?,?,?,?,?)"
+            " ON CONFLICT(user_id) DO UPDATE SET at = excluded.at,"
+            " words = excluded.words, ok = excluded.ok, note = excluded.note",
+            (user_id, now(), words, 1 if ok else 0, note[:300]))
+
+
+def get_push(user_id: int) -> dict | None:
+    with db() as con:
+        row = con.execute("SELECT at, words, ok, note FROM pushes"
+                          " WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        return None
+    return {"at": row["at"], "words": row["words"], "ok": bool(row["ok"]),
+            "note": row["note"] or ""}
 
 
 def get_snapshot(user_id: int, slot: str = "current"):

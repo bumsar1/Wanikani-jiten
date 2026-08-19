@@ -77,7 +77,8 @@ and opens a dashboard showing:
 * a search box for the whole jiten.moe catalogue, filtered by genre and tag
 
 Leave the window open while you use the dashboard; Ctrl+C stops it. Run it again
-whenever you gain a level.
+whenever you gain a level &mdash; the upload to jiten.moe is what its own coverage
+column is worked out from, and it only moves when something is sent.
 
 **The title list is your own jiten.moe statuses.** Whatever you have marked
 *watching/reading* or *plan to watch/read* is what gets tracked — set a status on
