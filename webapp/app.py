@@ -566,6 +566,47 @@ def words(deck_id):
     return jsonify(dict(counts))
 
 
+@app.get("/gap/<int:deck_id>")
+def gap(deck_id):
+    """The words in a title this account has not learned, most frequent first."""
+    user = require_login()
+    key = creds_of(user).get("jiten_key")
+    if not key:
+        return jsonify({"error": "This needs a Jiten API key - it is your "
+                                 "account that knows which words you have "
+                                 "learned."})
+    try:
+        target = max(1, min(100, int(request.args.get("target", 95))))
+    except ValueError:
+        target = 95
+    try:
+        raw = w.jiten_gap_csv(deck_id, key, target)
+    except SystemExit as e:
+        return jsonify({"error": str(e)[:200]})
+    rows, total = w.gap_rows(raw, limit=40)
+    return jsonify({"rows": rows, "total": total})
+
+
+@app.get("/gap/<int:deck_id>/csv")
+def gap_csv(deck_id):
+    user = require_login()
+    key = creds_of(user).get("jiten_key")
+    if not key:
+        return Response("no Jiten key on this account", status=403,
+                        mimetype="text/plain")
+    try:
+        target = max(1, min(100, int(request.args.get("target", 95))))
+    except ValueError:
+        target = 95
+    try:
+        raw = w.jiten_gap_csv(deck_id, key, target)
+    except SystemExit as e:
+        return Response(str(e), status=502, mimetype="text/plain")
+    return Response(raw, mimetype="text/csv", headers={
+        "Content-Disposition":
+            f'attachment; filename="gap {deck_id} {target}.csv"'})
+
+
 @app.get("/subs/<int:entry_id>")
 def subs_list(entry_id):
     """That title's subtitle files, Chinese-only ones left out."""

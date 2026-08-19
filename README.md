@@ -85,8 +85,8 @@ the site and it appears on the next run. `decks.txt` is merged in on top for
 anything you want to follow without putting it on a list.
 
 From the dashboard you can search the catalogue, add a title to any of your lists,
-mark one finished, and download a title's Japanese subtitles as a zip with the
-Chinese ones filtered out.
+mark one finished, see which words are still stopping you in it, and download a
+title's Japanese subtitles as a zip with the Chinese ones filtered out.
 
 ---
 

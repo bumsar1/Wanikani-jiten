@@ -2289,6 +2289,54 @@ def cmd_next(args) -> None:
           f"kanji coverage.")
 
 
+GAP_COLUMNS = ("Word", "ReadingKana", "Occurences", "Definitions")
+
+
+def jiten_gap_csv(deck_id: int, key: str, target: int | None = 95,
+                  min_occurrences: int | None = None,
+                  no_sentences: bool = True) -> bytes:
+    """Jiten's own list of the words in a title you have not learned.
+
+    format 2 = csv, order 3 = by how often the word appears in this title, and
+    excludeMatureMasteredBlacklisted is what makes it *your* gap rather than a
+    word list. A target turns it into "just enough to reach this percentage".
+    """
+    payload = {"format": 2, "downloadType": 1, "order": 3,
+               "excludeMatureMasteredBlacklisted": True,
+               "excludeExampleSentences": no_sentences}
+    if target:
+        payload.update({"downloadType": 5, "targetPercentage": target})
+    if min_occurrences:
+        payload["minOccurrences"] = min_occurrences
+    status, body, _ = http(f"{JITEN_API}/api/media-deck/{deck_id}/download",
+                           method="POST", headers=jiten_headers(key),
+                           body=json.dumps(payload).encode(),
+                           content_type="application/json", timeout=180)
+    if status >= 400:
+        raise SystemExit(f"jiten gap failed ({status}): "
+                         f"{body[:200].decode('utf-8', 'replace')}")
+    return body
+
+
+def gap_rows(body: bytes, limit: int | None = None) -> tuple[list[dict], int]:
+    """(rows, total) out of that csv. Already ordered by occurrences."""
+    text = body.decode("utf-8-sig", "replace")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = []
+    total = 0
+    for r in reader:
+        total += 1
+        if limit is not None and len(rows) >= limit:
+            continue
+        try:
+            n = int(r.get("Occurences") or 0)
+        except ValueError:
+            n = 0
+        rows.append({"w": r.get("Word") or "", "kana": r.get("ReadingKana") or "",
+                     "n": n, "means": (r.get("Definitions") or "")[:70]})
+    return rows, total
+
+
 def cmd_gap(args) -> None:
     """The words in a title you cannot read yet, straight from Jiten."""
     key = jiten_key(args.jiten_key)
@@ -2653,6 +2701,85 @@ footer { color:var(--faint); font-size:12px; margin-top:56px;
 """
 
 
+GAP_CSS = """
+.gapbox { background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; padding:14px 16px; margin:12px 0 0;
+  box-shadow:var(--shadow); }
+.gaphead { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center;
+  justify-content:space-between; margin-bottom:10px; }
+.gaphead .go { padding:6px 14px; }
+.gapbox select { font:inherit; font-size:12.5px; padding:4px 9px;
+  border-radius:99px; border:1px solid var(--line); background:var(--bg);
+  color:var(--muted); }
+.gapbox td.wd { font-size:16px; white-space:nowrap; }
+.gapbox td.wd span { font-size:12px; color:var(--faint); margin-left:7px; }
+.gapbox td.mn { color:var(--muted); font-size:13px; }
+"""
+
+GAP_JS = """
+(function(){
+  const box = document.getElementById('gapbox');
+  if (!box) return;
+  // Needs the Jiten account to know what you have learned, so there is nothing
+  // it can say in a saved file.
+  if (typeof LIVE === 'undefined' || !LIVE){
+    document.querySelectorAll('.gapbtn').forEach(b => b.remove());
+    box.remove();
+    return;
+  }
+  const esc3 = s => String(s == null ? '' : s).replace(/[&<>"]/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let deck = null, title = '', target = 95;
+
+  async function load(btn){
+    box.hidden = false;
+    box.innerHTML = '<p class="empty">Asking jiten.moe which words you are ' +
+                    'missing&hellip;</p>';
+    box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    let d;
+    try {
+      d = await (await fetch(`/gap/${deck}?target=${target}`)).json();
+    } catch (e){
+      box.innerHTML = '<p class="empty">Could not fetch that list.</p>'; return;
+    }
+    if (d.error){
+      box.innerHTML = `<p class="empty">${esc3(d.error)}</p>`; return;
+    }
+    const opts = [90, 95, 98].map(t =>
+      `<option value="${t}"${t === target ? ' selected' : ''}>${t}%</option>`).join('');
+    const rows = d.rows.map(r => `<tr>
+        <td class="wd">${esc3(r.w)}${r.kana && r.kana !== r.w
+          ? `<span>${esc3(r.kana)}</span>` : ''}</td>
+        <td class="num">${r.n}</td>
+        <td class="mn">${esc3(r.means)}</td></tr>`).join('');
+    box.innerHTML = `
+      <div class="gaphead">
+        <div><b>${esc3(title)}</b>
+          <span class="faint">&middot; ${d.total.toLocaleString()} words between
+          you and <select id="gaptarget">${opts}</select></span></div>
+        <a class="go dl" href="/gap/${deck}/csv?target=${target}">Download CSV</a>
+      </div>
+      <div class="wrap"><table class="sortable tight">
+        <tr><th>word</th><th class="num">times</th><th>meaning</th></tr>
+        ${rows}</table></div>
+      <p class="sub">The ${d.rows.length} that appear most often, of
+      ${d.total.toLocaleString()}. Learn from the top and each one buys you
+      more than the last.</p>`;
+    document.getElementById('gaptarget').onchange = e => {
+      target = +e.target.value; load(btn);
+    };
+    if (typeof sortable === 'function') sortable();
+  }
+
+  document.querySelectorAll('.gapbtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      deck = btn.dataset.deck; title = btn.dataset.title || '';
+      load(btn);
+    });
+  });
+})();
+"""
+
 READ_HTML = """
 <p class="sub">Paste anything Japanese &mdash; a line from a game, a page you
 copied, a tweet. Your own WaniKani data does the work in this browser, nothing
@@ -2661,7 +2788,6 @@ is sent anywhere, and it works on things jiten.moe has never heard of.</p>
   placeholder="&#12371;&#12371;&#12395;&#26085;&#26412;&#35486;&#12434;&#36028;&#12427;"></textarea>
 <div class="controls rcbar">
   <button id="rcgo" class="go">Check</button>
-  <label><input type="checkbox" id="rcsort"> hardest first</label>
   <span id="rcsum" class="faint"></span>
 </div>
 <div id="rcout"></div>
@@ -2737,10 +2863,7 @@ READ_JS = """
     let uniqKnown = 0;
     for (const ch of seen.keys()) if (mine.has(ch)) uniqKnown++;
     const missing = [...seen.entries()].filter(([ch]) => !mine.has(ch));
-    const hardest = document.getElementById('rcsort').checked;
-    missing.sort(hardest
-      ? (a, b) => (WK.levels[b[0]] || 99) - (WK.levels[a[0]] || 99)
-      : (a, b) => b[1] - a[1]);
+    missing.sort((a, b) => b[1] - a[1]);      // the ones you meet most, first
 
     sum.textContent = `${total} kanji, ${uniq} distinct`;
     const chips = missing.map(([ch, n]) => {
@@ -2768,7 +2891,6 @@ READ_JS = """
     clearTimeout(timer); timer = setTimeout(check, 250);
   });
   document.getElementById('rcgo').addEventListener('click', check);
-  document.getElementById('rcsort').addEventListener('change', check);
 })();
 """
 
@@ -4208,6 +4330,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                    f' data-title="{esc(deck_title(deck))}"'
                    f' title="Japanese subtitles on jimaku.cc">subs</button>'
                    if subs else "")
+                + (f' <button class="subs gapbtn" data-deck="{deck_id}"'
+                   f' data-title="{esc(deck_title(deck))}"'
+                   f' title="The words you cannot read in this yet">words</button>')
                 + f' <button class="subs setst" data-deck="{deck_id}" data-st="3"'
                   f' data-done="finished ✓"'
                   f' title="Mark as finished on jiten.moe">finished</button>'
@@ -4228,6 +4353,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         h.append("</table></div>")
 
     h.append('<div id="subsbox" class="subsbox" hidden></div>')
+    h.append('<div id="gapbox" class="gapbox" hidden></div>')
 
     if nkey:
         h.append(h2("Immersion"))
@@ -4422,7 +4548,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     tags_json = json.dumps(tags, ensure_ascii=False, separators=(",", ":"))
 
     def compose(live: bool) -> str:
-        parts, css = list(h), head + f"<style>{READ_CSS}</style>"
+        parts, css = list(h), head + f"<style>{READ_CSS}{GAP_CSS}</style>"
         parts.append(f"<script>const TRACK={track};const GRID={grid_json};"
                      f"const GRID_LEVEL={lvl};const GRID_TITLES={titles_json};"
                      f"const LIVE={'true' if live else 'false'};"
@@ -4433,7 +4559,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                      f"<script>{CHART_JS}</script><script>{GRID_JS}</script>"
                      f"<script>{REACH_JS}</script><script>{SUBS_JS}</script>"
                      f"<script>{LIKE_JS}</script><script>{STATUS_JS}</script>"
-                     f"<script>{READ_JS}</script>")
+                     f"<script>{READ_JS}</script><script>{GAP_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.
@@ -4502,10 +4628,12 @@ def cmd_serve(args) -> None:
             if args.verbose:
                 super().log_message(fmt, *a)
 
-        def _send(self, status, body: bytes, ctype: str):
+        def _send(self, status, body: bytes, ctype: str, extra: dict | None = None):
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             try:
                 self.wfile.write(body)
@@ -4616,6 +4744,35 @@ def cmd_serve(args) -> None:
                     "onlyDual": bool(keep) and all(r["lang"] == "dual" for r in keep),
                 }, ensure_ascii=False).encode()
                 return self._send(200, payload, "application/json")
+
+            if self.path.startswith("/gap/"):
+                want_csv = self.path.split("?")[0].endswith("/csv")
+                bits = self.path.split("?")[0].strip("/").split("/")
+                query = urllib.parse.parse_qs(
+                    self.path.split("?")[1] if "?" in self.path else "")
+                try:
+                    deck_id = int(bits[1])
+                    target = int((query.get("target") or ["95"])[0])
+                except (ValueError, IndexError):
+                    return self._send(400, b"bad id", "text/plain")
+                if not key:
+                    return self._send(200, json.dumps(
+                        {"error": "This needs a Jiten API key - it is your "
+                                  "account that knows which words you have "
+                                  "learned."}).encode(), "application/json")
+                try:
+                    raw = jiten_gap_csv(deck_id, key, target)
+                except SystemExit as e:
+                    return self._send(200, json.dumps({"error": str(e)[:200]})
+                                      .encode(), "application/json")
+                if want_csv:
+                    return self._send(200, raw, "text/csv", extra={
+                        "Content-Disposition":
+                            f'attachment; filename="gap {deck_id} {target}.csv"'})
+                rows, total = gap_rows(raw, limit=40)
+                body = json.dumps({"rows": rows, "total": total},
+                                  ensure_ascii=False).encode()
+                return self._send(200, body, "application/json")
 
             if self.path.startswith("/words/"):
                 try:

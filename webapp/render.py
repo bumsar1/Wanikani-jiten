@@ -728,6 +728,10 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                        f' data-title="{esc(w.deck_title(deck))}"'
                        f' title="Japanese subtitles on jimaku.cc">subs</button>'
                        if subs else "")
+                    + (f' <button class="subs gapbtn" data-deck="{did}"'
+                       f' data-title="{esc(w.deck_title(deck))}"'
+                       f' title="The words you cannot read in this yet">'
+                       f'words</button>')
                     + f' <button class="subs setst" data-deck="{did}" data-st="3"'
                       f' data-done="finished ✓"'
                       f' title="Mark as finished on jiten.moe">finished</button>'
@@ -747,6 +751,7 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                     + '</tr>')
             h.append("</table></div>")
         h.append('<div id="subsbox" class="subsbox" hidden></div>')
+        h.append('<div id="gapbox" class="gapbox" hidden></div>')
 
     done = extras.get("finished") or []
     h.append(h2("Finished"))
@@ -881,12 +886,12 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         f"const REACH_TARGET={min(60, lvl + 5)};</script>"
         f"<script>{w.SORT_JS}</script><script>{w.SLIDER_JS}</script>"
         f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
-        f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script><script>{w.READ_JS}</script>"
+        f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script><script>{w.READ_JS}</script><script>{w.GAP_JS}</script>"
         f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>")
 
     return shell(f'{user["username"]} - coverage', body, user=user,
                  extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS
-                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS, scripts=scripts)
+                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS + w.GAP_CSS, scripts=scripts)
 
 
 def _trend(rows) -> str:
