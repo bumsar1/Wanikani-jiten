@@ -676,6 +676,7 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                  + (f' &middot; {ntot["streak"]}d streak' if ntot["streak"] else "")
                  + '</div></div>')
     h.append("</div>")
+    h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
     h.append(w.BROWSE_SLOT)
 
     if not decks:
@@ -780,6 +781,11 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             h.append(h2("Immersion"))
             h.append(w.immersion_html(extras.get("nihongo_totals"),
                                       extras.get("nihongo_unmeasured")))
+
+        counts = w.month_totals(cache)
+        if counts:
+            h.append(h2("Lessons and passes"))
+            h.append(w.counters_html(counts))
 
         h.append(h2("What each level would buy you"))
         h.append(w.CHART_HTML)

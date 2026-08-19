@@ -26,7 +26,7 @@ Double-click the launcher for your system:
 * **Windows** — `Update coverage (Windows).bat`
 * **macOS** — `Update coverage (macOS).command`
 
-The first run creates three key files next to the script, each with instructions
+The first run creates four key files next to the script, each with instructions
 inside it:
 
 ```
@@ -60,7 +60,9 @@ Fetches your WaniKani data, uploads your known words to jiten.moe, prints
 coverage for everything you are tracking, lists the leeches holding you back,
 and opens a dashboard showing:
 
+* how far into your current level you are, and the earliest you could leave it
 * how many kanji and words you have learned since last time, and which
+* lessons done and items passed, this month and this year
 * coverage per tracked title, its trend, the hours you have actually put into
   it, and what finishing your current level would add on its own
 * a curve of what every WaniKani level would give you, with a slider to try one
@@ -151,6 +153,10 @@ them.
 
 ## Worth knowing
 
+* **There is no review count.** WaniKani retired the endpoint that held one —
+  it answers an empty list for every account now — so what you get instead is
+  lessons and passes by month, taken from the dates on each item, plus the
+  lifetime answer total and accuracy.
 * **Kanji coverage is a floor, not a ceiling.** Knowing the characters is
   necessary and nowhere near sufficient; grammar and the words WaniKani never
   teaches decide the rest. The word figure from jiten.moe is the honest one, and

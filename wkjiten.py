@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import calendar
 import csv
 import json
 import os
@@ -135,10 +136,14 @@ def wk_token(cli_token: str | None) -> str:
     return token
 
 
+def wk_headers(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}", "Wanikani-Revision": WK_REVISION}
+
+
 def wk_paged(path: str, token: str) -> Iterable[dict]:
     """Walk a WaniKani collection, yielding each resource."""
     url = f"{WK_API}/{path}"
-    headers = {"Authorization": f"Bearer {token}", "Wanikani-Revision": WK_REVISION}
+    headers = wk_headers(token)
     page = 0
     while url:
         page += 1
@@ -149,12 +154,14 @@ def wk_paged(path: str, token: str) -> Iterable[dict]:
         url = (data.get("pages") or {}).get("next_url")
 
 
+def togo_of(stage: int, gaps: dict, passing: int) -> int:
+    """Seconds from the next review at `stage` until the item passes."""
+    return sum(gaps.get(k, 0) for k in range(max(stage, 0) + 1, passing))
+
+
 def wk_fetch(token: str) -> dict:
     """Fetch everything we need from WaniKani and shape it for the cache."""
-    user = get_json(
-        f"{WK_API}/user",
-        headers={"Authorization": f"Bearer {token}", "Wanikani-Revision": WK_REVISION},
-    )["data"]
+    user = get_json(f"{WK_API}/user", headers=wk_headers(token))["data"]
 
     subjects: dict[int, dict] = {}
     for s in wk_paged("subjects?types=kanji,vocabulary,kana_vocabulary", token):
@@ -176,17 +183,99 @@ def wk_fetch(token: str) -> dict:
             "level": d["level"],
             "readings": readings[:3],
             "meaning": meaning,
+            # Levels 1-2 run on the accelerated schedule, so the wait to Guru
+            # is not the same number for everyone.
+            "srs": d.get("spaced_repetition_system_id") or 1,
+            # The radicals a kanji is locked behind. Without these, a level
+            # whose kanji are mostly still locked has no date at all.
+            "parts": d.get("component_subject_ids") or [],
         }
 
+    # The intervals the SRS actually uses, rather than four numbers copied out
+    # of a wiki: they differ between the standard and accelerated systems, and
+    # the level-up estimate is only worth showing if they are right.
+    srs_gap: dict[int, dict[int, int]] = {}
+    srs_pass: dict[int, int] = {}
+    try:
+        for s in get_json(f"{WK_API}/spaced_repetition_systems",
+                          headers=wk_headers(token))["data"]:
+            d = s["data"]
+            srs_pass[s["id"]] = d["passing_stage_position"]
+            srs_gap[s["id"]] = {st["position"]: st.get("interval") or 0
+                                for st in d["stages"]}
+    except SystemExit:
+        pass
+
+    # All of them, not just the started ones: a level is not finished until 90%
+    # of its kanji have passed, and the ones still sitting in your lesson queue
+    # are exactly the ones holding that up. Everything downstream reads this
+    # with .get(sid, 0), so the extra stage-0 rows change nothing for it.
     assignments: dict[int, int] = {}       # subject_id -> srs_stage
-    for a in wk_paged("assignments?started=true", token):
-        assignments[a["data"]["subject_id"]] = a["data"]["srs_stage"]
+    lessons_by_month: Counter[str] = Counter()
+    passed_by_month: Counter[str] = Counter()
+    state: dict[int, dict] = {}
+    for a in wk_paged("assignments", token):
+        d = a["data"]
+        sid = d["subject_id"]
+        assignments[sid] = d["srs_stage"]
+        if d.get("started_at"):
+            lessons_by_month[d["started_at"][:7]] += 1
+        if d.get("passed_at"):
+            passed_by_month[d["passed_at"][:7]] += 1
+        state[sid] = {"s": d["srs_stage"], "at": d.get("available_at"),
+                      "locked": not d.get("unlocked_at")}
 
     progressions = [
         {"level": p["data"]["level"], "started_at": p["data"].get("started_at"),
          "passed_at": p["data"].get("passed_at")}
         for p in wk_paged("level_progressions", token)
     ]
+
+    # Just this level's kanji, with the wait from their next review to Guru
+    # worked out here - so the page can measure it against the clock at the
+    # moment you look, not the moment this was fetched.
+    level = user.get("level") or 0
+    level_kanji = []
+    for sid, s in subjects.items():
+        if s["type"] != "kanji" or s["level"] != level:
+            continue
+        st = state.get(sid) or {"s": 0, "at": None, "locked": True}
+        system = s.get("srs") or 1
+        gaps = srs_gap.get(system) or {}
+        passing = srs_pass.get(system, 5)
+
+        def ladder(stage: int) -> int:
+            """Seconds from the next review at `stage` to passing."""
+            return sum(gaps.get(k, 0) for k in range(max(stage, 0) + 1, passing))
+
+        stage = st["s"]
+        # A locked kanji waits on its radicals, so carry what is left of each
+        # one that has not passed yet - the deepest of them sets the date.
+        deps = []
+        if st["locked"]:
+            for part in s.get("parts") or []:
+                ps = state.get(part)
+                if ps is None:
+                    deps.append({"at": None, "togo": ladder(0), "unknown": True})
+                elif ps["s"] < passing:
+                    deps.append({"at": ps["at"], "togo": ladder(ps["s"]),
+                                 "unknown": False})
+        level_kanji.append({"c": s["characters"], "s": stage, "at": st["at"],
+                            "locked": st["locked"], "togo": togo_of(stage, gaps, passing),
+                            "lesson": ladder(0), "deps": deps,
+                            "passed": stage >= passing})
+
+    # /reviews was retired - WaniKani stopped keeping the records and it now
+    # answers an empty collection for every account. review_statistics is what
+    # is left: lifetime answer counts per subject, with no dates on them.
+    answers = {"correct": 0, "incorrect": 0}
+    try:
+        for r in wk_paged("review_statistics", token):
+            d = r["data"]
+            answers["correct"] += (d.get("meaning_correct") or 0) +                                   (d.get("reading_correct") or 0)
+            answers["incorrect"] += (d.get("meaning_incorrect") or 0) +                                     (d.get("reading_incorrect") or 0)
+    except SystemExit:
+        pass
 
     return {
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -195,7 +284,111 @@ def wk_fetch(token: str) -> dict:
         "subjects": {str(k): v for k, v in subjects.items()},
         "assignments": {str(k): v for k, v in assignments.items()},
         "progressions": progressions,
+        "lessons_by_month": dict(lessons_by_month),
+        "passed_by_month": dict(passed_by_month),
+        "level_kanji": level_kanji,
+        "answers": answers,
     }
+
+
+def level_progress(cache: dict) -> dict | None:
+    """How far into the current level you are, and the earliest you could leave.
+
+    WaniKani moves you up when 90% of the level's kanji have passed to Guru, so
+    that ratio is the progress - not lessons done, not items burned. The date is
+    the earliest possible one: every remaining review answered correctly, first
+    time. Miss one and it slides.
+    """
+    items = cache.get("level_kanji")
+    if not items:
+        return None
+    total = len(items)
+    needed = -(-total * 9 // 10)          # ceil(0.9 * total), WaniKani's rule
+    passed = sum(1 for k in items if k["passed"])
+    now = time.time()
+
+    # When each unpassed item could reach Guru, assuming nothing is missed.
+    when = []
+    for k in items:
+        if k["passed"]:
+            when.append(0.0)
+            continue
+        if k["at"]:
+            # Already in the SRS: its own next review starts the clock.
+            when.append(max(now, iso_seconds(k["at"])) + k["togo"])
+        elif not k["locked"]:
+            # Sitting in the lesson queue: earliest is doing it right now.
+            when.append(now + k.get("lesson", k["togo"]))
+        else:
+            # Locked. It unlocks when the last of its radicals passes, and only
+            # then can the lesson be done, so the two waits are sequential.
+            deps = k.get("deps") or []
+            if any(d.get("unknown") for d in deps):
+                when.append(None)
+                continue
+            unlock = max((max(now, iso_seconds(d["at"])) + d["togo"] if d["at"]
+                          else now + d["togo"]) for d in deps) if deps else now
+            when.append(unlock + k.get("lesson", k["togo"]))
+
+    dated = sorted(t for t in when if t is not None)
+    eta = dated[needed - 1] if len(dated) >= needed else None
+    return {"level": cache.get("level") or 0, "total": total, "passed": passed,
+            "needed": needed, "eta": eta,
+            # Locked is what to tell you about; undated is why there may be no
+            # date - a radical chain this has no state for at all.
+            "locked": sum(1 for k in items if k["locked"] and not k["passed"]),
+            "undated": sum(1 for t in when if t is None),
+            "apprentice": sum(1 for k in items if 1 <= k["s"] <= 4),
+            "unstarted": sum(1 for k in items if k["s"] == 0)}
+
+
+def iso_seconds(stamp: str) -> float:
+    """A WaniKani timestamp as a unix time. They are always UTC with a Z."""
+    try:
+        return calendar.timegm(time.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError):
+        return time.time()
+
+
+def until_text(seconds: float) -> str:
+    """A wait, in the roundest unit that still says something."""
+    d = seconds - time.time()
+    if d <= 0:
+        return "any review now"
+    if d < 3600:
+        return f"in {d / 60:.0f} minutes"
+    if d < 86400:
+        return f"in {d / 3600:.0f} hours"
+    if d < 86400 * 14:
+        return f"in {d / 86400:.1f} days"
+    return f"in {d / 86400 / 7:.0f} weeks"
+
+
+def month_totals(cache: dict) -> dict | None:
+    """Lessons and passes for this month and this year, plus lifetime answers.
+
+    Reviews per month are not on offer: WaniKani retired /reviews and now
+    answers an empty collection for every account, so the only review numbers
+    left are the lifetime totals in review_statistics, which carry no dates.
+    """
+    if "lessons_by_month" not in cache:
+        return None            # fetched before any of this was collected
+    month = time.strftime("%Y-%m")
+    year = time.strftime("%Y")
+    lessons = cache.get("lessons_by_month") or {}
+    passes = cache.get("passed_by_month") or {}
+
+    def span(table, prefix):
+        return sum(n for k, n in table.items() if k.startswith(prefix))
+
+    answers = cache.get("answers") or {}
+    correct = answers.get("correct") or 0
+    wrong = answers.get("incorrect") or 0
+    return {"lessons_month": span(lessons, month), "lessons_year": span(lessons, year),
+            "passed_month": span(passes, month), "passed_year": span(passes, year),
+            "lessons_all": sum(lessons.values()), "passed_all": sum(passes.values()),
+            "answers": correct + wrong,
+            "accuracy": (correct / (correct + wrong) * 100) if correct + wrong else None}
 
 
 def wk_pace(cache: dict, recent: int = 6) -> float | None:
@@ -1094,6 +1287,70 @@ def nihongo_cell(entry: dict | None) -> tuple[str, str]:
     else:
         detail = f'{entry["logs"]} log{"" if entry["logs"] == 1 else "s"}'
     return f"{hours:.4f}", f'{head}<div class="und">{esc(detail)}</div>'
+
+
+def level_bar_html(prog: dict | None, pace: float | None = None) -> str:
+    """The level-up bar. 90% of this level's kanji at Guru is the finish line."""
+    if not prog:
+        return ""
+    total, passed, needed = prog["total"], prog["passed"], prog["needed"]
+    pct = min(100.0, passed / needed * 100) if needed else 0.0
+
+    # Four buckets that add up to the level, rather than overlapping ones: the
+    # locked kanji are also "not started", and saying both reads as double.
+    queued = max(0, prog["unstarted"] - prog["locked"])
+    bits = []
+    if prog["apprentice"]:
+        bits.append(f'{prog["apprentice"]} in Apprentice')
+    if queued:
+        bits.append(f'{queued} waiting in your lesson queue')
+    if prog["locked"]:
+        bits.append(f'{prog["locked"]} still locked behind radicals')
+
+    if passed >= needed:
+        when = "<b>Level up is waiting for you</b> &mdash; 90% is already there."
+    elif prog["eta"]:
+        when = (f'Earliest level {prog["level"] + 1} '
+                f'<b>{esc(until_text(prog["eta"]))}</b>, and only if every '
+                f'remaining review is right first time.')
+    else:
+        when = (f'No date yet &mdash; {prog["undated"]} of these sit behind '
+                f'radicals with no state to read, so 90% cannot be reached '
+                f'until those turn up.')
+    if pace:
+        when += f' Your recent pace is {pace:.0f} days a level.'
+
+    return (f'<div class="lvlbar">'
+            f'<div class="lvlhead"><span>Level {prog["level"]} &middot; '
+            f'{passed} of {needed} kanji passed</span>'
+            f'<span class="faint">{pct:.0f}%</span></div>'
+            f'<div class="lvltrack"><i style="width:{pct:.1f}%"></i></div>'
+            f'<p class="sub">{when} <span class="faint">'
+            + " &middot; ".join(esc(b) for b in bits)
+            + f'{" &middot; " if bits else ""}{total} kanji at this level'
+              f'</span></p></div>')
+
+
+def counters_html(t: dict) -> str:
+    """Lessons and passes for the month and the year."""
+    def row(label, month, year, allt):
+        return (f'<tr><td>{esc(label)}</td><td class="num">{month:,}</td>'
+                f'<td class="num">{year:,}</td><td class="num">{allt:,}</td></tr>')
+    acc = (f'{t["accuracy"]:.1f}%' if t["accuracy"] is not None else "&mdash;")
+    return (
+        '<div class="wrap"><table class="tight"><tr><th></th>'
+        '<th class="num">this month</th><th class="num">this year</th>'
+        '<th class="num">all time</th></tr>'
+        + row("lessons", t["lessons_month"], t["lessons_year"], t["lessons_all"])
+        + row("items passed to Guru", t["passed_month"], t["passed_year"],
+              t["passed_all"])
+        + '</table></div>'
+        f'<p class="sub">Reviews per month are not something the API will say: '
+        f'WaniKani retired that endpoint and it answers an empty list for every '
+        f'account now. What survives is the lifetime total &mdash; '
+        f'<b>{t["answers"]:,} answers</b> at <b>{acc}</b> correct &mdash; and '
+        f'the two counts above, which come from when each item was actually '
+        f'unlocked and passed.</p>')
 
 
 def immersion_html(totals: dict | None, unmeasured: list[dict] | None) -> str:
@@ -2332,6 +2589,16 @@ table.nt { min-width:744px; }
 .und { font-size:11px; font-weight:500; color:var(--faint); margin-top:1px; }
 .faint { color:var(--faint); }
 .subhead { font-size:15px; font-weight:640; margin:28px 0 6px; }
+.lvlbar { background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; padding:15px 17px; margin:0 0 18px;
+  box-shadow:var(--shadow); }
+.lvlhead { display:flex; justify-content:space-between; align-items:baseline;
+  font-size:13.5px; font-weight:620; margin-bottom:9px; gap:12px; }
+.lvltrack { height:9px; border-radius:99px; background:var(--line-soft);
+  overflow:hidden; }
+.lvltrack i { display:block; height:100%; border-radius:99px;
+  background:linear-gradient(90deg,var(--accent),var(--good)); }
+.lvlbar .sub { margin:10px 0 0; font-size:13px; }
 .mediahead span { font-size:11.5px; font-weight:600; color:var(--faint);
   background:var(--line-soft); border-radius:99px; padding:2px 8px;
   margin-left:6px; vertical-align:2px; }
@@ -3750,6 +4017,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                  + (f' &middot; {streak}d streak' if streak else "")
                  + '</div></div>')
     h.append("</div>")
+    h.append(level_bar_html(level_progress(cache), wk_pace(cache)))
     h.append(BROWSE_SLOT)
 
     h.append(h2("Your tracked titles"))
@@ -3855,6 +4123,11 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         h.append('<p class="empty">Nothing marked finished yet. Search above for '
                  'something you have already seen and press <b>finished</b>, or '
                  'use the button beside a title you are tracking.</p>')
+
+    counts = month_totals(cache)
+    if counts:
+        h.append(h2("Lessons and passes"))
+        h.append(counters_html(counts))
 
     h.append(h2("What each level would buy you"))
     h.append(CHART_HTML)
