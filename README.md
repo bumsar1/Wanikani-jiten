@@ -60,7 +60,8 @@ Fetches your WaniKani data, uploads your known words to jiten.moe, prints
 coverage for everything you are tracking, lists the leeches holding you back,
 and opens a dashboard showing:
 
-* how far into your current level you are, and the earliest you could leave it
+* how far into your current level you are, the earliest you could leave it,
+  and the date your own recent pace suggests
 * how many kanji and words you have learned since last time, and which
 * lessons done and items passed, this month and this year
 * coverage per tracked title, its trend, the hours you have actually put into
@@ -71,6 +72,8 @@ and opens a dashboard showing:
 * leeches, ranked by how often they block the titles you actually read
 * what you have logged on NihongoTracker, broken down by medium, and which of
   it no jiten.moe list is measuring
+* a box to paste any Japanese text into, which highlights the kanji you
+  cannot read yet &mdash; this one works in the saved file too
 * a search box for the whole jiten.moe catalogue, filtered by genre and tag
 
 Leave the window open while you use the dashboard; Ctrl+C stops it. Run it again

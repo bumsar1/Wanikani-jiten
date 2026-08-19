@@ -783,6 +783,9 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             h.append(w.immersion_html(extras.get("nihongo_totals"),
                                       extras.get("nihongo_unmeasured")))
 
+        h.append(h2("Read-check any text"))
+        h.append(w.READ_HTML)
+
         h.append(h2("What each level would buy you"))
         h.append(w.CHART_HTML)
         h.append(w.SLIDER_HTML)
@@ -878,12 +881,12 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         f"const REACH_TARGET={min(60, lvl + 5)};</script>"
         f"<script>{w.SORT_JS}</script><script>{w.SLIDER_JS}</script>"
         f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
-        f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script>"
+        f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script><script>{w.READ_JS}</script>"
         f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>")
 
     return shell(f'{user["username"]} - coverage', body, user=user,
                  extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS
-                 + w.BROWSE_CSS + w.SUBS_CSS, scripts=scripts)
+                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS, scripts=scripts)
 
 
 def _trend(rows) -> str:

@@ -332,8 +332,22 @@ def level_progress(cache: dict) -> dict | None:
 
     dated = sorted(t for t in when if t is not None)
     eta = dated[needed - 1] if len(dated) >= needed else None
+
+    # The earliest date assumes you answer everything correctly the first time
+    # and do each lesson the moment it appears, which nobody does. What actually
+    # happens is on record: when this level started, plus how long your recent
+    # levels have taken.
+    pace = wk_pace(cache)
+    likely = None
+    for p in cache.get("progressions") or []:
+        if p.get("level") == cache.get("level") and p.get("started_at") and pace:
+            likely = iso_seconds(p["started_at"]) + pace * 86400
+            break
+    # Never promise sooner than the SRS allows.
+    if likely and eta and likely < eta:
+        likely = None
     return {"level": cache.get("level") or 0, "total": total, "passed": passed,
-            "needed": needed, "eta": eta,
+            "needed": needed, "eta": eta, "likely": likely, "pace": pace,
             # Locked is what to tell you about; undated is why there may be no
             # date - a radical chain this has no state for at all.
             "locked": sum(1 for k in items if k["locked"] and not k["passed"]),
@@ -359,8 +373,10 @@ def until_text(seconds: float) -> str:
         return f"in {d / 60:.0f} minutes"
     if d < 86400:
         return f"in {d / 3600:.0f} hours"
-    if d < 86400 * 14:
+    if d < 86400 * 10:
         return f"in {d / 86400:.1f} days"
+    if d < 86400 * 28:
+        return f"in {d / 86400:.0f} days"
     return f"in {d / 86400 / 7:.0f} weeks"
 
 
@@ -1310,14 +1326,18 @@ def level_bar_html(prog: dict | None, pace: float | None = None) -> str:
     if passed >= needed:
         when = "<b>Level up is waiting for you</b> &mdash; 90% is already there."
     elif prog["eta"]:
-        when = (f'Earliest level {prog["level"] + 1} '
-                f'<b>{esc(until_text(prog["eta"]))}</b>, and only if every '
-                f'remaining review is right first time.')
+        when = (f'Level {prog["level"] + 1} <b>{esc(until_text(prog["eta"]))}</b> '
+                f'at the very earliest, and only if every remaining review is '
+                f'right first time.')
+        if prog["likely"]:
+            when += (f' Going by how long your recent levels actually took, '
+                     f'<b>{esc(until_text(prog["likely"]))}</b> is the realistic '
+                     f'one.')
     else:
         when = (f'No date yet &mdash; {prog["undated"]} of these sit behind '
                 f'radicals with no state to read, so 90% cannot be reached '
                 f'until those turn up.')
-    if pace:
+    if pace and not prog.get("likely"):
         when += f' Your recent pace is {pace:.0f} days a level.'
 
     return (f'<div class="lvlbar">'
@@ -2632,6 +2652,125 @@ footer { color:var(--faint); font-size:12px; margin-top:56px;
 }
 """
 
+
+READ_HTML = """
+<p class="sub">Paste anything Japanese &mdash; a line from a game, a page you
+copied, a tweet. Your own WaniKani data does the work in this browser, nothing
+is sent anywhere, and it works on things jiten.moe has never heard of.</p>
+<textarea id="rctext" rows="5" spellcheck="false"
+  placeholder="&#12371;&#12371;&#12395;&#26085;&#26412;&#35486;&#12434;&#36028;&#12427;"></textarea>
+<div class="controls rcbar">
+  <button id="rcgo" class="go">Check</button>
+  <label><input type="checkbox" id="rcsort"> hardest first</label>
+  <span id="rcsum" class="faint"></span>
+</div>
+<div id="rcout"></div>
+"""
+
+READ_CSS = """
+#rctext { width:100%; font:inherit; font-size:15px; line-height:1.7; padding:13px;
+  border:1px solid var(--line); border-radius:12px; background:var(--raise);
+  color:var(--fg); box-shadow:var(--shadow); resize:vertical; }
+#rctext:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+.rcbar { margin:10px 0 0; align-items:center; }
+.rcbar label { font-size:13px; color:var(--muted); display:flex; gap:7px;
+  align-items:center; cursor:pointer; }
+.rcbar input { accent-color:var(--accent); }
+#rcsum { font-size:13px; }
+.rctext { background:var(--raise); border:1px solid var(--line);
+  border-radius:14px; padding:16px 18px; margin:16px 0 0; font-size:17px;
+  line-height:2.1; white-space:pre-wrap; word-break:break-word;
+  box-shadow:var(--shadow); }
+.rctext .miss { background:var(--accent-soft); color:var(--accent);
+  font-weight:640; border-radius:4px; padding:1px 2px; cursor:help;
+  border-bottom:2px solid var(--accent); }
+.rctext .hit { color:var(--good); }
+.rclegend { display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px;
+  color:var(--muted); margin:12px 0 0; }
+.rclegend b { font-weight:640; }
+.rcmiss { display:flex; flex-wrap:wrap; gap:7px; margin:14px 0 0; }
+.rcmiss a { font-size:15px; padding:4px 9px; border-radius:9px;
+  border:1px solid var(--line); background:var(--raise); }
+.rcmiss a:hover { border-color:var(--accent); color:var(--accent); }
+.rcmiss a i { font-style:normal; font-size:11px; color:var(--faint);
+  margin-left:5px; }
+"""
+
+READ_JS = """
+(function(){
+  const box = document.getElementById('rctext');
+  if (!box || typeof WK === 'undefined') return;
+  const CJK = /[㐀-䶿一-鿿豈-﫿]/;
+  const mine = new Set(Array.from(WK.known || ''));
+  const out = document.getElementById('rcout');
+  const sum = document.getElementById('rcsum');
+  const esc2 = s => s.replace(/[&<>"]/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  function check(){
+    const text = box.value;
+    if (!text.trim()){ out.innerHTML = ''; sum.textContent = ''; return; }
+    let total = 0, known = 0;
+    const seen = new Map();          // kanji -> occurrences
+    let marked = '';
+    for (const ch of text){
+      if (!CJK.test(ch)){ marked += esc2(ch); continue; }
+      total++;
+      seen.set(ch, (seen.get(ch) || 0) + 1);
+      const lv = WK.levels ? WK.levels[ch] : null;
+      if (mine.has(ch)){
+        known++;
+        marked += `<span class="hit">${esc2(ch)}</span>`;
+      } else {
+        // A kanji WaniKani never teaches has no level, and no amount of
+        // levelling will fix it - worth saying so rather than showing a blank.
+        const note = lv ? `level ${lv}` : 'not on WaniKani';
+        marked += `<span class="miss" title="${esc2(ch)} - ${note}">`
+                + `${esc2(ch)}</span>`;
+      }
+    }
+    if (!total){
+      out.innerHTML = '<p class="empty">No kanji in that - nothing to measure.</p>';
+      sum.textContent = ''; return;
+    }
+    const uniq = seen.size;
+    let uniqKnown = 0;
+    for (const ch of seen.keys()) if (mine.has(ch)) uniqKnown++;
+    const missing = [...seen.entries()].filter(([ch]) => !mine.has(ch));
+    const hardest = document.getElementById('rcsort').checked;
+    missing.sort(hardest
+      ? (a, b) => (WK.levels[b[0]] || 99) - (WK.levels[a[0]] || 99)
+      : (a, b) => b[1] - a[1]);
+
+    sum.textContent = `${total} kanji, ${uniq} distinct`;
+    const chips = missing.map(([ch, n]) => {
+      const lv = WK.levels ? WK.levels[ch] : null;
+      const label = lv ? `L${lv}` : 'never';
+      return `<a href="https://www.wanikani.com/kanji/${encodeURIComponent(ch)}"
+        target="_blank" rel="noopener">${esc2(ch)}<i>${label}${
+        n > 1 ? ' &times;' + n : ''}</i></a>`;
+    }).join('');
+
+    out.innerHTML =
+      `<div class="rclegend">
+         <span><b>${(known / total * 100).toFixed(1)}%</b> of the kanji here,
+           by occurrence</span>
+         <span><b>${(uniqKnown / uniq * 100).toFixed(1)}%</b> of the distinct
+           ones (${uniqKnown} of ${uniq})</span>
+         <span class="faint">${missing.length} to go</span>
+       </div>
+       <div class="rctext">${marked}</div>`
+      + (missing.length ? `<div class="rcmiss">${chips}</div>` : '');
+  }
+
+  let timer = 0;
+  box.addEventListener('input', () => {
+    clearTimeout(timer); timer = setTimeout(check, 250);
+  });
+  document.getElementById('rcgo').addEventListener('click', check);
+  document.getElementById('rcsort').addEventListener('change', check);
+})();
+"""
 
 BROWSE_SLOT = "<!--browse-->"
 NAV_SLOT = "<!--nav-->"
@@ -4126,6 +4265,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                  'something you have already seen and press <b>finished</b>, or '
                  'use the button beside a title you are tracking.</p>')
 
+    h.append(h2("Read-check any text"))
+    h.append(READ_HTML)
+
     h.append(h2("What each level would buy you"))
     h.append(CHART_HTML)
     h.append(SLIDER_HTML)
@@ -4280,23 +4422,24 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
     tags_json = json.dumps(tags, ensure_ascii=False, separators=(",", ":"))
 
     def compose(live: bool) -> str:
-        parts, css = list(h), head
+        parts, css = list(h), head + f"<style>{READ_CSS}</style>"
         parts.append(f"<script>const TRACK={track};const GRID={grid_json};"
                      f"const GRID_LEVEL={lvl};const GRID_TITLES={titles_json};"
                      f"const LIVE={'true' if live else 'false'};"
                      f"const OTHERS={others_json};const TAGS={tags_json};"
-                     f"const REACH_TARGET={target_level};</script>"
+                     f"const REACH_TARGET={target_level};"
+                     f"const WK={blob};</script>"
                      f"<script>{SORT_JS}</script><script>{SLIDER_JS}</script>"
                      f"<script>{CHART_JS}</script><script>{GRID_JS}</script>"
                      f"<script>{REACH_JS}</script><script>{SUBS_JS}</script>"
-                     f"<script>{LIKE_JS}</script><script>{STATUS_JS}</script>")
+                     f"<script>{LIKE_JS}</script><script>{STATUS_JS}</script>"
+                     f"<script>{READ_JS}</script>")
         links = list(sections)
         if live:
             # The browser panel goes near the top: it is what you came to use.
             css += f"<style>{BROWSE_CSS}</style>"
             parts[parts.index(BROWSE_SLOT)] = BROWSE_HTML
-            parts.append(f"<script>const WK={blob};</script>"
-                         f"<script>{BROWSE_JS}</script>")
+            parts.append(f"<script>{BROWSE_JS}</script>")
             links.insert(0, ("browse", "Browse jiten.moe"))
         else:
             parts[parts.index(BROWSE_SLOT)] = ""
