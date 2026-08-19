@@ -650,8 +650,8 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         return f'<h2 id="{slug}">{esc(label)}</h2>'
 
     h = [f'<div class="hero">{w.brand_mark(ICON)}<div class="hd">'
-         f'<h1>{esc(user["username"])} on '
-         f'<span>jiten.moe</span></h1><p class="sub">WaniKani level {lvl} &middot; '
+         f'<h1>{esc(user["username"])}</h1>'
+         f'<p class="sub">WaniKani level {lvl} &middot; '
          f'data from {esc((cache.get("fetched_at") or "")[:16].replace("T", " "))}'
          f'</p></div></div>', w.NAV_SLOT, '<div class="cards">']
 
@@ -676,7 +676,12 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                  + (f' &middot; {ntot["streak"]}d streak' if ntot["streak"] else "")
                  + '</div></div>')
     h.append("</div>")
+    # The bar and the counters are one thought - where WaniKani has got you -
+    # so they sit together at the top rather than as a section to scroll to.
     h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
+    counts = w.month_totals(cache)
+    if counts:
+        h.append(w.counters_html(counts))
     h.append(w.BROWSE_SLOT)
 
     if not decks:
@@ -777,11 +782,6 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             h.append(h2("Immersion"))
             h.append(w.immersion_html(extras.get("nihongo_totals"),
                                       extras.get("nihongo_unmeasured")))
-
-        counts = w.month_totals(cache)
-        if counts:
-            h.append(h2("Lessons and passes"))
-            h.append(w.counters_html(counts))
 
         h.append(h2("What each level would buy you"))
         h.append(w.CHART_HTML)

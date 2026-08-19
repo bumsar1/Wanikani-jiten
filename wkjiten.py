@@ -3992,8 +3992,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
 
     h = ["<main>",
          f'<div class="hero">{brand_mark()}<div class="hd">'
-         f'<h1>{esc(cache.get("username"))} on '
-         f'<span>jiten.moe</span></h1>'
+         f'<h1>{esc(cache.get("username"))}</h1>'
          f'<p class="sub">WaniKani level {lvl} &middot; generated '
          f'{time.strftime("%d %b %Y, %H:%M")}</p></div></div>',
          NAV_SLOT, '<div class="cards">']
@@ -4021,7 +4020,12 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
                  + (f' &middot; {streak}d streak' if streak else "")
                  + '</div></div>')
     h.append("</div>")
+    # The bar and the counters are one thought - where WaniKani has got you -
+    # so they sit together at the top rather than as a section to scroll to.
     h.append(level_bar_html(level_progress(cache), wk_pace(cache)))
+    counts = month_totals(cache)
+    if counts:
+        h.append(counters_html(counts))
     h.append(BROWSE_SLOT)
 
     h.append(h2("Your tracked titles"))
@@ -4121,11 +4125,6 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         h.append('<p class="empty">Nothing marked finished yet. Search above for '
                  'something you have already seen and press <b>finished</b>, or '
                  'use the button beside a title you are tracking.</p>')
-
-    counts = month_totals(cache)
-    if counts:
-        h.append(h2("Lessons and passes"))
-        h.append(counters_html(counts))
 
     h.append(h2("What each level would buy you"))
     h.append(CHART_HTML)
