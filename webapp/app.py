@@ -13,6 +13,7 @@ import os
 import sys
 import threading
 import time
+import urllib.parse
 import zipfile
 from collections import Counter
 
@@ -615,6 +616,38 @@ def words(deck_id):
     except SystemExit as e:
         return Response(str(e), status=502, mimetype="text/plain")
     return jsonify(dict(counts))
+
+
+# Jiten's kanji lookup needs no key, and it is the one thing the grid asks the
+# server for. The local tool answers it by proxying anything under /api/ to
+# Jiten, which is fine on a server only you can reach - here that would be an
+# open relay with somebody's account behind it, so this is the one endpoint and
+# it takes one character.
+_kanji_words: dict[str, dict] = {}
+
+
+@app.get("/api/kanji/<ch>")
+def kanji_words(ch: str):
+    """Common words containing a kanji, for the panel under the grid."""
+    require_login()
+    if len(ch) != 1 or not w.KANJI_RE.fullmatch(ch):
+        abort(404)
+    hit = _kanji_words.get(ch)
+    if hit is None:
+        try:
+            raw = w.get_json(f"{w.JITEN_API}/api/kanji/"
+                             f"{urllib.parse.quote(ch)}")
+        except SystemExit:
+            raw = {}
+        # Jiten sends 17kB, 13kB of which is a breakdown by reading that the
+        # page never looks at. There are only ~2,100 kanji, so what is left is
+        # small enough to keep for everyone on the instance rather than ask
+        # again per account.
+        hit = {"topWords": [{"reading": t.get("reading"),
+                             "mainDefinition": t.get("mainDefinition")}
+                            for t in (raw.get("topWords") or [])[:12]]}
+        _kanji_words[ch] = hit
+    return jsonify(hit)
 
 
 @app.get("/gap/<int:deck_id>")
