@@ -56,6 +56,101 @@ form.inline { display:inline; }
 """
 
 
+MOBILE_CSS = """
+/* A phone gets one thing at a time: every section folds to its heading, and
+   the jump links become a bar that stays put while you scroll. The wide layout
+   is untouched - this is the same page, read on a narrow screen. */
+@media (max-width:700px) {
+  main > nav { position:sticky; top:0; z-index:30; flex-wrap:nowrap;
+    overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+    margin:0 -14px 4px; padding:9px 14px;
+    background:var(--bg); border-bottom:1px solid var(--line); }
+  main > nav::-webkit-scrollbar { display:none; }
+  main > nav a { white-space:nowrap; padding:7px 12px; font-size:13px; }
+
+  h2.acc { display:flex; align-items:center; gap:10px; cursor:pointer;
+    margin:0; padding:16px 2px; border-bottom:1px solid var(--line);
+    scroll-margin-top:54px; }
+  h2.acc::after { content:"+"; margin-left:auto; font-size:18px; font-weight:400;
+    color:var(--faint); line-height:1; }
+  h2.acc.open { color:var(--accent); }
+  h2.acc.open::after { content:"\2013"; color:var(--accent); }
+  .acc-hidden { display:none !important; }
+}
+"""
+
+MOBILE_JS = """
+(function(){
+  const NARROW = 700;
+  const main = document.querySelector('main');
+  if (!main) return;
+
+  // Each h2 owns everything up to the next one. Grouping it here means no
+  // section had to be written twice to be foldable, and the hero, the cards
+  // and the footer - which belong to no heading - stay put.
+  const groups = [];
+  let cur = null;
+  for (const el of [...main.children]){
+    if (el.tagName === 'H2'){ cur = {head: el, body: []}; groups.push(cur); }
+    else if (el.tagName === 'FOOTER'){ cur = null; }
+    else if (cur){ cur.body.push(el); }
+  }
+  if (!groups.length) return;
+
+  let on = false;
+  const isOpen = g => g.head.classList.contains('open');
+  function show(g, open){
+    g.head.classList.toggle('open', open);
+    g.body.forEach(el => el.classList.toggle('acc-hidden', !open));
+  }
+  function enable(){
+    on = true;
+    groups.forEach(g => {
+      g.head.classList.add('acc');
+      g.head.setAttribute('role', 'button');
+      g.head.setAttribute('tabindex', '0');
+      show(g, false);
+    });
+  }
+  function disable(){
+    on = false;
+    groups.forEach(g => {
+      g.head.classList.remove('acc', 'open');
+      g.head.removeAttribute('role');
+      g.head.removeAttribute('tabindex');
+      g.body.forEach(el => el.classList.remove('acc-hidden'));
+    });
+  }
+
+  groups.forEach(g => {
+    const toggle = () => { if (on) show(g, !isOpen(g)); };
+    g.head.addEventListener('click', toggle);
+    g.head.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); }
+    });
+  });
+
+  // A jump link has to open what it jumps to, or the anchor lands on a closed
+  // heading and the tap looks like it did nothing. Runs before the browser
+  // scrolls, so it lands on the section rather than above it.
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]');
+    if (!a || !on) return;
+    const g = groups.find(g => g.head.id === a.getAttribute('href').slice(1));
+    if (g) show(g, true);
+  });
+
+  function sync(){
+    const narrow = window.innerWidth <= NARROW;
+    if (narrow && !on) enable();
+    else if (!narrow && on) disable();
+  }
+  addEventListener('resize', sync);
+  sync();
+})();
+"""
+
+
 BURN_CSS = """
 .pager { display:flex; align-items:center; gap:12px; margin:10px 0 2px;
   font-size:13px; color:var(--muted); }
@@ -65,6 +160,21 @@ BURN_CSS = """
 .pager button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
 .pager button:disabled { opacity:.4; cursor:default; }
 .pager span { font-variant-numeric:tabular-nums; }
+
+/* A kanji cell is 26px, and the shared "td:first-child:not(.num)" rule asks
+   for 11em of it - 286px of mostly empty column. td.kanji answers that with
+   min-width:auto but loses on specificity, so say it again from the id. */
+#burn td.kanji { min-width:auto; }
+
+/* Six columns of this needed dragging sideways on a phone. Type and level are
+   the two you would not have opened the list for, so they go and the rest
+   fits. */
+@media (max-width:700px) {
+  #burn { min-width:0; font-size:13px; }
+  #burn th, #burn td { padding-left:9px; padding-right:9px; }
+  #burn th:nth-child(4), #burn td:nth-child(4),
+  #burn th:nth-child(5), #burn td:nth-child(5) { display:none; }
+}
 """
 
 BURN_JS = """
@@ -1037,11 +1147,12 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
         f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script><script>{w.READ_JS}</script><script>{w.GAP_JS}</script>"
         f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>"
-        f"<script>{BURN_JS}</script>")
+        f"<script>{BURN_JS}</script><script>{MOBILE_JS}</script>")
 
     return shell(f'{user["username"]} - coverage', body, user=user,
                  extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS
-                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS + w.GAP_CSS + BURN_CSS,
+                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS + w.GAP_CSS + BURN_CSS
+                 + MOBILE_CSS,
                  scripts=scripts)
 
 
