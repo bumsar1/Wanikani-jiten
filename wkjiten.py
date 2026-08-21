@@ -196,11 +196,13 @@ def wk_fetch(token: str) -> dict:
     # the level-up estimate is only worth showing if they are right.
     srs_gap: dict[int, dict[int, int]] = {}
     srs_pass: dict[int, int] = {}
+    srs_burn: dict[int, int] = {}
     try:
         for s in get_json(f"{WK_API}/spaced_repetition_systems",
                           headers=wk_headers(token))["data"]:
             d = s["data"]
             srs_pass[s["id"]] = d["passing_stage_position"]
+            srs_burn[s["id"]] = d.get("burning_stage_position") or 9
             srs_gap[s["id"]] = {st["position"]: st.get("interval") or 0
                                 for st in d["stages"]}
     except SystemExit:
@@ -224,6 +226,24 @@ def wk_fetch(token: str) -> dict:
             passed_by_month[d["passed_at"][:7]] += 1
         state[sid] = {"s": d["srs_stage"], "at": d.get("available_at"),
                       "locked": not d.get("unlocked_at")}
+
+    # One correct answer from Burned: the stage just below the burning one,
+    # whose next review is the review that would do it. The date is already in
+    # hand from the assignments above, so this costs no extra request.
+    #
+    # It is "could burn", not "will": answer wrong at that stage and the item
+    # drops several stages and leaves the list for months. And the nearest few
+    # hundred are enough to look at - a finished account has thousands, and all
+    # of them would be payload nobody reads.
+    ready = []
+    for sid, s in subjects.items():
+        st = state.get(sid)
+        if not st or not st.get("at"):
+            continue
+        if st["s"] == srs_burn.get(s.get("srs") or 1, 9) - 1:
+            ready.append((st["at"], str(sid)))
+    ready.sort()
+    burning = {sid: at for at, sid in ready[:400]}
 
     progressions = [
         {"level": p["data"]["level"], "started_at": p["data"].get("started_at"),
@@ -287,6 +307,8 @@ def wk_fetch(token: str) -> dict:
         "lessons_by_month": dict(lessons_by_month),
         "passed_by_month": dict(passed_by_month),
         "level_kanji": level_kanji,
+        "burning": burning,
+        "burning_total": len(ready),
         "answers": answers,
     }
 

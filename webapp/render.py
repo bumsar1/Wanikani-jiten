@@ -8,6 +8,7 @@ stay in step.
 
 from __future__ import annotations
 
+import calendar
 import json
 import time
 import urllib.parse
@@ -666,6 +667,26 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str,
 
 # ---------------------------------------------------------------- dashboard
 
+def _burn_when(at: str, now: float) -> tuple[str, float]:
+    """How long until a review, and the epoch seconds it lands on.
+
+    WaniKani stamps these in UTC; timegm reads them as such rather than as
+    whatever the server happens to be set to.
+    """
+    try:
+        t = calendar.timegm(time.strptime(at[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError):
+        return "&mdash;", 0.0
+    d = t - now
+    if d <= 0:
+        return "in your queue now", t
+    if d < 86400:
+        return f"in {d / 3600:.0f}h", t
+    if d < 86400 * 14:
+        return f"in {d / 86400:.0f} days", t
+    return f"in {d / 86400 / 7:.0f} weeks", t
+
+
 def dashboard(user, cache, known, decks, history, extras) -> str:
     """decks is a list of (deck dict, analysis dict) for the user's titles."""
     lvl = cache.get("level") or 0
@@ -878,6 +899,53 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                      f'<td>{esc(mean)}</td><td class="num">{n:,}</td>'
                      f'<td>{w.SRS_STAGE_NAMES.get(stage, "?")}</td>'
                      f'<td class="num">{klvl}</td></tr>')
+        h.append("</table></div></details>")
+
+    # Items one correct answer from Burned. Enlightened is four months long, so
+    # these are easy to miss entirely - the item is in the queue for a day and
+    # then either gone for good or back down the ladder.
+    burning = cache.get("burning") or {}
+    if burning:
+        now = time.time()
+        rows = []
+        for sid, at in burning.items():
+            s = subjects.get(sid)
+            if not s:
+                continue
+            label, t = _burn_when(at, now)
+            rows.append((t or float("inf"), label, s))
+        rows.sort(key=lambda r: r[0])
+        due = sum(1 for t, _l, _s in rows if t and t <= now)
+        week = sum(1 for t, _l, _s in rows if t and now < t <= now + 86400 * 7)
+        total = cache.get("burning_total") or len(rows)
+
+        h.append(h2("One answer from burned"))
+        shown = ("" if total <= len(rows) else
+                 f", the soonest {len(rows):,} of {total:,}")
+        h.append(f'<details class="fold"><summary><span class="tw">Show what is '
+                 f'about to burn</span><span class="cnt">{due:,} in your queue '
+                 f'now &middot; {week:,} within the week{shown}</span>'
+                 f'</summary>')
+        h.append('<p class="sub">Enlightened items, whose next review is the one '
+                 'that burns them &mdash; if you answer it correctly. Get it '
+                 'wrong and the item drops back down for months.</p>')
+        h.append('<div class="wrap"><table class="sortable"><tr><th>item</th>'
+                 '<th>reading</th><th>meaning</th><th>type</th>'
+                 '<th class="num">wk level</th><th>could burn</th></tr>')
+        for t, label, s in rows:
+            ch = s["characters"]
+            kind = {"kanji": "kanji", "vocabulary": "vocab",
+                    "kana_vocabulary": "kana"}.get(s["type"], s["type"])
+            url = ("https://www.wanikani.com/"
+                   + ("kanji/" if s["type"] == "kanji" else "vocabulary/")
+                   + urllib.parse.quote(ch))
+            h.append(f'<tr><td class="kanji"><a href="{url}" target="_blank"'
+                     f' rel="noopener">{esc(ch)}</a></td>'
+                     f'<td>{esc("、".join(s.get("readings") or []))}</td>'
+                     f'<td>{esc(s.get("meaning") or "")}</td><td>{kind}</td>'
+                     f'<td class="num">{s["level"]}</td>'
+                     f'<td data-sort="{t if t != float("inf") else 0:.0f}">'
+                     f'{label}</td></tr>')
         h.append("</table></div></details>")
 
     h.append(h2("Nearly within reach"))
