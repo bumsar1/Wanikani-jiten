@@ -56,6 +56,53 @@ form.inline { display:inline; }
 """
 
 
+BURN_CSS = """
+.pager { display:flex; align-items:center; gap:12px; margin:10px 0 2px;
+  font-size:13px; color:var(--muted); }
+.pager button { font:inherit; font-size:13px; color:var(--muted);
+  background:var(--raise); border:1px solid var(--line); border-radius:9px;
+  padding:5px 11px; cursor:pointer; }
+.pager button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+.pager button:disabled { opacity:.4; cursor:default; }
+.pager span { font-variant-numeric:tabular-nums; }
+"""
+
+BURN_JS = """
+(function(){
+  const tbl = document.getElementById('burn');
+  const pager = document.getElementById('burnpager');
+  if (!tbl || !pager) return;
+  const PER = 10;
+  const label = pager.querySelector('span');
+  const [back, fwd] = pager.querySelectorAll('button');
+  let page = 0;
+  function draw(){
+    const rows = [...tbl.rows].slice(1);          // read the live order
+    const pages = Math.max(1, Math.ceil(rows.length / PER));
+    page = Math.min(Math.max(page, 0), pages - 1);
+    const from = page * PER;
+    rows.forEach((r, i) => {
+      r.style.display = (i >= from && i < from + PER) ? '' : 'none';
+    });
+    label.textContent = rows.length
+      ? `${from + 1}\u2013${Math.min(from + PER, rows.length)} of ${rows.length}`
+      : 'nothing here';
+    back.disabled = page === 0;
+    fwd.disabled = page >= pages - 1;
+  }
+  back.onclick = () => { page--; draw(); };
+  fwd.onclick = () => { page++; draw(); };
+  // Sorting re-appends every row, so the page has to be redrawn over the new
+  // order. The header's own handler runs first; this fires as the click
+  // bubbles up to the table, by which time the rows have moved.
+  tbl.addEventListener('click', e => {
+    if (e.target.closest('th')) { page = 0; draw(); }
+  });
+  draw();
+})();
+"""
+
+
 def shell(title: str, body: str, *, user=None, extra_css: str = "",
           scripts: str = "") -> str:
     """Common HTML skeleton. Same tokens as the local dashboard."""
@@ -929,7 +976,7 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         h.append('<p class="sub">Enlightened items, whose next review is the one '
                  'that burns them &mdash; if you answer it correctly. Get it '
                  'wrong and the item drops back down for months.</p>')
-        h.append('<div class="wrap"><table class="sortable"><tr><th>item</th>'
+        h.append('<div class="wrap"><table id="burn" class="sortable"><tr><th>item</th>'
                  '<th>reading</th><th>meaning</th><th>type</th>'
                  '<th class="num">wk level</th><th>could burn</th></tr>')
         for t, label, s in rows:
@@ -946,7 +993,13 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
                      f'<td class="num">{s["level"]}</td>'
                      f'<td data-sort="{t if t != float("inf") else 0:.0f}">'
                      f'{label}</td></tr>')
-        h.append("</table></div></details>")
+        h.append("</table></div>")
+        # Ten at a time: the whole point is the next few, and a sortable table
+        # of four hundred rows buries them.
+        h.append('<div class="pager" id="burnpager">'
+                 '<button type="button">&lsaquo; prev</button><span></span>'
+                 '<button type="button">next &rsaquo;</button></div>')
+        h.append("</details>")
 
     h.append(h2("Nearly within reach"))
     h.append(w.REACH_HTML)
@@ -983,11 +1036,13 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         f"<script>{w.SORT_JS}</script><script>{w.SLIDER_JS}</script>"
         f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
         f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script><script>{w.READ_JS}</script><script>{w.GAP_JS}</script>"
-        f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>")
+        f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>"
+        f"<script>{BURN_JS}</script>")
 
     return shell(f'{user["username"]} - coverage', body, user=user,
                  extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS
-                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS + w.GAP_CSS, scripts=scripts)
+                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS + w.GAP_CSS + BURN_CSS,
+                 scripts=scripts)
 
 
 def _trend(rows) -> str:
