@@ -74,7 +74,7 @@ MOBILE_CSS = """
   h2.acc::after { content:"+"; margin-left:auto; font-size:18px; font-weight:400;
     color:var(--faint); line-height:1; }
   h2.acc.open { color:var(--accent); }
-  h2.acc.open::after { content:"\2013"; color:var(--accent); }
+  h2.acc.open::after { content:"–"; color:var(--accent); }
   .acc-hidden { display:none !important; }
 }
 """
@@ -102,6 +102,16 @@ MOBILE_JS = """
   function show(g, open){
     g.head.classList.toggle('open', open);
     g.body.forEach(el => el.classList.toggle('acc-hidden', !open));
+    // The heading is the fold now, so a section that keeps its own content
+    // behind a "show me" summary would cost two taps to read. Open those on
+    // the way in - but only the content ones: the tag picker is a menu
+    // wearing a <details>, and it has to stay shut.
+    if (!open) return;
+    for (const el of g.body){
+      if (el.matches && el.matches('details.fold')) el.open = true;
+      if (el.querySelectorAll)
+        el.querySelectorAll('details.fold').forEach(d => { d.open = true; });
+    }
   }
   function enable(){
     on = true;
