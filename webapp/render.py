@@ -63,6 +63,24 @@ AUTH_CSS = """
 .tier .sub { margin:0; display:block; font-size:13px; }
 /* The line for the level you are on. It is the only sentence on the page that
    is not a number, so it gets room and a colour of its own. */
+.tier .who { flex:1 1 320px; min-width:0; }
+/* How far into this stretch, as a line rather than a sentence. */
+.tierbar { height:4px; border-radius:var(--r-pill); background:var(--line-soft);
+  margin:9px 0 0; max-width:280px; overflow:hidden; }
+.tierbar i { display:block; height:100%; border-radius:var(--r-pill);
+  background:var(--accent); animation:grow 600ms var(--ease) both;
+  transform-origin:left; }
+/* What is next, and when at the speed you actually go. */
+.tier .next { display:flex; align-items:center; gap:var(--s3); margin-left:auto;
+  padding-left:var(--s4); border-left:1px solid var(--line); align-self:stretch; }
+.tier .next img { width:72px; height:48px; object-fit:cover;
+  border-radius:var(--r-box); filter:brightness(.7) saturate(.8); }
+.tier .next b { display:block; font-size:16px; letter-spacing:-.01em; }
+.tier .next .lbl { display:block; font-size:10px; font-weight:650;
+  letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+.tier .next .sub { display:block; font-size:12.5px; }
+@media (max-width:700px) { .tier .next { display:none; } }
+
 .tier .verse { margin:7px 0 0; font-size:15px; color:var(--fg); max-width:52ch;
   font-style:italic; letter-spacing:-.005em; }
 .tier .verse::before { content:"“"; color:var(--accent); margin-right:2px; }
@@ -193,9 +211,20 @@ AUTH_CSS = """
 .rung .cap { display:flex; justify-content:space-between; align-items:baseline;
   gap:var(--s2); padding:9px 12px; font-size:13px; color:var(--muted); }
 .rung .cap b { color:var(--fg); font-size:14px; }
+.rung .tiermark { position:absolute; top:8px; right:8px; z-index:1;
+  display:inline-block; width:auto; height:auto; white-space:nowrap;
+  font-size:11px; font-weight:650; letter-spacing:.04em; line-height:1;
+  padding:5px 8px; border-radius:var(--r-pill);
+  backdrop-filter:blur(6px); }
+.rung .tiermark.past { background:var(--good); color:#08130d; font-size:12px;
+  padding:5px 7px; }
+.rung .tiermark.here { background:var(--accent); color:#fff; }
+/* The passed ones stay grey, but the tick does not - it is the one thing on
+   the card that is not about the picture. */
+.rung.past img { filter:grayscale(1) brightness(.5); }
+.rung.past:hover img { filter:grayscale(.15) brightness(.9); }
 .rung[aria-expanded="true"] { border-color:var(--accent); }
 .rung[aria-expanded="true"] img { filter:none; }
-.rung.past img { filter:grayscale(1) brightness(.55); }
 .rung.ahead img { filter:brightness(.75) saturate(.7); }
 .rung.now { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent),
   0 10px 30px -12px var(--accent); }
@@ -1722,7 +1751,7 @@ def levelup_banner(extras, level: int) -> str:
             + f'</div>{art}</div>')
 
 
-def tier_strip(level: int) -> str:
+def tier_strip(level: int, cache=None) -> str:
     """Where you are on the climb, on the page you read every day."""
     name, lo, hi = tier_of(level)
     nxt = next((t for t in TIERS if t[1] > hi), None)
@@ -1731,12 +1760,33 @@ def tier_strip(level: int) -> str:
             f'<b>{nxt[0]}</b></span>' if nxt else
             '<span class="sub">the last of them</span>')
     line = LEVEL_LINES.get(level, "")
+
+    # The right half was empty, and two things were known and unsaid: how far
+    # into this stretch you are, and when the next one starts at the speed you
+    # actually go.
+    span = hi - lo + 1
+    done = level - lo
+    pace = w.wk_pace(cache) if cache else None
+    when = (f' &middot; {w.in_months(to_go * pace)}' if nxt and pace else "")
+    if nxt:
+        side = (f'<div class="next">'
+                f'<img src="/asset/tier-{nxt[0].lower()}-sm.webp" alt=""'
+                f' width="240" height="160" loading="lazy">'
+                f'<div><span class="lbl">next</span><b>{nxt[0]}</b>'
+                f'<span class="sub">{to_go} level{"" if to_go == 1 else "s"}'
+                f'{when}</span></div></div>')
+    else:
+        side = ('<div class="next"><div><span class="lbl">the end</span>'
+                '<b>Level 60</b><span class="sub">nothing after this</span>'
+                '</div></div>')
+    bar = (f'<div class="tierbar" title="level {level} of {lo}&ndash;{hi}">'
+           f'<i style="width:{100 * done / span:.0f}%"></i></div>')
     return (f'<div class="tier"><img src="/asset/tier-{name.lower()}-sm.webp"'
             f' alt="" width="240" height="160" loading="lazy">'
-            f'<div><h3>{name}</h3>'
-            f'<p class="sub">levels {lo}&ndash;{hi}</p>{tail}'
+            f'<div class="who"><h3>{name}</h3>'
+            f'<p class="sub">levels {lo}&ndash;{hi}</p>{tail}{bar}'
             + (f'<p class="verse">{esc(line)}</p>' if line else "")
-            + '</div></div>')
+            + f'</div>{side}</div>')
 
 
 def tier_ladder(level: int) -> str:
@@ -1748,11 +1798,18 @@ def tier_ladder(level: int) -> str:
         # confirmation style - a passed stretch was picking it up by accident.
         state = ("now" if name == here else
                  "past" if hi < level else "ahead")
+        # Greyscale says "behind you", which is not the same as "you cleared
+        # this" - and the only thing that had been saying the second was a
+        # green border the cards picked up by accident from button.done.
+        mark = ('<span class="tiermark past" title="cleared">&#10003;</span>'
+                if state == "past" else
+                f'<span class="tiermark here">level {level}</span>'
+                if state == "now" else "")
         cards.append(
             f'<button type="button" class="rung {state}" data-tier="{name.lower()}"'
             f' aria-expanded="false">'
             f'<img src="/asset/tier-{name.lower()}.webp" alt="" width="720"'
-            f' height="480" loading="lazy">'
+            f' height="480" loading="lazy">{mark}'
             f'<span class="cap"><b>{name}</b><span>{lo}&ndash;{hi}</span></span>'
             f'</button>')
     return (f'<div class="ladder">{"".join(cards)}</div>'
@@ -1838,7 +1895,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         h.append(levelup_banner(extras, lvl))
         h.append(burned_banner(extras))
         h.append(year_heatmap(cache))
-        h.append(tier_strip(lvl))
+        h.append(tier_strip(lvl, cache))
         h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
         counts = w.month_totals(cache)
         if counts:
