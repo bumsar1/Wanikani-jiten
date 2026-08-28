@@ -294,6 +294,24 @@ LOAD_CSS = """
   .loadrail.on i { width:100%; opacity:.5; animation:none; }
   .loadrail.on b { display:none; }
 }
+
+/* Moving between pages, without a line of JavaScript: both documents opt in,
+   and the browser keeps the old one on screen while the new one arrives, then
+   crosses between them. A browser that has never heard of it navigates exactly
+   as it did before. */
+@view-transition { navigation: auto; }
+::view-transition-old(root) { animation:pageout 140ms var(--ease) both; }
+::view-transition-new(root) { animation:pagein 260ms var(--ease) both; }
+@keyframes pageout { to { opacity:0; transform:translateY(-6px); } }
+@keyframes pagein { from { opacity:0; transform:translateY(10px); } }
+
+/* The top bar is the same bar on both sides, so it should sit still while the
+   page underneath it changes rather than fading out and back in. */
+.topbar { view-transition-name: topbar; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation:none; }
+}
 """
 
 LOAD_JS = """
@@ -1042,36 +1060,45 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
          f'<h1>{esc(user["username"])}</h1>'
          f'<p class="sub">WaniKani level {lvl} &middot; '
          f'data from {esc((cache.get("fetched_at") or "")[:16].replace("T", " "))}'
-         f'</p></div></div>', w.NAV_SLOT, '<div class="cards">']
+         f'</p></div></div>', w.NAV_SLOT]
 
     def card(n, label, delta=None):
         d = f'<div class="d">{delta:+d} since last refresh</div>' if delta else ""
         return (f'<div class="card"><div class="n">{n}</div>'
                 f'<div class="l">{label}</div>{d}</div>')
 
-    h.append(card(lvl, "level"))
-    h.append(card(len(known["kanji_known"]), "kanji known", extras.get("d_kanji")))
-    h.append(card(len(known["words_known_set"]), "words known", extras.get("d_words")))
-    if decks:
-        best = max(decks, key=lambda r: r[1]["kanji_cov_occ"])
-        h.append(card(f'{best[1]["kanji_cov_occ"]:.0f}%',
-                      f'best: {esc(w.deck_title(best[0])[:14])}'))
-    ntot = extras.get("nihongo_totals")
-    if ntot:
-        h.append(f'<div class="card"><div class="n">{ntot["hours"]:.0f}h</div>'
-                 f'<div class="l">immersion logged</div>'
-                 f'<div class="d">{ntot["listening"]:.0f}h listening &middot; '
-                 f'{ntot["reading"]:.0f}h reading'
-                 + (f' &middot; {ntot["streak"]}d streak' if ntot["streak"] else "")
-                 + '</div></div>')
-    h.append("</div>")
-    # The bar and the counters are one thought - where WaniKani has got you -
-    # so they sit together at the top rather than as a section to scroll to.
-    h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
-    counts = w.month_totals(cache)
-    if counts:
-        h.append(w.counters_html(counts))
-    h.append(w.BROWSE_SLOT)
+    # The standing of the account - the counters, the bar, what has changed
+    # since last time - is a thing you read once when you arrive, not something
+    # to re-read above every screen. It stays on today; the other pages keep
+    # only the line that says whose numbers these are and how old they are.
+    on_today = page == "today"
+    if not on_today:
+        h.append(w.BROWSE_SLOT)
+    if on_today:
+        h.append('<div class="cards">')
+        h.append(card(lvl, "level"))
+        h.append(card(len(known["kanji_known"]), "kanji known", extras.get("d_kanji")))
+        h.append(card(len(known["words_known_set"]), "words known", extras.get("d_words")))
+        if decks:
+            best = max(decks, key=lambda r: r[1]["kanji_cov_occ"])
+            h.append(card(f'{best[1]["kanji_cov_occ"]:.0f}%',
+                          f'best: {esc(w.deck_title(best[0])[:14])}'))
+        ntot = extras.get("nihongo_totals")
+        if ntot:
+            h.append(f'<div class="card"><div class="n">{ntot["hours"]:.0f}h</div>'
+                     f'<div class="l">immersion logged</div>'
+                     f'<div class="d">{ntot["listening"]:.0f}h listening &middot; '
+                     f'{ntot["reading"]:.0f}h reading'
+                     + (f' &middot; {ntot["streak"]}d streak' if ntot["streak"] else "")
+                     + '</div></div>')
+        h.append("</div>")
+        # The bar and the counters are one thought - where WaniKani has got you -
+        # so they sit together at the top rather than as a section to scroll to.
+        h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
+        counts = w.month_totals(cache)
+        if counts:
+            h.append(w.counters_html(counts))
+        h.append(w.BROWSE_SLOT)
 
     if not decks:
         h.append(h2("Your titles"))
