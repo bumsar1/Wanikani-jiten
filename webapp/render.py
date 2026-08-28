@@ -110,6 +110,13 @@ AUTH_CSS = """
 .heat .wk:nth-child(4n) i { animation-delay:40ms; }
 .heat .wk:nth-child(4n+2) i { animation-delay:80ms; }
 .heat .wk:nth-child(4n+3) i { animation-delay:120ms; }
+.heat i:not(.pad) { cursor:default; }
+.heat i.lit { outline:2px solid var(--fg); outline-offset:1px; border-radius:3px; }
+/* The line above the grid is the readout, so the eye does not have to leave
+   the squares to find out what one of them says. */
+.heatnote { transition:color var(--t-fast) var(--ease); }
+.heatnote.reading { color:var(--fg); }
+.heatnote .none { color:var(--faint); }
 
 /* Thirty days of what could burn. Bars rather than a table, because the
    question is which week is heavy, not what Tuesday's exact number is. */
@@ -436,6 +443,37 @@ CARD_JS = """
       crab.src = '/asset/crabigator-land.png';
       setTimeout(() => { crab.src = '/asset/crabigator-idle.png'; }, 420);
     }, {once: true});
+  }
+
+  // The heatmap reads back into the line above it. A native title tooltip
+  // takes half a second to appear, cannot be styled, and sits wherever the
+  // pointer happens to be; this puts the answer in the same place every time,
+  // which is what lets you sweep along a week and actually compare days.
+  const heat = document.getElementById('heat');
+  const note = document.getElementById('heatnote');
+  if (heat && note){
+    const sum = note.dataset.sum;
+    let lit = null;
+    const clear = () => {
+      if (lit) lit.classList.remove('lit');
+      lit = null;
+      note.innerHTML = sum;
+      note.classList.remove('reading');
+    };
+    const read = sq => {
+      if (!sq || !sq.dataset.d) return;
+      if (lit) lit.classList.remove('lit');
+      lit = sq; sq.classList.add('lit');
+      const n = +sq.dataset.n;
+      note.innerHTML = n
+        ? `<b>${n.toLocaleString()}</b> item${n === 1 ? '' : 's'} passed on ` +
+          `<b>${sq.dataset.d}</b>`
+        : `<span class="none">Nothing passed on ${sq.dataset.d}</span>`;
+      note.classList.add('reading');
+    };
+    heat.addEventListener('pointerover', e => read(e.target.closest('i:not(.pad)')));
+    heat.addEventListener('pointerdown', e => read(e.target.closest('i:not(.pad)')));
+    heat.addEventListener('pointerleave', clear);
   }
 
   // The chips are already on the page; this only decides whether they are
@@ -1555,16 +1593,19 @@ def year_heatmap(cache, weeks: int = 53) -> str:
             # Five steps, on a curve: one item is visible, and a two-hundred
             # day does not make every ordinary day look empty.
             step = 0 if not n else min(4, 1 + int(3 * (n / top) ** 0.45))
-            cells.append(f'<i class="d{step}" title="{time.strftime("%a %d %b %Y", t)}'
-                         f': {n:,}"></i>')
+            cells.append(f'<i class="d{step}"'
+                         f' data-d="{time.strftime("%a %-d %b %Y", t)}" data-n="{n}"'
+                         f' title="{time.strftime("%a %d %b %Y", t)}: {n:,}"></i>')
             if t.tm_mday <= 7 and wday == 0:
                 months.append((wcol, time.strftime("%b", t)))
         cols.append(f'<span class="wk">{"".join(cells)}</span>')
     labels = "".join(f'<span style="grid-column:{c + 1}">{m}</span>'
                      for c, m in months)
-    return (f'<p class="sub"><b>{total:,}</b> items passed in the last year, '
-            f'over <b>{active:,}</b> days.</p>'
-            f'<div class="heat"><div class="months">{labels}</div>'
+    summary = (f'<b>{total:,}</b> items passed in the last year, '
+               f'over <b>{active:,}</b> days.')
+    return (f'<p class="sub heatnote" id="heatnote" data-sum="{esc(summary)}">'
+            f'{summary}</p>'
+            f'<div class="heat" id="heat"><div class="months">{labels}</div>'
             f'<div class="grid">{"".join(cols)}</div></div>')
 
 
