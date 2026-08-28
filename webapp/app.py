@@ -28,6 +28,12 @@ import store                 # noqa: E402
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("WKJITEN_SESSION_SECRET") or os.urandom(32)
+
+# Flask escapes non-ASCII to \uXXXX by default, which is six bytes for every
+# Japanese character it sends - the tier panel came to 211kB that way and 83kB
+# without. The responses are UTF-8 and say so; nothing here needs them ASCII.
+app.json.ensure_ascii = False
+app.json.compact = True
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   MAX_CONTENT_LENGTH=4 << 20)
 if os.environ.get("WKJITEN_HTTPS", "").lower() in ("1", "true", "yes"):
