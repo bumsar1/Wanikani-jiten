@@ -221,6 +221,7 @@ def wk_fetch(token: str) -> dict:
     assignments: dict[int, int] = {}       # subject_id -> srs_stage
     lessons_by_month: Counter[str] = Counter()
     passed_by_month: Counter[str] = Counter()
+    passed_by_day: Counter[str] = Counter()
     state: dict[int, dict] = {}
     for a in wk_paged("assignments", token):
         d = a["data"]
@@ -230,6 +231,10 @@ def wk_fetch(token: str) -> dict:
             lessons_by_month[d["started_at"][:7]] += 1
         if d.get("passed_at"):
             passed_by_month[d["passed_at"][:7]] += 1
+            # The day, not only the month. A month is a number; a year of days
+            # is a picture of whether you kept showing up. It is 365 small
+            # integers, so it costs nothing to keep.
+            passed_by_day[d["passed_at"][:10]] += 1
         state[sid] = {"s": d["srs_stage"], "at": d.get("available_at"),
                       "locked": not d.get("unlocked_at")}
 
@@ -318,6 +323,11 @@ def wk_fetch(token: str) -> dict:
         "progressions": progressions,
         "lessons_by_month": dict(lessons_by_month),
         "passed_by_month": dict(passed_by_month),
+        # Only the last fourteen months: further back is history nobody scrolls
+        # to, and it keeps the snapshot from growing with the account.
+        "passed_by_day": {d: n for d, n in sorted(passed_by_day.items())
+                          if d >= time.strftime("%Y-%m-%d",
+                                                time.gmtime(time.time() - 430 * 86400))},
         "level_kanji": level_kanji,
         "burning": burning,
         "burning_total": len(ready),

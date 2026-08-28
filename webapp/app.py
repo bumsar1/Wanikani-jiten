@@ -458,6 +458,12 @@ def _page(which: str):
             extras["leveled"] = {"from": prev.get("level") or 0,
                                  "to": cache.get("level") or 0}
         old_stage = prev.get("assignments", {})
+        # Items that crossed into Burned since the last look. They never come
+        # back, which is the whole point of the word.
+        extras["burned"] = sorted(
+            cache["subjects"][sid]["characters"]
+            for sid, st in cache["assignments"].items()
+            if st >= 9 and old_stage.get(sid, 0) < 9 and sid in cache["subjects"])
         extras["moved_up"] = {
             s["characters"] for sid, s in cache["subjects"].items()
             if s["type"] == "kanji"

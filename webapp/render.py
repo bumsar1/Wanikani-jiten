@@ -68,6 +68,49 @@ AUTH_CSS = """
 .tier .verse::before { content:"“"; color:var(--accent); margin-right:2px; }
 .tier .verse::after { content:"”"; color:var(--accent); margin-left:1px; }
 
+/* One sentence with the three numbers that were already on the page, standing
+   next to each other for once. */
+.bet { margin:0 0 var(--s3); padding:var(--s3) var(--s4);
+  border-left:3px solid var(--accent); border-radius:var(--r-ctl);
+  background:var(--accent-soft); max-width:none; font-size:15px; }
+.bet .lead { display:inline-block; font-size:11px; font-weight:650;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--accent);
+  margin-right:8px; }
+
+/* What was struck out while you were away. */
+.burned { display:flex; align-items:flex-start; gap:var(--s3); flex-wrap:wrap;
+  margin:0 0 var(--s3); padding:var(--s3) var(--s4);
+  border:1px solid var(--line); border-radius:var(--r-panel);
+  background:var(--raise); box-shadow:var(--shadow);
+  animation:settle 380ms var(--ease) both; }
+.burned .say { flex:1 1 320px; min-width:0; }
+.burned h3 { margin:0; font-size:18px; letter-spacing:-.01em; }
+.burned .sub { margin:2px 0 0; }
+.burned .newly { display:flex; flex-wrap:wrap; gap:4px; margin-top:10px; }
+.burned #dnplay2 { font-size:15px; opacity:.5; }
+.burned #dnplay2:hover, .burned #dnplay2.done { opacity:1; }
+.burned .dnbox { flex:1 1 100%; }
+
+/* A year of days. Squares rather than a chart, because the question is not
+   how many but how often. */
+.heat { margin:0 0 var(--s4); padding:var(--s3) var(--s4) var(--s4);
+  border:1px solid var(--line); border-radius:var(--r-panel);
+  background:var(--raise); box-shadow:var(--shadow); overflow-x:auto; }
+.heat .months { display:grid; grid-auto-flow:column; gap:3px; font-size:10px;
+  color:var(--faint); margin-bottom:5px; min-width:640px; }
+.heat .grid { display:flex; gap:3px; min-width:640px; }
+.heat .wk { display:grid; grid-template-rows:repeat(7,1fr); gap:3px; flex:1 1 0; }
+.heat i { display:block; aspect-ratio:1; border-radius:2px;
+  background:var(--line-soft); animation:settle 300ms var(--ease) both; }
+.heat i.pad { background:none; }
+.heat i.d1 { background:color-mix(in oklab, var(--accent) 28%, var(--line-soft)); }
+.heat i.d2 { background:color-mix(in oklab, var(--accent) 52%, var(--line-soft)); }
+.heat i.d3 { background:color-mix(in oklab, var(--accent) 76%, var(--line-soft)); }
+.heat i.d4 { background:var(--accent); }
+.heat .wk:nth-child(4n) i { animation-delay:40ms; }
+.heat .wk:nth-child(4n+2) i { animation-delay:80ms; }
+.heat .wk:nth-child(4n+3) i { animation-delay:120ms; }
+
 /* Thirty days of what could burn. Bars rather than a table, because the
    question is which week is heavy, not what Tuesday's exact number is. */
 .burncal { display:flex; align-items:flex-end; gap:3px; height:104px;
@@ -355,7 +398,12 @@ BURN_CSS = """
 
 DN_JS = """
 (function(){
-  const btn = document.getElementById('dnplay'), box = document.getElementById('dnbox');
+  // Two of these now: the one under the burn list, and the one beside what was
+  // struck out while you were away.
+  for (const [b, x] of [['dnplay', 'dnbox'], ['dnplay2', 'dnbox2']]) wire(b, x);
+
+  function wire(bid, xid){
+  const btn = document.getElementById(bid), box = document.getElementById(xid);
   if (!btn || !box) return;
   const v = box.querySelector('video');
   btn.addEventListener('click', () => {
@@ -374,6 +422,7 @@ DN_JS = """
     }
     btn.classList.toggle('done', opening);
   });
+  }
 })();
 """
 
@@ -1472,6 +1521,53 @@ def tier_of(level: int):
     return TIERS[-1]
 
 
+def year_heatmap(cache, weeks: int = 53) -> str:
+    """A year of days, one square each, shaded by how much you passed.
+
+    The monthly totals say 202 in August. They do not say whether that was
+    seven a day or two hundred on a Sunday, and the difference is the whole
+    question when the thing you are trying to keep is a habit.
+    """
+    days = cache.get("passed_by_day") or {}
+    if not days:
+        return ""
+    today = time.gmtime()
+    # Start on the Sunday of the week that is `weeks` back, so the columns line
+    # up as weeks rather than drifting.
+    start = calendar.timegm(time.strptime(time.strftime("%Y-%m-%d", today),
+                                          "%Y-%m-%d"))
+    start -= ((today.tm_wday + 1) % 7) * 86400          # back to this Sunday
+    start -= (weeks - 1) * 7 * 86400
+    top = max(days.values())
+    cols, total, active = [], 0, 0
+    months = []
+    for wcol in range(weeks):
+        cells = []
+        for wday in range(7):
+            t = time.gmtime(start + (wcol * 7 + wday) * 86400)
+            key = time.strftime("%Y-%m-%d", t)
+            if key > time.strftime("%Y-%m-%d", today):
+                cells.append('<i class="pad"></i>')
+                continue
+            n = days.get(key, 0)
+            total += n
+            active += 1 if n else 0
+            # Five steps, on a curve: one item is visible, and a two-hundred
+            # day does not make every ordinary day look empty.
+            step = 0 if not n else min(4, 1 + int(3 * (n / top) ** 0.45))
+            cells.append(f'<i class="d{step}" title="{time.strftime("%a %d %b %Y", t)}'
+                         f': {n:,}"></i>')
+            if t.tm_mday <= 7 and wday == 0:
+                months.append((wcol, time.strftime("%b", t)))
+        cols.append(f'<span class="wk">{"".join(cells)}</span>')
+    labels = "".join(f'<span style="grid-column:{c + 1}">{m}</span>'
+                     for c, m in months)
+    return (f'<p class="sub"><b>{total:,}</b> items passed in the last year, '
+            f'over <b>{active:,}</b> days.</p>'
+            f'<div class="heat"><div class="months">{labels}</div>'
+            f'<div class="grid">{"".join(cols)}</div></div>')
+
+
 def burn_calendar(cache, days: int = 30) -> str:
     """The next thirty days of what could burn, as thirty bars.
 
@@ -1521,6 +1617,50 @@ def burn_calendar(cache, days: int = 30) -> str:
     return (f'<p class="sub">{note}The tallest day in the next {days} is '
             f'<b>{top:,}</b>.</p>'
             f'<div class="burncal">{"".join(bars)}</div>')
+
+
+def best_bet(decks, lvl: int) -> str:
+    """One title, and why it is the one.
+
+    The table below sorts by coverage and leaves the reading of it to you. All
+    three numbers here are already computed for that table; they have simply
+    never stood in the same sentence.
+    """
+    if not decks:
+        return ""
+    deck, res = max(decks, key=lambda r: r[1]["kanji_cov_occ"])
+    now = res["kanji_cov_occ"]
+    fin = w.finishing_level(res, lvl)
+    reach = w.level_for(res["curve"], 95)
+    title = esc(w.deck_title(deck))
+    gain = (f' Finishing level {lvl} alone takes it to <b>{fin:.1f}%</b>.'
+            if fin and fin - now >= 0.1 else "")
+    far = (f' It stops fighting you at level {reach}.' if reach else "")
+    return (f'<p class="bet"><span class="lead">Read this</span> '
+            f'<b>{title}</b> is your best bet right now, at '
+            f'<b>{now:.1f}%</b> of its kanji.{gain}{far}</p>')
+
+
+def burned_banner(extras) -> str:
+    """What was struck out since you last looked.
+
+    Burning is the one thing in WaniKani that is permanent, and the app used to
+    let it pass without a word. The clip is 212kB and only fetched if you ask
+    for it - the sources are written in on the click, like everywhere else.
+    """
+    gone = extras.get("burned") or []
+    if not gone:
+        return ""
+    n = len(gone)
+    chips = "".join(f'<span class="ni">{esc(c)}</span>' for c in gone[:60])
+    more = f'<span class="ni more">+{n - 60}</span>' if n > 60 else ""
+    return (f'<div class="burned" id="burnedbox">'
+            f'<div class="say"><h3>{n:,} name{"" if n == 1 else "s"} struck out</h3>'
+            f'<p class="sub">Burned since your last refresh. They do not come '
+            f'back.</p><div class="newly">{chips}{more}</div></div>'
+            f'<button type="button" id="dnplay2" title="the list">&#9760;</button>'
+            f'<div class="dnbox" id="dnbox2" hidden>'
+            f'<video muted loop playsinline preload="none"></video></div></div>')
 
 
 def levelup_banner(extras, level: int) -> str:
@@ -1661,6 +1801,8 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         # The bar and the counters are one thought - where WaniKani has got you -
         # so they sit together at the top rather than as a section to scroll to.
         h.append(levelup_banner(extras, lvl))
+        h.append(burned_banner(extras))
+        h.append(year_heatmap(cache))
         h.append(tier_strip(lvl))
         h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
         counts = w.month_totals(cache)
@@ -1675,6 +1817,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
                  'jiten.moe, or use the search above, then refresh.</p>')
     else:
         h.append(h2("Your tracked titles"))
+        h.append(best_bet(decks, lvl))
         groups = w.by_media_type(decks)
         split = len(groups) > 1
         nprog = extras.get("nihongo") or {}
