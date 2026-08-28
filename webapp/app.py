@@ -338,6 +338,31 @@ def baseline():
 
 @app.get("/")
 def dashboard():
+    return _page("today")
+
+
+@app.get("/levels")
+def levels_page():
+    return _page("levels")
+
+
+@app.get("/kanji")
+def kanji_page():
+    return _page("kanji")
+
+
+@app.get("/browse")
+def browse_page():
+    return _page("browse")
+
+
+def _page(which: str):
+    """One set of numbers, four pages made from it.
+
+    Everything below used to render a single 7,664px column. The work is the
+    same either way - the snapshot is parsed once, the decks analysed once -
+    so the split costs nothing here and saves it at the other end, where a
+    page now carries only the data its own sections read."""
     user = require_login()
     creds = creds_of(user)
     if not creds.get("wk_token"):
@@ -461,7 +486,7 @@ def dashboard():
             extras["nihongo_unmeasured"] = nt["unmeasured"]
 
     return render.dashboard(user, cache, known, decks,
-                            store.get_history(user["id"]), extras)
+                            store.get_history(user["id"]), extras, page=which)
 
 
 @app.get("/together")

@@ -4244,16 +4244,22 @@ async function analyse(id, btn){
   btn.disabled = false; btn.textContent = 'when?';
 }
 
-// Searching on every keystroke meant a request and a re-render while you were
-// still typing. Enter only.
-$('#q').addEventListener('keydown', e => {
-  // Enter also confirms an IME conversion; that one is not a submit.
-  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); search(); }
-});
-$('#go').addEventListener('click', search);
-for (const id of ['#type', '#sort', '#minchars'])
-  $(id).addEventListener('change', () => { if ($('#q').value.trim() ||
-    $('#type').value || $('#minchars').value || chosen.size) search(); });
+// The functions above are also used by the reach panel, which is why this file
+// is not wrapped in one - but the wiring below belongs to the search box, and
+// the search box is only on one page now. Without the guard, this throws on
+// every other page, and takes the rest of the bundle down with it.
+if ($('#q')){
+  // Searching on every keystroke meant a request and a re-render while you were
+  // still typing. Enter only.
+  $('#q').addEventListener('keydown', e => {
+    // Enter also confirms an IME conversion; that one is not a submit.
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); search(); }
+  });
+  $('#go').addEventListener('click', search);
+  for (const id of ['#type', '#sort', '#minchars'])
+    $(id).addEventListener('change', () => { if ($('#q').value.trim() ||
+      $('#type').value || $('#minchars').value || chosen.size) search(); });
+}
 """
 
 BROWSE_CSS = """

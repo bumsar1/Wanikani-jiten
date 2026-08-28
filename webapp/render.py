@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import calendar
 import hashlib
+import re
 import json
 import time
 import urllib.parse
@@ -50,6 +51,7 @@ AUTH_CSS = """
 .topbar { display:flex; justify-content:space-between; align-items:center;
   gap:12px; padding:14px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
 .topbar .who { color:var(--muted); font-size:13px; }
+.topbar nav a.here { color:var(--accent); background:var(--accent-soft); }
 .topbar nav { margin:0; }
 form.inline { display:inline; }
 .code { font-family:ui-monospace,Menlo,Consolas,monospace; background:var(--bg);
@@ -376,13 +378,19 @@ LOAD_JS = """
 
 
 def shell(title: str, body: str, *, user=None, extra_css: str = "",
-          scripts: str = "") -> str:
+          scripts: str = "", page: str = "") -> str:
     """Common HTML skeleton. Same tokens as the local dashboard."""
     bar = ""
     if user:
-        bar = (f'<div class="topbar"><nav><a href="/">dashboard</a>'
-               f'<a href="/together">together</a><a href="/settings">settings</a>'
-               + ('<a href="/invites">invites</a>' if user.get("is_admin") else "")
+        tabs = [("/", "today", "today"), ("/levels", "levels", "levels"),
+                ("/kanji", "kanji", "kanji"), ("/browse", "browse", "browse"),
+                ("/together", "together", ""), ("/settings", "settings", "")]
+        if user.get("is_admin"):
+            tabs.append(("/invites", "invites", ""))
+        bar = ('<div class="topbar"><nav>'
+               + "".join(f'<a href="{href}"'
+                         + (' class="here"' if key and key == page else "")
+                         + f">{label}</a>" for href, label, key in tabs)
                + f'</nav><span class="who">{esc(user["username"])} &middot; '
                  f'<a href="/logout">log out</a></span></div>')
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -1007,7 +1015,19 @@ def _burn_when(at: str, now: float) -> tuple[str, float]:
     return f"in {d / 86400 / 7:.0f} weeks", t
 
 
-def dashboard(user, cache, known, decks, history, extras) -> str:
+# Which section belongs on which page. Everything used to be one 7,664px
+# column; this splits it by how often you look at a thing rather than by what
+# it is about. The ids are the slugs h2() makes from the headings.
+PAGES = {
+    "today":  ("Today", ["your-titles", "your-tracked-titles", "immersion",
+                         "one-answer-from-burned", "finished"]),
+    "levels": ("Levels", ["what-each-level-would-buy-you", "nearly-within-reach"]),
+    "kanji":  ("Kanji", ["kanji-grid", "leeches-blocking-your-reading"]),
+    "browse": ("Browse", ["browse", "read-check-any-text"]),
+}
+
+
+def dashboard(user, cache, known, decks, history, extras, page: str = "today") -> str:
     """decks is a list of (deck dict, analysis dict) for the user's titles."""
     lvl = cache.get("level") or 0
     subjects, assignments = cache["subjects"], cache["assignments"]
@@ -1235,9 +1255,13 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
             label, t = _burn_when(at, now)
             rows.append((t or float("inf"), label, s))
         rows.sort(key=lambda r: r[0])
+        # Ten at a time, ten pages deep: past that it is not "about to burn",
+        # it is a list of everything, and 400 rows of table was 80kB of page
+        # for the nine tenths nobody scrolls to.
+        shown_rows, rows = len(rows), rows[:100]
         due = sum(1 for t, _l, _s in rows if t and t <= now)
         week = sum(1 for t, _l, _s in rows if t and now < t <= now + 86400 * 7)
-        total = cache.get("burning_total") or len(rows)
+        total = cache.get("burning_total") or shown_rows
 
         h.append(h2("One answer from burned"))
         shown = ("" if total <= len(rows) else
@@ -1304,24 +1328,44 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         for d, r in sorted(decks, key=lambda r: -r[1]["kanji_cov_occ"])]},
         ensure_ascii=False, separators=(",", ":"))
 
-    body = "".join(h)
-    links = [("browse", "Browse jiten.moe")] + sections
-    body = body.replace(w.BROWSE_SLOT, w.BROWSE_HTML)
-    body = body.replace(w.NAV_SLOT, "<nav>" + "".join(
+    # Keep the preamble - hero, cards, level bar, all of which belong to no
+    # heading - and then only the sections this page is for. A section is
+    # everything from its own h2 up to the next one.
+    wanted = set(PAGES[page][1])
+    kept, current = [], None
+    for part in h:
+        mark = re.match(r'<h2 id="([a-z0-9-]+)"', part)
+        if mark:
+            current = mark.group(1)
+        if current is None or current in wanted or part.startswith("<footer"):
+            kept.append(part)
+    body = "".join(kept)
+    links = [(s, t) for s, t in sections if s in wanted]
+    if page == "browse":
+        links = [("browse", "Browse jiten.moe")] + links
+    body = body.replace(w.BROWSE_SLOT, w.BROWSE_HTML if page == "browse" else "")
+    # One or two sections do not need jump links to themselves.
+    body = body.replace(w.NAV_SLOT, "" if len(links) < 3 else "<nav>" + "".join(
         f'<a href="#{s}">{esc(t)}</a>' for s, t in links) + "</nav>")
 
-    scripts = (
-        f"<script>const TRACK={track};const WK={blob};"
-        f"const GRID={w.grid_payload(grid)};"
-        f"const GRID_LEVEL={lvl};"
-        f"const GRID_TITLES={json.dumps([w.deck_title(d) for d, _ in decks], ensure_ascii=False)};"
-        f"const LIVE=true;const OTHERS=[];"
-        f"const TAGS={json.dumps(extras.get('tags', []), ensure_ascii=False)};"
-        f"const REACH_TARGET={min(60, lvl + 5)};</script>"
-        + DASH_TAG)
+    # Only the data this page can actually use. The grid is 52kB of it and
+    # belongs to one section; sending it to the other three was most of what
+    # made a page load heavy.
+    data = [f"const WK={blob};const LIVE=true;const OTHERS=[];",
+            f"const GRID_LEVEL={lvl};"]
+    if page == "kanji":
+        data.append(f"const GRID={w.grid_payload(grid)};")
+        data.append(f"const GRID_TITLES="
+                    f"{json.dumps([w.deck_title(d) for d, _ in decks], ensure_ascii=False)};")
+    if page == "levels":
+        data.append(f"const TRACK={track};")
+        data.append(f"const REACH_TARGET={min(60, lvl + 5)};")
+    if page == "browse":
+        data.append(f"const TAGS={json.dumps(extras.get('tags', []), ensure_ascii=False)};")
 
-    return shell(f'{user["username"]} - coverage', body, user=user,
-                 scripts=scripts)
+    title = f'{user["username"]} - {PAGES[page][0].lower()}'
+    return shell(title, body, user=user, page=page,
+                 scripts=f'<script>{"".join(data)}</script>' + DASH_TAG)
 
 
 def _trend(rows) -> str:
