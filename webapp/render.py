@@ -95,6 +95,7 @@ AUTH_CSS = """
 .tierbox .words { display:flex; flex-wrap:wrap; gap:5px; margin-top:var(--s2); }
 .tierbox .wd { font-size:14px; padding:3px 9px; border-radius:var(--r-pill);
   border:1px solid var(--line); color:var(--muted); background:var(--bg); }
+.tierbox .wd.in { animation:tilein 300ms var(--ease) both; }
 .tierbox .wd.on { color:var(--fg); border-color:var(--good); }
 .tierbox .more { color:var(--faint); font-size:13px; margin-top:var(--s2); }
 
@@ -303,22 +304,38 @@ TIER_JS = """
   const cache = new Map();
   let open = null;
 
+  // Same sweep as the kanji grid: the tiles fill in on a diagonal rather than
+  // landing in one frame, and the step shrinks as the rows multiply so ten
+  // levels take about as long as one.
+  let front = 0;
   function rows(items){
     const byLevel = new Map();
     for (const it of items){
       if (!byLevel.has(it.l)) byLevel.set(it.l, []);
       byLevel.get(it.l).push(it);
     }
-    return [...byLevel].sort((a, b) => a[0] - b[0]).map(([lv, list]) =>
+    const list = [...byLevel].sort((a, b) => a[0] - b[0]);
+    const step = Math.min(34, 420 / Math.max(1, list.length));
+    front = 0;
+    return list.map(([lv, tiles], row) =>
       `<div class="lvlrow"><span class="lvlnum">${lv}</span><div class="kanjis">` +
-      list.map(k => `<span class="k b-${BAND(k.s)}">${k.c}</span>`).join('') +
+      tiles.map((k, col) => {
+        const wait = Math.round(row * step + col * 3);
+        if (wait > front) front = wait;
+        return `<span class="k in b-${BAND(k.s)}" style="animation-delay:${wait}ms">${k.c}</span>`;
+      }).join('') +
       '</div></div>').join('');
   }
 
   function draw(d){
     const wordCap = 240;
-    const words = d.words.slice(0, wordCap).map(x =>
-      `<span class="wd${x.s >= 5 ? ' on' : ''}">${x.c}</span>`).join('');
+    const kanjiHtml = rows(d.kanji);
+    // The words come in behind the kanji, quickly, so the panel reads top to
+    // bottom once rather than everywhere at once.
+    const words = d.words.slice(0, wordCap).map((x, i) =>
+      `<span class="wd in${x.s >= 5 ? ' on' : ''}"` +
+      ` style="animation-delay:${Math.round(front + 60 + i * 1.6)}ms">${x.c}</span>`)
+      .join('');
     const rest = d.words.length - wordCap;
     box.innerHTML =
       `<h4>${d.name} &middot; levels ${d.lo}&ndash;${d.hi}</h4>` +
@@ -326,7 +343,7 @@ TIER_JS = """
       `<b>${d.passed.kanji.toLocaleString()}</b> of them passed &middot; ` +
       `${d.words.length.toLocaleString()} words, ` +
       `<b>${d.passed.words.toLocaleString()}</b> passed</p>` +
-      rows(d.kanji) +
+      kanjiHtml +
       `<div class="words">${words}</div>` +
       (rest > 0 ? `<p class="more">and ${rest.toLocaleString()} more words</p>` : '');
   }
