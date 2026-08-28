@@ -61,6 +61,12 @@ AUTH_CSS = """
   flex:none; }
 .tier h3 { margin:0; font-size:20px; letter-spacing:-.01em; }
 .tier .sub { margin:0; display:block; font-size:13px; }
+/* The line for the level you are on. It is the only sentence on the page that
+   is not a number, so it gets room and a colour of its own. */
+.tier .verse { margin:7px 0 0; font-size:15px; color:var(--fg); max-width:52ch;
+  font-style:italic; letter-spacing:-.005em; }
+.tier .verse::before { content:"“"; color:var(--accent); margin-right:2px; }
+.tier .verse::after { content:"”"; color:var(--accent); margin-left:1px; }
 
 .ladder { display:grid; gap:var(--s3); margin:0 0 var(--s4);
   grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
@@ -1297,6 +1303,73 @@ TIERS = [("Pleasant", 1, 10), ("Painful", 11, 20), ("Death", 21, 30),
          ("Hell", 31, 40), ("Paradise", 41, 50), ("Reality", 51, 60)]
 
 
+# One line per level, because "level 34 of 60" is a progress bar and not a
+# reason to come back. They are short on purpose: this sits under a picture of
+# a crocodile in a headband, and anything longer would be a lecture.
+LEVEL_LINES = {
+    1: "Everything is new, which is the only time everything is easy.",
+    2: "Four strokes, and one of them is already a word.",
+    3: "The radicals are lying to you kindly. Let them.",
+    4: "You have started recognising things on signs. That was fast.",
+    5: "Mnemonics you would never admit to out loud are working.",
+    6: "The first ones come back around. Some of them stayed.",
+    7: "Two hundred items in, and the shape of the thing appears.",
+    8: "You can read a menu badly. Badly is a beginning.",
+    9: "The reviews arrive whether or not you meant to open the app.",
+    10: "Ten levels. A sixth of it, and the easy sixth at that.",
+    11: "Painful is the name they gave it, and they were not joking.",
+    12: "The pile stops being new and starts being a habit.",
+    13: "Nothing is dramatic here. That is the danger.",
+    14: "Two kanji you keep confusing. Everyone has a pair.",
+    15: "A quarter through. Nobody claps at a quarter.",
+    16: "The words are getting longer and the radicals stranger.",
+    17: "Guru is not the same as knowing, and you have noticed.",
+    18: "You read a sentence and only stopped twice.",
+    19: "The leeches have names now.",
+    20: "The end of Painful. It was not the worst of it.",
+    21: "Death. It is a joke about the workload and also not.",
+    22: "The reviews outnumber the lessons and will from here on.",
+    23: "This is the stretch people quit in. Knowing that helps.",
+    24: "Slow is not stopped. The counter only moves one way.",
+    25: "Halfway. Say it out loud - it sounds better than it reads.",
+    26: "You have burned things. They do not come back.",
+    27: "Some days it is twenty items and that is a full day.",
+    28: "The kanji you meet in the wild are yours now.",
+    29: "You are past the point where anyone else would have quit.",
+    30: "Half the alphabet of a language that has no alphabet.",
+    31: "Hell, allegedly. By now you know what the names are worth.",
+    32: "A hundred a day is not the goal. Coming back is the goal.",
+    33: "You can guess a reading you have never seen and be right.",
+    34: "The gap between what you know and what you can read closes.",
+    35: "Manga stops being a wall of shapes and becomes slow reading.",
+    36: "Nobody is watching the streak but you. That is enough.",
+    37: "The ones you failed six times are the ones that stick hardest.",
+    38: "Three fifths. The rest is shorter than what is behind you.",
+    39: "You have learned more kanji than most people ever meet.",
+    40: "The end of Hell. From here the names get kinder.",
+    41: "Paradise. The joke is that the work is the same.",
+    42: "Reading gets faster without you deciding to be faster.",
+    43: "The fast levels start. Fewer radicals in the way.",
+    44: "Words you never studied make sense from their parts.",
+    45: "Three quarters. That is not a milestone, it is a slope.",
+    46: "You look up fewer things. You notice you looked up fewer things.",
+    47: "The reviews are maintenance now, not construction.",
+    48: "Novels are still hard. Novels are no longer impossible.",
+    49: "The last of the strange ones are arriving.",
+    50: "Fifty. The mountain is behind you and you are still walking.",
+    51: "Reality. The name is a compliment.",
+    52: "The rare kanji arrive and you meet them once a year after this.",
+    53: "You are learning the ones native readers also look up.",
+    54: "Anything left is detail. Detail is the whole point.",
+    55: "Five to go, and each is a week.",
+    56: "You read for pleasure now and study on the side.",
+    57: "The end is close enough to be a date rather than a hope.",
+    58: "Two more. You know exactly what two more feels like.",
+    59: "The last set of lessons you will ever be given here.",
+    60: "Level 60. WaniKani is finished; Japanese is not. Go read.",
+}
+
+
 def tier_of(level: int):
     for name, lo, hi in TIERS:
         if lo <= level <= hi:
@@ -1312,10 +1385,13 @@ def tier_strip(level: int) -> str:
     tail = (f'<span class="sub">{to_go} level{"" if to_go == 1 else "s"} to '
             f'<b>{nxt[0]}</b></span>' if nxt else
             '<span class="sub">the last of them</span>')
+    line = LEVEL_LINES.get(level, "")
     return (f'<div class="tier"><img src="/asset/tier-{name.lower()}-sm.webp"'
             f' alt="" width="240" height="160" loading="lazy">'
             f'<div><h3>{name}</h3>'
-            f'<p class="sub">levels {lo}&ndash;{hi}</p>{tail}</div></div>')
+            f'<p class="sub">levels {lo}&ndash;{hi}</p>{tail}'
+            + (f'<p class="verse">{esc(line)}</p>' if line else "")
+            + '</div></div>')
 
 
 def tier_ladder(level: int) -> str:
