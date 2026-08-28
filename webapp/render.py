@@ -171,6 +171,18 @@ BURN_CSS = """
 .pager button:disabled { opacity:.4; cursor:default; }
 .pager span { font-variant-numeric:tabular-nums; }
 
+.dn { margin-top:2px; }
+.dn > button { font-size:14px; line-height:1; padding:4px 10px; opacity:.45;
+  transition:opacity var(--t-fast) var(--ease); }
+.dn > button:hover, .dn > button.done { opacity:1; }
+.dnbox { margin-top:10px; max-width:420px; border:1px solid var(--line);
+  border-radius:var(--r-panel); overflow:hidden; background:var(--raise);
+  box-shadow:var(--lift); animation:dnin var(--t-base) var(--ease); }
+.dnbox[hidden] { display:none; }
+.dnbox video { display:block; width:100%; height:auto; }
+.dnbox .sub { margin:0; padding:9px 14px 11px; font-size:13px; }
+@keyframes dnin { from { opacity:0; transform:translateY(-6px); } }
+
 /* A kanji cell is 26px, and the shared "td:first-child:not(.num)" rule asks
    for 11em of it - 286px of mostly empty column. td.kanji answers that with
    min-width:auto but loses on specificity, so say it again from the id. */
@@ -185,6 +197,30 @@ BURN_CSS = """
   #burn th:nth-child(4), #burn td:nth-child(4),
   #burn th:nth-child(5), #burn td:nth-child(5) { display:none; }
 }
+"""
+
+DN_JS = """
+(function(){
+  const btn = document.getElementById('dnplay'), box = document.getElementById('dnbox');
+  if (!btn || !box) return;
+  const v = box.querySelector('video');
+  btn.addEventListener('click', () => {
+    const opening = box.hasAttribute('hidden');
+    if (opening){
+      if (!v.querySelector('source')){
+        v.innerHTML = '<source src="/asset/deathnote.webm" type="video/webm">'
+                    + '<source src="/asset/deathnote.mp4" type="video/mp4">';
+        v.load();
+      }
+      box.removeAttribute('hidden');
+      v.play().catch(() => {});
+    } else {
+      v.pause();
+      box.setAttribute('hidden', '');
+    }
+    btn.classList.toggle('done', opening);
+  });
+})();
 """
 
 BURN_JS = """
@@ -267,18 +303,22 @@ LOAD_JS = """
   const FLAG = 'wkjiten:navigating';
   let timer = null, shown = 0;
 
-  function show(){
+  function note(obj){
+    try { sessionStorage.setItem(FLAG, JSON.stringify(obj)); } catch (e) {}
+  }
+  function show(at){
     rail.classList.add('on');
     shown = performance.now();
+    if (at) note({t: Date.now(), shown: at});
   }
   function start(){
     if (timer) return;
     // The loader lives on the page being left, and that page is destroyed the
     // moment the next one commits - locally that is under a millisecond, so he
     // never got off the mark. Hand him over instead: the click leaves a note,
-    // and the arriving page picks it up and lets him finish the lap.
-    try { sessionStorage.setItem(FLAG, String(Date.now())); } catch (e) {}
-    timer = setTimeout(show, 80);
+    // and the arriving page picks it up.
+    note({t: Date.now(), shown: 0});
+    timer = setTimeout(() => show(Date.now()), 80);
   }
   function stop(){
     clearTimeout(timer); timer = null;
@@ -289,11 +329,25 @@ LOAD_JS = """
   // page has finished loading AND he has had time to cross once. Anything
   // else - a typed URL, a fresh tab - starts quiet.
   let handover = null;
-  try { handover = sessionStorage.getItem(FLAG); sessionStorage.removeItem(FLAG); } catch (e) {}
-  if (handover && Date.now() - +handover < 10000){
-    show();
+  try {
+    handover = JSON.parse(sessionStorage.getItem(FLAG) || 'null');
+    sessionStorage.removeItem(FLAG);
+  } catch (e) {}
+  if (handover && Date.now() - handover.t < 10000){
+    // If he was already running when the page was left, pick him up mid-stride
+    // rather than putting him back on the start line. A negative delay is the
+    // animation saying "assume this much has already happened", which is what
+    // stops him crossing twice for one click.
+    let carried = 0;
+    if (handover.shown){
+      carried = (Date.now() - handover.shown) % CROSS;
+      for (const el of [rail.querySelector('i'), rail.querySelector('b')])
+        el.style.animationDelay = `-${carried}ms` + (el.tagName === 'B' ? `, -${carried}ms` : '');
+    }
+    show(0);
     const done = () => {
-      const left = Math.max(0, CROSS - (performance.now() - shown));
+      // What is left of *his* lap, not a fresh one - he is already part way in.
+      const left = Math.max(0, (CROSS - carried) - (performance.now() - shown));
       setTimeout(stop, left);
     };
     if (document.readyState === 'complete') done();
@@ -1217,6 +1271,18 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         h.append('<div class="pager" id="burnpager">'
                  '<button type="button">&lsaquo; prev</button><span></span>'
                  '<button type="button">next &rsaquo;</button></div>')
+        # Burning an item is striking a name off for good, and this is the list
+        # of names one answer away. The clip is 212kB and is not fetched until
+        # somebody actually asks for it.
+        names = (f"{due:,} name{'' if due == 1 else 's'} in your queue right now"
+                 if due else
+                 f"{week:,} name{'' if week == 1 else 's'} this week"
+                 if week else f"{len(rows):,} names waiting")
+        h.append(f'<div class="dn"><button type="button" id="dnplay"'
+                 f' title="the list">&#9760;</button>'
+                 f'<div class="dnbox" id="dnbox" hidden>'
+                 f'<video muted loop playsinline preload="none"></video>'
+                 f'<p class="sub">{names}.</p></div></div>')
         h.append("</details>")
 
     h.append(h2("Nearly within reach"))
@@ -1255,7 +1321,8 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
         f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
         f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script><script>{w.READ_JS}</script><script>{w.GAP_JS}</script>"
         f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>"
-        f"<script>{BURN_JS}</script><script>{MOBILE_JS}</script>")
+        f"<script>{BURN_JS}</script><script>{DN_JS}</script>"
+        f"<script>{MOBILE_JS}</script>")
 
     return shell(f'{user["username"]} - coverage', body, user=user,
                  extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS
