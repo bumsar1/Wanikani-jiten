@@ -621,6 +621,10 @@ def tier(name):
                "s": stages.get(sid, 0),
                "m": subj.get("meaning") or "",
                "r": "、".join(subj.get("readings") or [])}
+        # Only where WaniKani's address differs from the characters, which is
+        # the handful of items that were linking to a 404.
+        if subj.get("slug"):
+            row["u"] = subj["slug"]
         (kanji if subj["type"] == "kanji" else words).append(row)
     key = lambda r: (r["l"], r["c"])
     kanji.sort(key=key)

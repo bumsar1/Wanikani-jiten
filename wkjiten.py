@@ -190,6 +190,12 @@ def wk_fetch(token: str) -> dict:
             # whose kanji are mostly still locked has no date at all.
             "parts": d.get("component_subject_ids") or [],
         }
+        # WaniKani's own address for the thing, which is not always its
+        # characters: 今日は lives at /vocabulary/こんにちは, and linking to the
+        # characters gives a 404. Only kept when it differs, which is rare
+        # enough that the snapshot barely notices.
+        if d.get("slug") and d["slug"] != chars:
+            subjects[s["id"]]["slug"] = d["slug"]
 
     # The intervals the SRS actually uses, rather than four numbers copied out
     # of a wiki: they differ between the standard and accelerated systems, and

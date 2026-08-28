@@ -382,7 +382,10 @@ TIER_JS = """
     if (!it) return;
     const out = document.getElementById('tierpick');
     const kind = id[0] === 'w' ? 'vocabulary' : 'kanji';
-    const url = 'https://www.wanikani.com/' + kind + '/' + encodeURIComponent(it.c);
+    // WaniKani's address is not always the characters - 今日は lives at
+    // /vocabulary/こんにちは - so use the slug it gives us when it differs.
+    const url = 'https://www.wanikani.com/' + kind + '/' +
+                encodeURIComponent(it.u || it.c);
     out.innerHTML =
       `<span class="big">${it.c}</span>` +
       `<span class="what"><b>${it.m || '&mdash;'}</b>` +
@@ -1617,7 +1620,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
                     "kana_vocabulary": "kana"}.get(s["type"], s["type"])
             url = ("https://www.wanikani.com/"
                    + ("kanji/" if s["type"] == "kanji" else "vocabulary/")
-                   + urllib.parse.quote(ch))
+                   + urllib.parse.quote(s.get("slug") or ch))
             h.append(f'<tr><td class="kanji"><a href="{url}" target="_blank"'
                      f' rel="noopener">{esc(ch)}</a></td>'
                      f'<td>{esc("、".join(s.get("readings") or []))}</td>'
