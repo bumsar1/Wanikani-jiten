@@ -3641,7 +3641,6 @@ CHART_CSS = """
 
 GRID_HTML = """
 <div id="gridfold">
-  <p class="sub"><span class="cnt"></span></p>
   <div class="gridbar">
     <div class="modes">
       <button data-mode="srs" class="on">by SRS stage</button>
@@ -3703,7 +3702,7 @@ GRID_JS = """
   ];
   const band = s => s >= 9 ? 5 : s >= 8 ? 4 : s >= 7 ? 3 : s >= 5 ? 2 : s >= 1 ? 1 : 0;
   const max = Math.max(1, ...G.filter(k => !k.k).map(k => k.n));
-  let mode = 'srs', scope = 'mine', drawn = false;
+  let mode = 'srs', scope = 'mine', drawn = false, wave = true;
 
   // Resolve the themed colours once and blend numerically. Leaving 2,000-odd
   // color-mix() calls in inline styles makes every style recalculation on the
@@ -3741,16 +3740,30 @@ GRID_JS = """
       if (!byLevel.has(k.l)) byLevel.set(k.l, []);
       byLevel.get(k.l).push(k);
     }
-    let html = '';
+    // The sweep should take about the same time whether you are on level 12
+    // with twelve rows or level 60 with sixty of them, so the step shrinks as
+    // the grid grows rather than the wave getting longer.
+    const step = wave ? Math.min(34, 520 / Math.max(1, byLevel.size)) : 0;
+    let html = '', row = 0;
     for (const [lv, list] of [...byLevel].sort((a, b) => a[0] - b[0])){
       html += `<div class="lvlrow"><span class="lvlnum${lv === GRID_LEVEL ?
         ' now' : ''}">${lv}</span><div class="kanjis">`;
-      for (const k of list)
-        html += `<span class="k" style="background:${colour(k)}"
-                 data-c="${k.c}">${k.c}</span>`;
+      let col = 0;
+      for (const k of list){
+        // Each tile waits for where it sits, which sends a diagonal across the
+        // grid rather than dropping the whole slab at once. First draw only:
+        // changing colour mode should be instant, not a performance again.
+        const wait = wave ? Math.round(row * step + col * 3.5) : 0;
+        html += `<span class="k${wave ? ' in' : ''}" style="background:${colour(k)}` +
+                (wait ? `;animation-delay:${wait}ms` : '') +
+                `" data-c="${k.c}">${k.c}</span>`;
+        col++;
+      }
       html += '</div></div>';
+      row++;
     }
     out.innerHTML = html;
+    wave = false;
 
     document.getElementById('legend').innerHTML = mode === 'srs'
       ? STAGES.map(s => `<span class="lg"><i style="background:${s[2]}"></i>${s[1]}</span>`).join('')
@@ -3814,10 +3827,9 @@ GRID_JS = """
   // The grid used to hide behind a "show me" summary because it shared a page
   // with nine other sections. It has a page of its own now, so it draws on
   // arrival - it is what you came for.
-  const fold = document.getElementById('gridfold');
-  const inTitles = G.filter(k => k.n).length;
-  fold.querySelector('.cnt').textContent =
-    `${G.length.toLocaleString()} kanji, ${inTitles.toLocaleString()} of them in your titles`;
+  // The section's own opening line already carries these numbers, server-side
+  // and with the real ones; this used to be the fold's summary and would say
+  // them a second time.
   drawn = true;
   draw();
 
@@ -3871,6 +3883,13 @@ GRID_CSS = """
   padding-top:7px; font-variant-numeric:tabular-nums; flex:none; }
 .lvlnum.now { color:var(--accent); font-weight:700; }
 .kanjis { display:flex; flex-wrap:wrap; gap:3px; }
+/* Two thousand tiles landing at once is a slab; a diagonal makes it a grid
+   being filled in. The delay per tile is set where the tile is built. */
+.k.in { animation:tilein 340ms var(--ease) both; }
+@keyframes tilein {
+  from { opacity:0; transform:translateY(9px) scale(.86); }
+  60%  { opacity:1; }
+}
 .k { width:27px; height:27px; border-radius:6px; font-size:16px; line-height:27px;
   text-align:center; color:#fff; cursor:pointer; user-select:none;
   text-shadow:0 1px 2px rgba(0,0,0,.35); }
