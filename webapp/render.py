@@ -9,6 +9,7 @@ stay in step.
 from __future__ import annotations
 
 import calendar
+import hashlib
 import json
 import time
 import urllib.parse
@@ -387,9 +388,10 @@ def shell(title: str, body: str, *, user=None, extra_css: str = "",
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title>{w.favicon_link(ICON)}'
-            f'<style>{w.REPORT_CSS}{AUTH_CSS}{LOAD_CSS}{extra_css}</style></head><body>'
+            f'<link rel="stylesheet" href="{CSS_URL}">'
+            f'{extra_css}</head><body>'
             f'<main>{bar}{body}</main>'
-            f'<script>{LOAD_JS}</script>{scripts}</body></html>')
+            f'<script src="{CORE_URL}" defer></script>{scripts}</body></html>')
 
 
 def login_page(error: str = "", note: str = "") -> str:
@@ -848,8 +850,7 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
     if not people:
         body = (f'<h1>Together</h1><p class="sub">Nobody is sharing their lists yet.'
                 f'</p>{head}{missing}')
-    return shell("Together", body, user=user, extra_css=TOGETHER_CSS,
-                 scripts=SHARE_JS + ADD_JS)
+    return shell("Together", body, user=user, scripts=SHARE_JS + ADD_JS)
 
 
 ADD_JS = """
@@ -981,7 +982,7 @@ def public_profile(owner, profile: dict, stats, lists, base_url: str,
       by how often each one appears. This page is shared deliberately and can be
       withdrawn at any time.</footer>
       </div>"""
-    return shell(f"{username} on jiten.moe", body, extra_css=TOGETHER_CSS)
+    return shell(f"{username} on jiten.moe", body)
 
 
 # ---------------------------------------------------------------- dashboard
@@ -1311,23 +1312,15 @@ def dashboard(user, cache, known, decks, history, extras) -> str:
 
     scripts = (
         f"<script>const TRACK={track};const WK={blob};"
-        f"const GRID={json.dumps(grid, ensure_ascii=False, separators=(',', ':'))};"
+        f"const GRID={w.grid_payload(grid)};"
         f"const GRID_LEVEL={lvl};"
         f"const GRID_TITLES={json.dumps([w.deck_title(d) for d, _ in decks], ensure_ascii=False)};"
         f"const LIVE=true;const OTHERS=[];"
         f"const TAGS={json.dumps(extras.get('tags', []), ensure_ascii=False)};"
         f"const REACH_TARGET={min(60, lvl + 5)};</script>"
-        f"<script>{w.SORT_JS}</script><script>{w.SLIDER_JS}</script>"
-        f"<script>{w.CHART_JS}</script><script>{w.GRID_JS}</script>"
-        f"<script>{w.REACH_JS}</script><script>{w.BROWSE_JS}</script><script>{w.READ_JS}</script><script>{w.GAP_JS}</script>"
-        f"<script>{w.SUBS_JS}</script><script>{w.STATUS_JS}</script>"
-        f"<script>{BURN_JS}</script><script>{DN_JS}</script>"
-        f"<script>{MOBILE_JS}</script>")
+        + DASH_TAG)
 
     return shell(f'{user["username"]} - coverage', body, user=user,
-                 extra_css=w.SLIDER_CSS + w.GRID_CSS + w.CHART_CSS + w.REACH_CSS
-                 + w.BROWSE_CSS + w.SUBS_CSS + w.READ_CSS + w.GAP_CSS + BURN_CSS
-                 + MOBILE_CSS,
                  scripts=scripts)
 
 
@@ -1344,3 +1337,43 @@ def _trend(rows) -> str:
         days = 0
     cls = ' class="up"' if delta > 0 else ""
     return f'<span{cls}>{delta:+.1f}pp</span> / {days}d'
+
+
+# ------------------------------------------------------------------ bundles
+
+# The stylesheet and the shared scripts are the same bytes for every account
+# and every page load, and they were being inlined into all of them: 30kB of
+# CSS and 39kB of JavaScript, re-sent and re-parsed on every navigation. As
+# files they are fetched once and then cost nothing. The name carries a hash of
+# the contents, so a changed file is a changed URL and the cache never serves a
+# stale one - which is what lets them be cached for a year.
+#
+# The offline report is untouched: it has to be one file that works with no
+# server, so it keeps inlining everything.
+
+def _bundle(*parts: str) -> str:
+    return "\n".join(parts)
+
+
+CSS_BUNDLE = _bundle(w.REPORT_CSS, AUTH_CSS, LOAD_CSS, MOBILE_CSS, BURN_CSS,
+                     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
+                     w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS)
+
+# Every page needs these three; only the dashboard needs the rest.
+CORE_JS = _bundle(LOAD_JS, MOBILE_JS, w.SORT_JS)
+DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
+                  w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS)
+
+BUNDLES: dict[str, tuple[str, str]] = {}
+
+
+def _serve(name: str, ext: str, body: str, mime: str) -> str:
+    path = f"{name}.{hashlib.sha256(body.encode()).hexdigest()[:10]}.{ext}"
+    BUNDLES[path] = (body, mime)
+    return "/s/" + path
+
+
+CSS_URL = _serve("app", "css", CSS_BUNDLE, "text/css")
+CORE_URL = _serve("core", "js", CORE_JS, "text/javascript")
+DASH_URL = _serve("dash", "js", DASH_JS, "text/javascript")
+DASH_TAG = f'<script src="{DASH_URL}" defer></script>'

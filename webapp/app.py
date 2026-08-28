@@ -560,6 +560,18 @@ ASSETS = {
 }
 
 
+@app.get("/s/<name>")
+def bundle(name):
+    """The stylesheet and the shared scripts. The name carries a hash of the
+    contents, so this can be cached for a year without ever going stale."""
+    hit = render.BUNDLES.get(name)
+    if not hit:
+        abort(404)
+    body, mime = hit
+    return Response(body, mimetype=mime, headers={
+        "Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @app.get("/asset/<name>")
 def asset(name):
     mime = ASSETS.get(name)

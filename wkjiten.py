@@ -3659,10 +3659,40 @@ GRID_HTML = """
 </details>
 """
 
+def grid_payload(grid: list[dict]) -> str:
+    """The kanji grid, by column instead of by tile.
+
+    The numbers were never the weight: 2,102 tiles carrying the same eight key
+    names came to 143,684 characters, and the field names were most of it. The
+    same data in parallel arrays is a fraction of that, and GRID_JS puts the
+    objects back together once, on arrival.
+    """
+    return json.dumps({
+        "c": "".join(k["c"] for k in grid),
+        "l": [k["l"] for k in grid],
+        "s": [k["s"] for k in grid],
+        "k": "".join("1" if k["k"] else "0" for k in grid),
+        "n": [k["n"] for k in grid],
+        "r": [k["r"] for k in grid],
+        "m": [k["m"] for k in grid],
+        "d": {str(i): k["d"] for i, k in enumerate(grid) if k.get("d")},
+        "u": "".join("1" if k.get("up") else "0" for k in grid),
+    }, ensure_ascii=False, separators=(",", ":"))
+
+
 GRID_JS = """
 (function(){
   const out = document.getElementById('gridout');
-  if (!out || typeof GRID === 'undefined' || !GRID.length) return;
+  if (!out || typeof GRID === 'undefined' || !GRID.c) return;
+  // GRID arrives by column - see grid_payload() - and is put back together
+  // once, here, so everything below still reads plain tiles.
+  const G = Array.from(GRID.c, (c, i) => {
+    const t = {c, l:GRID.l[i], s:GRID.s[i], k:GRID.k[i] === '1', n:GRID.n[i],
+               r:GRID.r[i], m:GRID.m[i], d:GRID.d[i] || []};
+    if (GRID.u[i] === '1') t.up = 1;
+    return t;
+  });
+  if (!G.length) return;
   const STAGES = [
     [0, 'locked or unstarted', 'var(--k0)'],
     [1, 'Apprentice',          '#dd0093'],
@@ -3672,7 +3702,7 @@ GRID_JS = """
     [9, 'Burned',              '#8a7355'],
   ];
   const band = s => s >= 9 ? 5 : s >= 8 ? 4 : s >= 7 ? 3 : s >= 5 ? 2 : s >= 1 ? 1 : 0;
-  const max = Math.max(1, ...GRID.filter(k => !k.k).map(k => k.n));
+  const max = Math.max(1, ...G.filter(k => !k.k).map(k => k.n));
   let mode = 'srs', scope = 'mine', drawn = false;
 
   // Resolve the themed colours once and blend numerically. Leaving 2,000-odd
@@ -3691,7 +3721,7 @@ GRID_JS = """
   const hex = c => '#' + c.map(v =>
     Math.round(v).toString(16).padStart(2, '0')).join('');
   const IMPACT = new Map();
-  for (const k of GRID){
+  for (const k of G){
     if (k.k) IMPACT.set(k.c, hex(KNOWN));
     else if (!k.n) IMPACT.set(k.c, hex(COLD));
     else {
@@ -3699,12 +3729,12 @@ GRID_JS = """
       IMPACT.set(k.c, hex(COLD.map((c, i) => c + (HOT[i] - c) * t)));
     }
   }
-  const SRS = new Map(GRID.map(k => [k.c, STAGES[band(k.s)][2]]));
+  const SRS = new Map(G.map(k => [k.c, STAGES[band(k.s)][2]]));
   const colour = k => (mode === 'srs' ? SRS : IMPACT).get(k.c);
 
   function draw(){
     const byLevel = new Map();
-    for (const k of GRID){
+    for (const k of G){
       // Levels above yours are all locked and identical to look at; showing
       // them by default buries the part you can act on.
       if (scope === 'mine' && k.l > GRID_LEVEL) continue;
@@ -3730,7 +3760,7 @@ GRID_JS = """
   }
 
   async function show(c){
-    const k = GRID.find(x => x.c === c);
+    const k = G.find(x => x.c === c);
     if (!k) return;
     const stage = STAGES[band(k.s)][1];
     const wk = 'https://www.wanikani.com/kanji/' + encodeURIComponent(k.c);
@@ -3783,9 +3813,9 @@ GRID_JS = """
 
   // 2,000-odd tiles are not worth building until the fold is actually opened.
   const fold = document.getElementById('gridfold');
-  const inTitles = GRID.filter(k => k.n).length;
+  const inTitles = G.filter(k => k.n).length;
   fold.querySelector('.cnt').textContent =
-    `${GRID.length.toLocaleString()} kanji, ${inTitles.toLocaleString()} of them in your titles`;
+    `${G.length.toLocaleString()} kanji, ${inTitles.toLocaleString()} of them in your titles`;
   fold.addEventListener('toggle', () => {
     fold.querySelector('.tw').textContent = fold.open ? 'Hide the grid'
                                                       : 'Show the grid';
@@ -4555,7 +4585,7 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
           **({"up": 1} if s["characters"] in moved_up else {})}
          for sid, s in subjects.items() if s["type"] == "kanji"),
         key=lambda k: (k["l"], -k["n"], k["c"]))
-    grid_json = json.dumps(grid_data, ensure_ascii=False, separators=(",", ":"))
+    grid_json = grid_payload(grid_data)
     seen_kanji = sum(1 for k in grid_data if k["n"])
     h.append(h2("Kanji grid"))
     h.append(f'<p class="sub">All {len(grid_data):,} WaniKani kanji by level. '
