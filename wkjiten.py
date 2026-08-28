@@ -4117,8 +4117,14 @@ function render(){
   let h = '<table class="sortable tight"><tr><th>title</th><th>type</th>' +
           '<th class="num">chars</th><th class="num">diff</th>' +
           '<th class="num">coverage</th><th></th></tr>';
+  // The rows come in one after another rather than as a block: the answer to a
+  // search is a list you read down, so it arrives that way. 26ms apart, which
+  // is quick enough that ten rows are all there before you have focused on the
+  // first one.
+  let rank = 0;
   for (const d of lastRows){
-    h += `<tr><td class="withcover"><span class="ct"><img class="cover"
+    const wait = Math.min(rank++ * 26, 320);
+    h += `<tr class="rowin" style="animation-delay:${wait}ms"><td class="withcover"><span class="ct"><img class="cover"
             loading="lazy" alt=""
             src="https://cdn.jiten.moe/${d.deckId}/cover.jpg"
             onerror="this.style.visibility='hidden'">
@@ -4294,6 +4300,10 @@ if ($('#q')){
 """
 
 BROWSE_CSS = """
+/* Search results arrive as a list being written out, not as a slab. */
+tr.rowin { animation:rowin 300ms var(--ease) both; }
+@keyframes rowin { from { opacity:0; transform:translateY(8px); } }
+
 .controls { display:flex; flex-wrap:wrap; gap:9px; margin:0 0 14px; }
 .controls input, .controls select { font:inherit; font-size:14px; padding:10px 13px;
   border:1px solid var(--line); border-radius:10px; background:var(--raise);
