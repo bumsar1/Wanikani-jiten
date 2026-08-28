@@ -52,6 +52,33 @@ AUTH_CSS = """
   gap:12px; padding:14px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
 .topbar .who { color:var(--muted); font-size:13px; }
 .topbar nav a.here { color:var(--accent); background:var(--accent-soft); }
+
+.tier { display:flex; align-items:center; gap:var(--s4); margin:0 0 var(--s3);
+  background:var(--raise); border:1px solid var(--line);
+  border-radius:var(--r-panel); padding:var(--s3) var(--s4) var(--s3) var(--s3);
+  box-shadow:var(--shadow); }
+.tier img { width:96px; height:64px; object-fit:cover; border-radius:var(--r-box);
+  flex:none; }
+.tier h3 { margin:0; font-size:20px; letter-spacing:-.01em; }
+.tier .sub { margin:0; display:block; font-size:13px; }
+
+.ladder { display:grid; gap:var(--s3); margin:0 0 var(--s4);
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+.rung { margin:0; border:1px solid var(--line); border-radius:var(--r-panel);
+  overflow:hidden; background:var(--raise); position:relative;
+  transition:transform var(--t-base) var(--ease),
+             border-color var(--t-base) var(--ease); }
+.rung img { display:block; width:100%; height:auto; }
+.rung figcaption { display:flex; justify-content:space-between; align-items:baseline;
+  gap:var(--s2); padding:9px 12px; font-size:13px; color:var(--muted); }
+.rung figcaption b { color:var(--fg); font-size:14px; }
+.rung.done img { filter:grayscale(1) brightness(.55); }
+.rung.ahead img { filter:brightness(.75) saturate(.7); }
+.rung.now { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent),
+  0 10px 30px -12px var(--accent); }
+.rung.now figcaption b { color:var(--accent); }
+.rung:hover { transform:translateY(-2px); border-color:var(--accent); }
+.rung:hover img { filter:none; }
 .topbar nav { margin:0; }
 form.inline { display:inline; }
 .code { font-family:ui-monospace,Menlo,Consolas,monospace; background:var(--bg);
@@ -295,22 +322,48 @@ LOAD_CSS = """
   .loadrail.on b { display:none; }
 }
 
-/* Moving between pages, without a line of JavaScript: both documents opt in,
-   and the browser keeps the old one on screen while the new one arrives, then
-   crosses between them. A browser that has never heard of it navigates exactly
-   as it did before. */
+/* Moving between pages: both documents opt in, and the browser holds the old
+   one on screen while the new one arrives. The tabs are in an order, so the
+   pages travel in that order too - forward comes in from the right, back from
+   the left - which says which way you moved without a word of copy. */
 @view-transition { navigation: auto; }
-::view-transition-old(root) { animation:pageout 140ms var(--ease) both; }
-::view-transition-new(root) { animation:pagein 260ms var(--ease) both; }
-@keyframes pageout { to { opacity:0; transform:translateY(-6px); } }
-@keyframes pagein { from { opacity:0; transform:translateY(10px); } }
 
-/* The top bar is the same bar on both sides, so it should sit still while the
-   page underneath it changes rather than fading out and back in. */
+::view-transition-old(root) { animation:pageout 160ms var(--ease) both; }
+::view-transition-new(root) { animation:pagein 300ms var(--ease) both; }
+@keyframes pageout { to { opacity:0; transform:scale(.985); } }
+@keyframes pagein { from { opacity:0; transform:scale(1.01); } }
+
+html[data-dir="fwd"]::view-transition-old(root) { animation:outleft 190ms var(--ease) both; }
+html[data-dir="fwd"]::view-transition-new(root) { animation:inright 320ms var(--ease) both; }
+html[data-dir="back"]::view-transition-old(root) { animation:outright 190ms var(--ease) both; }
+html[data-dir="back"]::view-transition-new(root) { animation:inleft 320ms var(--ease) both; }
+@keyframes outleft  { to   { opacity:0; transform:translateX(-4%); } }
+@keyframes inright  { from { opacity:0; transform:translateX(7%); } }
+@keyframes outright { to   { opacity:0; transform:translateX(4%); } }
+@keyframes inleft   { from { opacity:0; transform:translateX(-7%); } }
+
+/* Two things sit still while the rest travels: the bar, which is the same bar
+   on both sides, and the line saying whose numbers these are. Naming them
+   takes them out of the page snapshot and gives them their own, so the browser
+   moves them from where they were to where they are going. */
 .topbar { view-transition-name: topbar; }
+.hero { view-transition-name: hero; }
+
+/* Arriving under its own steam, for browsers that do not do the above and for
+   the first load of the session: the sections come up in order, quickly enough
+   that it reads as the page settling rather than as a performance. */
+main > *:not(.topbar):not(nav) { animation:settle 380ms var(--ease) both; }
+main > *:nth-child(2)  { animation-delay:20ms; }
+main > *:nth-child(3)  { animation-delay:45ms; }
+main > *:nth-child(4)  { animation-delay:70ms; }
+main > *:nth-child(5)  { animation-delay:95ms; }
+main > *:nth-child(6)  { animation-delay:115ms; }
+main > *:nth-child(n+7) { animation-delay:135ms; }
+@keyframes settle { from { opacity:0; transform:translateY(12px); } }
 
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root), ::view-transition-new(root) { animation:none; }
+  ::view-transition-old(root), ::view-transition-new(root),
+  main > * { animation:none; }
 }
 """
 
@@ -385,6 +438,26 @@ LOAD_JS = """
     start();
   });
   addEventListener('submit', e => { if (!e.defaultPrevented) start(); });
+  // Which way the tabs run, so a page can travel in the direction you moved.
+  const ORDER = ['/', '/levels', '/kanji', '/browse'];
+  const at = path => ORDER.indexOf(path);
+  const DIR = 'wkjiten:from';
+  function face(from, to){
+    document.documentElement.dataset.dir =
+      (from < 0 || to < 0 || from === to) ? 'none' : (to > from ? 'fwd' : 'back');
+  }
+  addEventListener('pageswap', e => {
+    try { sessionStorage.setItem(DIR, String(at(location.pathname))); } catch (_){}
+    const url = e.activation && e.activation.entry && e.activation.entry.url;
+    if (e.viewTransition && url) face(at(location.pathname), at(new URL(url).pathname));
+  });
+  addEventListener('pagereveal', e => {
+    if (!e.viewTransition) return;
+    let from = -1;
+    try { from = Number(sessionStorage.getItem(DIR)); } catch (_){}
+    face(Number.isFinite(from) ? from : -1, at(location.pathname));
+  });
+
   // A restore from the back/forward cache shows the old page instantly, so the
   // rail must not be left running on top of it. Only that case: pageshow fires
   // on every load, and an unconditional stop here cancelled the handover in
@@ -1033,14 +1106,61 @@ def _burn_when(at: str, now: float) -> tuple[str, float]:
     return f"in {d / 86400 / 7:.0f} weeks", t
 
 
+# WaniKani groups the sixty levels into six stretches with names of their own,
+# and the names are half the fun of the climb. The artwork is the user's own.
+TIERS = [("Pleasant", 1, 10), ("Painful", 11, 20), ("Death", 21, 30),
+         ("Hell", 31, 40), ("Paradise", 41, 50), ("Reality", 51, 60)]
+
+
+def tier_of(level: int):
+    for name, lo, hi in TIERS:
+        if lo <= level <= hi:
+            return name, lo, hi
+    return TIERS[-1]
+
+
+def tier_strip(level: int) -> str:
+    """Where you are on the climb, on the page you read every day."""
+    name, lo, hi = tier_of(level)
+    nxt = next((t for t in TIERS if t[1] > hi), None)
+    to_go = (nxt[1] - level) if nxt else 0
+    tail = (f'<span class="sub">{to_go} level{"" if to_go == 1 else "s"} to '
+            f'<b>{nxt[0]}</b></span>' if nxt else
+            '<span class="sub">the last of them</span>')
+    return (f'<div class="tier"><img src="/asset/tier-{name.lower()}-sm.webp"'
+            f' alt="" width="240" height="160" loading="lazy">'
+            f'<div><h3>{name}</h3>'
+            f'<p class="sub">levels {lo}&ndash;{hi}</p>{tail}</div></div>')
+
+
+def tier_ladder(level: int) -> str:
+    """All six, so the shape of what is left is visible at a glance."""
+    here = tier_of(level)[0]
+    cards = []
+    for name, lo, hi in TIERS:
+        state = ("now" if name == here else
+                 "done" if hi < level else "ahead")
+        cards.append(
+            f'<figure class="rung {state}">'
+            f'<img src="/asset/tier-{name.lower()}.webp" alt="" width="720"'
+            f' height="480" loading="lazy">'
+            f'<figcaption><b>{name}</b><span>{lo}&ndash;{hi}</span></figcaption>'
+            f'</figure>')
+    return f'<div class="ladder">{"".join(cards)}</div>'
+
+
 # Which section belongs on which page. Everything used to be one 7,664px
 # column; this splits it by how often you look at a thing rather than by what
 # it is about. The ids are the slugs h2() makes from the headings.
 PAGES = {
     "today":  ("Today", ["your-titles", "your-tracked-titles", "immersion",
-                         "one-answer-from-burned", "finished"]),
-    "levels": ("Levels", ["what-each-level-would-buy-you", "nearly-within-reach"]),
-    "kanji":  ("Kanji", ["kanji-grid", "leeches-blocking-your-reading"]),
+                         "finished"]),
+    "levels": ("Levels", ["the-climb", "what-each-level-would-buy-you",
+                          "nearly-within-reach"]),
+    # Burning is about single items, the same as the grid and the leeches, so
+    # it sits with them rather than with the titles.
+    "kanji":  ("Kanji", ["kanji-grid", "leeches-blocking-your-reading",
+                         "one-answer-from-burned"]),
     "browse": ("Browse", ["browse", "read-check-any-text"]),
 }
 
@@ -1094,6 +1214,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         h.append("</div>")
         # The bar and the counters are one thought - where WaniKani has got you -
         # so they sit together at the top rather than as a section to scroll to.
+        h.append(tier_strip(lvl))
         h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
         counts = w.month_totals(cache)
         if counts:
@@ -1211,6 +1332,12 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         h.append(w.CHART_HTML)
         h.append(w.SLIDER_HTML)
 
+    if page == "levels":
+        h.append(h2("The climb"))
+        h.append('<p class="sub">WaniKani cuts the sixty levels into six and '
+                 'gives them names. You are somewhere inside one of them.</p>')
+        h.append(tier_ladder(lvl))
+
     # Kanji grid
     occ: Counter[str] = Counter()
     for _d, res in decks:
@@ -1250,10 +1377,9 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
     if leeches:
         h.append(h2("Leeches blocking your reading"))
         blocked = sum(row[0] for row in leeches)
-        h.append(f'<details class="fold"><summary><span class="tw">Show the '
-                 f'{len(leeches)} worst</span><span class="cnt">{blocked:,} '
-                 f'occurrences you cannot read, all in items already sitting in '
-                 f'your review queue</span></summary>')
+        h.append(f'<p class="sub">The {len(leeches)} worst: <b>{blocked:,} '
+                 f'occurrences</b> you cannot read, all in items already sitting '
+                 f'in your review queue.</p>')
         h.append('<p class="sub">Apprentice kanji, ranked by how often they turn '
                  'up in the titles above.</p>')
         h.append('<div class="wrap"><table class="sortable"><tr><th>kanji</th>'
@@ -1266,7 +1392,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
                      f'<td>{esc(mean)}</td><td class="num">{n:,}</td>'
                      f'<td>{w.SRS_STAGE_NAMES.get(stage, "?")}</td>'
                      f'<td class="num">{klvl}</td></tr>')
-        h.append("</table></div></details>")
+        h.append("</table></div>")
 
     # Items one correct answer from Burned. Enlightened is four months long, so
     # these are easy to miss entirely - the item is in the queue for a day and
@@ -1292,11 +1418,9 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
 
         h.append(h2("One answer from burned"))
         shown = ("" if total <= len(rows) else
-                 f", the soonest {len(rows):,} of {total:,}")
-        h.append(f'<details class="fold"><summary><span class="tw">Show what is '
-                 f'about to burn</span><span class="cnt">{due:,} in your queue '
-                 f'now &middot; {week:,} within the week{shown}</span>'
-                 f'</summary>')
+                 f", showing the soonest {len(rows):,} of {total:,}")
+        h.append(f'<p class="sub"><b>{due:,}</b> in your queue now &middot; '
+                 f'<b>{week:,}</b> within the week{shown}.</p>')
         h.append('<p class="sub">Enlightened items, whose next review is the one '
                  'that burns them &mdash; if you answer it correctly. Get it '
                  'wrong and the item drops back down for months.</p>')
@@ -1335,7 +1459,6 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
                  f'<div class="dnbox" id="dnbox" hidden>'
                  f'<video muted loop playsinline preload="none"></video>'
                  f'<p class="sub">{names}.</p></div></div>')
-        h.append("</details>")
 
     h.append(h2("Nearly within reach"))
     h.append(w.REACH_HTML)

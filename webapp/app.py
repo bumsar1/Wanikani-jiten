@@ -583,6 +583,9 @@ ASSETS = {
     "deathnote.mp4": "video/mp4",
     "deathnote.webm": "video/webm",
 }
+for _t in ("pleasant", "painful", "death", "hell", "paradise", "reality"):
+    ASSETS[f"tier-{_t}.webp"] = "image/webp"
+    ASSETS[f"tier-{_t}-sm.webp"] = "image/webp"
 
 
 @app.get("/s/<name>")

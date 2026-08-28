@@ -3640,8 +3640,8 @@ CHART_CSS = """
 """
 
 GRID_HTML = """
-<details class="fold" id="gridfold">
-  <summary><span class="tw">Show the grid</span><span class="cnt"></span></summary>
+<div id="gridfold">
+  <p class="sub"><span class="cnt"></span></p>
   <div class="gridbar">
     <div class="modes">
       <button data-mode="srs" class="on">by SRS stage</button>
@@ -3656,7 +3656,7 @@ GRID_HTML = """
   <div id="gridout" class="gridout"></div>
   <div id="kdetail" class="kdetail"><span class="hint">Pick a kanji to see its
     reading, and to open it on WaniKani.</span></div>
-</details>
+</div>
 """
 
 def grid_payload(grid: list[dict]) -> str:
@@ -3811,16 +3811,15 @@ GRID_JS = """
   pick('[data-mode]', b => { mode = b.dataset.mode; });
   pick('[data-scope]', b => { scope = b.dataset.scope; });
 
-  // 2,000-odd tiles are not worth building until the fold is actually opened.
+  // The grid used to hide behind a "show me" summary because it shared a page
+  // with nine other sections. It has a page of its own now, so it draws on
+  // arrival - it is what you came for.
   const fold = document.getElementById('gridfold');
   const inTitles = G.filter(k => k.n).length;
   fold.querySelector('.cnt').textContent =
     `${G.length.toLocaleString()} kanji, ${inTitles.toLocaleString()} of them in your titles`;
-  fold.addEventListener('toggle', () => {
-    fold.querySelector('.tw').textContent = fold.open ? 'Hide the grid'
-                                                      : 'Show the grid';
-    if (fold.open && !drawn){ drawn = true; draw(); }
-  });
+  drawn = true;
+  draw();
 
   // Any other fold on the page just flips its own wording.
   document.querySelectorAll('details.fold').forEach(function (d) {
