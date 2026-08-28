@@ -69,9 +69,13 @@ AUTH_CSS = """
   transition:transform var(--t-base) var(--ease),
              border-color var(--t-base) var(--ease); }
 .rung img { display:block; width:100%; height:auto; }
-.rung figcaption { display:flex; justify-content:space-between; align-items:baseline;
+.rung { padding:0; font:inherit; text-align:left; cursor:pointer;
+  white-space:normal; display:block; width:100%; }
+.rung .cap { display:flex; justify-content:space-between; align-items:baseline;
   gap:var(--s2); padding:9px 12px; font-size:13px; color:var(--muted); }
-.rung figcaption b { color:var(--fg); font-size:14px; }
+.rung .cap b { color:var(--fg); font-size:14px; }
+.rung[aria-expanded="true"] { border-color:var(--accent); }
+.rung[aria-expanded="true"] img { filter:none; }
 .rung.done img { filter:grayscale(1) brightness(.55); }
 .rung.ahead img { filter:brightness(.75) saturate(.7); }
 .rung.now { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent),
@@ -79,6 +83,39 @@ AUTH_CSS = """
 .rung.now figcaption b { color:var(--accent); }
 .rung:hover { transform:translateY(-2px); border-color:var(--accent); }
 .rung:hover img { filter:none; }
+
+/* What is inside a stretch, opened from its card. */
+.tierbox { margin:0 0 var(--s4); border:1px solid var(--line);
+  border-radius:var(--r-panel); background:var(--raise); padding:var(--s4);
+  box-shadow:var(--shadow); animation:settle 300ms var(--ease) both; }
+.tierbox[hidden] { display:none; }
+.tierbox h4 { margin:0 0 2px; font-size:16px; }
+.tierbox .sub { margin:0 0 var(--s3); }
+.tierbox .lvlrow { margin-bottom:6px; }
+.tierbox .words { display:flex; flex-wrap:wrap; gap:5px; margin-top:var(--s2); }
+.tierbox .wd { font-size:14px; padding:3px 9px; border-radius:var(--r-pill);
+  border:1px solid var(--line); color:var(--muted); background:var(--bg); }
+.tierbox .wd.on { color:var(--fg); border-color:var(--good); }
+.tierbox .more { color:var(--faint); font-size:13px; margin-top:var(--s2); }
+
+/* WaniKani's own stage colours, the same five the kanji grid paints with, so a
+   tile means the same thing on both pages. */
+.tierbox .b-unstarted   { background:var(--k0); }
+.tierbox .b-apprentice  { background:#dd0093; }
+.tierbox .b-guru        { background:#882d9e; }
+.tierbox .b-master      { background:#294ddb; }
+.tierbox .b-enlightened { background:#0093dd; }
+.tierbox .b-burned      { background:#8a7355; }
+
+/* A shape in the right place beats a spinner in the middle of nowhere. */
+.skel { display:grid; gap:8px; }
+.skel i { display:block; height:26px; border-radius:var(--r-ctl);
+  background:linear-gradient(90deg,var(--line-soft),var(--line),var(--line-soft));
+  background-size:220% 100%; animation:shimmer 1.1s linear infinite; }
+.skel i:nth-child(2) { width:82%; }
+.skel i:nth-child(3) { width:64%; }
+@keyframes shimmer { from { background-position:120% 0; }
+                     to   { background-position:-120% 0; } }
 .topbar nav { margin:0; }
 form.inline { display:inline; }
 .code { font-family:ui-monospace,Menlo,Consolas,monospace; background:var(--bg);
@@ -250,6 +287,79 @@ DN_JS = """
     }
     btn.classList.toggle('done', opening);
   });
+})();
+"""
+
+TIER_JS = """
+(function(){
+  const box = document.getElementById('tierbox');
+  const rungs = [...document.querySelectorAll('.rung')];
+  if (!box || !rungs.length) return;
+
+  // The same five bands the kanji grid uses, so a tile means the same thing on
+  // both pages.
+  const BAND = s => s >= 9 ? 'burned' : s >= 8 ? 'enlightened' : s >= 7 ? 'master'
+                  : s >= 5 ? 'guru' : s >= 1 ? 'apprentice' : 'unstarted';
+  const cache = new Map();
+  let open = null;
+
+  function rows(items){
+    const byLevel = new Map();
+    for (const it of items){
+      if (!byLevel.has(it.l)) byLevel.set(it.l, []);
+      byLevel.get(it.l).push(it);
+    }
+    return [...byLevel].sort((a, b) => a[0] - b[0]).map(([lv, list]) =>
+      `<div class="lvlrow"><span class="lvlnum">${lv}</span><div class="kanjis">` +
+      list.map(k => `<span class="k b-${BAND(k.s)}">${k.c}</span>`).join('') +
+      '</div></div>').join('');
+  }
+
+  function draw(d){
+    const wordCap = 240;
+    const words = d.words.slice(0, wordCap).map(x =>
+      `<span class="wd${x.s >= 5 ? ' on' : ''}">${x.c}</span>`).join('');
+    const rest = d.words.length - wordCap;
+    box.innerHTML =
+      `<h4>${d.name} &middot; levels ${d.lo}&ndash;${d.hi}</h4>` +
+      `<p class="sub">${d.kanji.length.toLocaleString()} kanji, ` +
+      `<b>${d.passed.kanji.toLocaleString()}</b> of them passed &middot; ` +
+      `${d.words.length.toLocaleString()} words, ` +
+      `<b>${d.passed.words.toLocaleString()}</b> passed</p>` +
+      rows(d.kanji) +
+      `<div class="words">${words}</div>` +
+      (rest > 0 ? `<p class="more">and ${rest.toLocaleString()} more words</p>` : '');
+  }
+
+  async function show(btn){
+    const name = btn.dataset.tier;
+    rungs.forEach(r => r.setAttribute('aria-expanded', String(r === btn)));
+    box.hidden = false;
+    if (cache.has(name)){ draw(cache.get(name)); return; }
+    // A shape where the answer will be, rather than a spinner somewhere else.
+    box.innerHTML = '<div class="skel"><i></i><i></i><i></i></div>';
+    try {
+      const d = await (await fetch('/tier/' + encodeURIComponent(name))).json();
+      cache.set(name, d);
+      if (box.hidden === false) draw(d);
+    } catch (e){
+      box.innerHTML = '<p class="sub">Could not load that one. Try again?</p>';
+    }
+  }
+
+  for (const btn of rungs){
+    btn.addEventListener('click', () => {
+      if (open === btn){
+        open = null;
+        box.hidden = true;
+        rungs.forEach(r => r.setAttribute('aria-expanded', 'false'));
+        return;
+      }
+      open = btn;
+      show(btn);
+      box.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    });
+  }
 })();
 """
 
@@ -1141,12 +1251,14 @@ def tier_ladder(level: int) -> str:
         state = ("now" if name == here else
                  "done" if hi < level else "ahead")
         cards.append(
-            f'<figure class="rung {state}">'
+            f'<button type="button" class="rung {state}" data-tier="{name.lower()}"'
+            f' aria-expanded="false">'
             f'<img src="/asset/tier-{name.lower()}.webp" alt="" width="720"'
             f' height="480" loading="lazy">'
-            f'<figcaption><b>{name}</b><span>{lo}&ndash;{hi}</span></figcaption>'
-            f'</figure>')
-    return f'<div class="ladder">{"".join(cards)}</div>'
+            f'<span class="cap"><b>{name}</b><span>{lo}&ndash;{hi}</span></span>'
+            f'</button>')
+    return (f'<div class="ladder">{"".join(cards)}</div>'
+            f'<div class="tierbox" id="tierbox" hidden></div>')
 
 
 # Which section belongs on which page. Everything used to be one 7,664px
@@ -1556,7 +1668,8 @@ CSS_BUNDLE = _bundle(w.REPORT_CSS, AUTH_CSS, LOAD_CSS, MOBILE_CSS, BURN_CSS,
 # Every page needs these three; only the dashboard needs the rest.
 CORE_JS = _bundle(LOAD_JS, MOBILE_JS, w.SORT_JS)
 DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
-                  w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS)
+                  w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS,
+                  TIER_JS)
 
 BUNDLES: dict[str, tuple[str, str]] = {}
 

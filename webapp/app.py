@@ -588,6 +588,39 @@ for _t in ("pleasant", "painful", "death", "hell", "paradise", "reality"):
     ASSETS[f"tier-{_t}-sm.webp"] = "image/webp"
 
 
+@app.get("/tier/<name>")
+def tier(name):
+    """What is inside one of WaniKani's six stretches of levels.
+
+    Fetched when a card is opened rather than shipped with the page: six of
+    these is every subject on the account, and you only ever look at one."""
+    user = require_login()
+    band = next((t for t in render.TIERS if t[0].lower() == name.lower()), None)
+    if not band:
+        abort(404)
+    label, lo, hi = band
+    cache = store.get_snapshot(user["id"])
+    if not cache:
+        return jsonify({"kanji": [], "words": []})
+    stages = cache.get("assignments") or {}
+    kanji, words = [], []
+    for sid, subj in (cache.get("subjects") or {}).items():
+        if not lo <= subj["level"] <= hi:
+            continue
+        stage = stages.get(sid, 0)
+        row = {"c": subj["characters"], "l": subj["level"], "s": stage}
+        (kanji if subj["type"] == "kanji" else words).append(row)
+    key = lambda r: (r["l"], r["c"])
+    kanji.sort(key=key)
+    words.sort(key=key)
+    return jsonify({
+        "name": label, "lo": lo, "hi": hi,
+        "kanji": kanji, "words": words,
+        "passed": {"kanji": sum(1 for r in kanji if r["s"] >= 5),
+                   "words": sum(1 for r in words if r["s"] >= 5)},
+    })
+
+
 @app.get("/s/<name>")
 def bundle(name):
     """The stylesheet and the shared scripts. The name carries a hash of the
