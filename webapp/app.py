@@ -11,6 +11,7 @@ import io
 import json
 import os
 import sys
+import concurrent.futures as cf
 import threading
 import time
 import urllib.parse
@@ -190,7 +191,20 @@ def deck_words_shared(deck_id: int, key: str | None, deck: dict | None):
 SHARED_STATUSES = ("ongoing", "planning", "completed")
 
 
-def user_decks(key: str | None):
+# The three list calls to Jiten are the whole latency of a page: 598ms of a
+# 600ms render, measured. They are also the same answer for a minute at a
+# time - a list changes when you mark something, and you know when you did
+# that. So: fetched in parallel rather than one after another, and held
+# briefly, with the marking routes clearing it.
+_decks_cache: dict[int, tuple[float, tuple]] = {}
+_DECKS_TTL = 90.0
+
+
+def forget_decks(user_id: int) -> None:
+    _decks_cache.pop(user_id, None)
+
+
+def user_decks(key: str | None, user_id: int | None = None):
     """Every title on this account's jiten.moe lists.
 
     Returns the ids to analyse (what they are actually on), the status of each,
@@ -201,12 +215,25 @@ def user_decks(key: str | None):
     """
     if not key:
         return [], {}, [], []
+    if user_id is not None:
+        hit = _decks_cache.get(user_id)
+        if hit and time.time() - hit[0] < _DECKS_TTL:
+            return hit[1]
+
+    def fetch(st):
+        try:
+            return st, w.jiten_status_decks(st, key)
+        except SystemExit:
+            return st, []
+
+    # Three requests that know nothing about each other, so they wait together
+    # rather than in turn.
+    with cf.ThreadPoolExecutor(max_workers=len(SHARED_STATUSES)) as pool:
+        answers = dict(pool.map(fetch, SHARED_STATUSES))
+
     ids, status, everything, raw = [], {}, [], []
     for st in SHARED_STATUSES:
-        try:
-            rows = w.jiten_status_decks(st, key)
-        except SystemExit:
-            continue
+        rows = answers.get(st) or []
         for row in rows:
             did = row["deckId"]
             raw.append(row)
@@ -220,7 +247,10 @@ def user_decks(key: str | None):
             if st != "completed" and did not in status:
                 status[did] = st
                 ids.append(did)
-    return ids, status, everything, raw
+    out = (ids, status, everything, raw)
+    if user_id is not None:
+        _decks_cache[user_id] = (time.time(), out)
+    return out
 
 
 # -------------------------------------------------------------------- routes
@@ -397,7 +427,7 @@ def _page(which: str):
 
     known = w.wk_known(cache)
     key = creds.get("jiten_key")
-    ids, status, everything, raw_decks = user_decks(key)
+    ids, status, everything, raw_decks = user_decks(key, user["id"])
 
     # The rows the list endpoints already returned carry exactly the fields
     # /detail does - links, coverage, character counts, the lot - so asking for
@@ -554,7 +584,7 @@ def set_sharing():
     if level != "private":
         key = creds_of(user).get("jiten_key")
         if key:
-            _ids, _status, everything, _raw = user_decks(key)
+            _ids, _status, everything, _raw = user_decks(key, user["id"])
             if everything:
                 store.put_shared_lists(user["id"], everything)
     return redirect(url_for("together"))
@@ -879,6 +909,10 @@ def proxy(rest):
     if request.query_string:
         url += "?" + request.query_string.decode()
     body = request.get_data() if request.method == "POST" else None
+    # Marking something watching, planned or finished changes the lists this
+    # page is built from, so the held copy has to go.
+    if request.method == "POST" and "deck-preferences" in rest:
+        forget_decks(user["id"])
     status, payload, headers = w.http(
         url, method=request.method, headers=w.jiten_headers(key), body=body,
         content_type="application/json" if body else None, timeout=180)
