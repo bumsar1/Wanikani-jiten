@@ -235,18 +235,25 @@ LOAD_CSS = """
   pointer-events:none; opacity:0; transition:opacity 160ms linear; }
 .loadrail.on { opacity:1; }
 .loadrail i { display:block; height:100%; width:0; background:var(--accent);
-  box-shadow:0 0 12px var(--accent);
-  transition:width 600ms cubic-bezier(.2,.7,.2,1); }
-.loadrail b { position:absolute; top:2px; width:56px; height:36px;
-  margin-left:-28px; left:0; background:url("/asset/crabigator-run.png") 0 0 / 448px 36px;
-  image-rendering:pixelated;
-  transition:left 600ms cubic-bezier(.2,.7,.2,1); }
-.loadrail.on b { animation:crabrun .6s steps(8) infinite; }
-@keyframes crabrun { to { background-position:-448px 0; } }
+  box-shadow:0 0 12px var(--accent); }
+.loadrail b { position:absolute; top:2px; left:0; width:70px; height:45px;
+  margin-left:-38px;
+  background:url("/asset/crabigator-run.png") 0 0 / 560px 45px;
+  image-rendering:pixelated; }
+
+/* He draws the line rather than reporting on it. A server-rendered page sends
+   no progress, so a bar that creeps to 90% is inventing a number; a runner
+   crossing the screen and going round again says the same thing honestly. */
+.loadrail.on i { animation:railfill 1.9s linear infinite; }
+.loadrail.on b { animation:crabrun .55s steps(8) infinite,
+                           crabdash 1.9s linear infinite; }
+@keyframes crabrun  { to { background-position:-560px 0; } }
+@keyframes crabdash { from { left:0; } to { left:100%; } }
+@keyframes railfill { from { width:0; } to { width:100%; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .loadrail i, .loadrail b { transition:none; }
-  .loadrail.on b { animation:none; background-position:0 0; }
+  .loadrail.on i { width:100%; opacity:.5; animation:none; }
+  .loadrail.on b { display:none; }
 }
 """
 
@@ -256,29 +263,17 @@ LOAD_JS = """
   rail.className = 'loadrail';
   rail.innerHTML = '<i></i><b></b>';
   document.body.appendChild(rail);
-  const bar = rail.querySelector('i'), crab = rail.querySelector('b');
-  let timer = null, creep = null, at = 0;
+  let timer = null;
 
-  function move(pct){
-    at = pct;
-    bar.style.width = pct + '%';
-    crab.style.left = pct + '%';
-  }
   function start(){
     if (timer) return;
-    timer = setTimeout(() => {
-      rail.classList.add('on');
-      move(18);
-      // Creeps towards 90 and stops: the page arrives when it arrives, and a
-      // bar that sits at 100 while nothing happens is a worse lie than one
-      // that is still climbing.
-      creep = setInterval(() => move(Math.min(90, at + (90 - at) * 0.18)), 400);
-    }, 150);
+    // 150ms of grace: a page that arrives quickly should not flash a loader
+    // on its way past.
+    timer = setTimeout(() => rail.classList.add('on'), 150);
   }
   function stop(){
-    clearTimeout(timer); clearInterval(creep); timer = creep = null;
+    clearTimeout(timer); timer = null;
     rail.classList.remove('on');
-    move(0);
   }
 
   addEventListener('click', e => {
