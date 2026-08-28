@@ -244,9 +244,9 @@ LOAD_CSS = """
 /* He draws the line rather than reporting on it. A server-rendered page sends
    no progress, so a bar that creeps to 90% is inventing a number; a runner
    crossing the screen and going round again says the same thing honestly. */
-.loadrail.on i { animation:railfill 1.9s linear infinite; }
-.loadrail.on b { animation:crabrun .55s steps(8) infinite,
-                           crabdash 1.9s linear infinite; }
+.loadrail.on i { animation:railfill .9s linear infinite; }
+.loadrail.on b { animation:crabrun .42s steps(8) infinite,
+                           crabdash .9s linear infinite; }
 @keyframes crabrun  { to { background-position:-560px 0; } }
 @keyframes crabdash { from { left:0; } to { left:100%; } }
 @keyframes railfill { from { width:0; } to { width:100%; } }
@@ -263,17 +263,41 @@ LOAD_JS = """
   rail.className = 'loadrail';
   rail.innerHTML = '<i></i><b></b>';
   document.body.appendChild(rail);
-  let timer = null;
+  const CROSS = 900;          // one run across, in ms - keep in step with the CSS
+  const FLAG = 'wkjiten:navigating';
+  let timer = null, shown = 0;
 
+  function show(){
+    rail.classList.add('on');
+    shown = performance.now();
+  }
   function start(){
     if (timer) return;
-    // 150ms of grace: a page that arrives quickly should not flash a loader
-    // on its way past.
-    timer = setTimeout(() => rail.classList.add('on'), 150);
+    // The loader lives on the page being left, and that page is destroyed the
+    // moment the next one commits - locally that is under a millisecond, so he
+    // never got off the mark. Hand him over instead: the click leaves a note,
+    // and the arriving page picks it up and lets him finish the lap.
+    try { sessionStorage.setItem(FLAG, String(Date.now())); } catch (e) {}
+    timer = setTimeout(show, 80);
   }
   function stop(){
     clearTimeout(timer); timer = null;
     rail.classList.remove('on');
+  }
+
+  // Arriving from a click of our own: show it now, and keep it up until the
+  // page has finished loading AND he has had time to cross once. Anything
+  // else - a typed URL, a fresh tab - starts quiet.
+  let handover = null;
+  try { handover = sessionStorage.getItem(FLAG); sessionStorage.removeItem(FLAG); } catch (e) {}
+  if (handover && Date.now() - +handover < 10000){
+    show();
+    const done = () => {
+      const left = Math.max(0, CROSS - (performance.now() - shown));
+      setTimeout(stop, left);
+    };
+    if (document.readyState === 'complete') done();
+    else addEventListener('load', done);
   }
 
   addEventListener('click', e => {
@@ -286,9 +310,11 @@ LOAD_JS = """
     start();
   });
   addEventListener('submit', e => { if (!e.defaultPrevented) start(); });
-  // Coming back from the cache shows the page instantly; the rail must not be
-  // left running on top of it.
-  addEventListener('pageshow', stop);
+  // A restore from the back/forward cache shows the old page instantly, so the
+  // rail must not be left running on top of it. Only that case: pageshow fires
+  // on every load, and an unconditional stop here cancelled the handover in
+  // the same breath that started it.
+  addEventListener('pageshow', e => { if (e.persisted) stop(); });
   addEventListener('pagehide', stop);
 })();
 """

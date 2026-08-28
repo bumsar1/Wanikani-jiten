@@ -2759,9 +2759,31 @@ table.nt { min-width:744px; }
 .lvlhead { display:flex; justify-content:space-between; align-items:baseline;
   font-size:13px; font-weight:650; margin-bottom:9px; gap:12px; }
 .lvltrack { height:9px; border-radius:99px; background:var(--line-soft);
-  overflow:hidden; }
-.lvltrack i { display:block; height:100%; border-radius:99px;
-  background:linear-gradient(90deg,var(--accent),var(--good)); }
+  overflow:visible; position:relative; }
+/* The one number on the page that is about you rather than about a title, so
+   it is the one thing allowed to give off light. The glow sits on the filled
+   part only - an empty level should look empty, not lit. */
+.lvltrack i { display:block; height:100%; border-radius:99px; position:relative;
+  background:linear-gradient(90deg,var(--accent),var(--good));
+  box-shadow:0 0 10px -1px var(--accent), 0 0 22px -6px var(--good);
+  animation:lvlglow 3.4s var(--ease) infinite alternate; }
+/* A sheen that crosses the filled part now and then. It travels once every
+   nine seconds, which is often enough to notice and rare enough to ignore. */
+.lvltrack i::after { content:""; position:absolute; inset:0; border-radius:99px;
+  overflow:hidden;
+  background:linear-gradient(100deg, transparent 20%,
+    rgba(255,255,255,.55) 50%, transparent 80%);
+  background-size:220% 100%; background-repeat:no-repeat;
+  animation:lvlsheen 9s var(--ease) infinite; }
+@keyframes lvlglow {
+  from { box-shadow:0 0 8px -2px var(--accent), 0 0 18px -8px var(--good); }
+  to   { box-shadow:0 0 16px 0 var(--accent), 0 0 30px -4px var(--good); }
+}
+@keyframes lvlsheen {
+  0%   { background-position:-120% 0; }
+  55%  { background-position:220% 0; }
+  100% { background-position:220% 0; }
+}
 .lvlbar .sub { margin:10px 0 0; font-size:13px; }
 .mediahead span { font-size:11px; font-weight:600; color:var(--faint);
   background:var(--line-soft); border-radius:99px; padding:2px 8px;
