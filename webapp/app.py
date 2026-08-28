@@ -546,6 +546,34 @@ def icon():
         "Cache-Control": "public, max-age=604800"})
 
 
+# The sprites and the clip, shipped with the code like the logo. A fixed list
+# rather than a directory: a name from a URL should never be able to pick the
+# file, however tidy the path looks.
+ASSETS = {
+    "crabigator-run.png": "image/png",
+    "crabigator-idle.png": "image/png",
+    "crabigator-jump.png": "image/png",
+    "crabigator-land.png": "image/png",
+    "crabigator-ko.png": "image/png",
+    "deathnote.mp4": "video/mp4",
+    "deathnote.webm": "video/webm",
+}
+
+
+@app.get("/asset/<name>")
+def asset(name):
+    mime = ASSETS.get(name)
+    if not mime:
+        abort(404)
+    try:
+        with open(os.path.join(os.path.dirname(w.ICON_FILE), name), "rb") as f:
+            data = f.read()
+    except OSError:
+        abort(404)
+    return Response(data, mimetype=mime, headers={
+        "Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @app.get("/media/<kind>/<int:user_id>")
 def media(kind, user_id):
     """User-supplied images, served with the type read from their own bytes and

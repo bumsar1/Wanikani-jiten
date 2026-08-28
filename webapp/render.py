@@ -30,22 +30,22 @@ def esc(s) -> str:
 
 AUTH_CSS = """
 .authbox { max-width:400px; margin:8vh auto; background:var(--raise);
-  border:1px solid var(--line); border-radius:16px; padding:28px;
+  border:1px solid var(--line); border-radius:14px; padding:28px;
   box-shadow:var(--shadow); }
 .authbox h1 { font-size:24px; margin-bottom:18px; }
 .authbox .mark { width:60px; height:60px; display:block; margin:0 auto 12px;
-  border-radius:17px; }
+  border-radius:14px; }
 .authbox .mark + h1 { text-align:center; }   /* only where there is a mark */
 .field { margin-bottom:14px; }
-.field label { display:block; font-size:12px; color:var(--faint); margin-bottom:5px;
+.field label { display:block; font-size:12.5px; color:var(--faint); margin-bottom:5px;
   text-transform:uppercase; letter-spacing:.07em; font-weight:600; }
-.field input { width:100%; font:inherit; padding:10px 13px; border-radius:11px;
+.field input { width:100%; font:inherit; padding:10px 13px; border-radius:10px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
-.field .hint { font-size:12px; color:var(--faint); margin-top:5px; }
+.field .hint { font-size:12.5px; color:var(--faint); margin-top:5px; }
 .err { background:var(--accent-soft); color:var(--accent); padding:10px 14px;
-  border-radius:11px; font-size:14px; margin-bottom:14px; }
+  border-radius:10px; font-size:14px; margin-bottom:14px; }
 .ok { background:var(--accent-soft); color:var(--good); padding:10px 14px;
-  border-radius:11px; font-size:14px; margin-bottom:14px; }
+  border-radius:10px; font-size:14px; margin-bottom:14px; }
 .topbar { display:flex; justify-content:space-between; align-items:center;
   gap:12px; padding:14px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
 .topbar .who { color:var(--muted); font-size:13px; }
@@ -165,7 +165,7 @@ BURN_CSS = """
 .pager { display:flex; align-items:center; gap:12px; margin:10px 0 2px;
   font-size:13px; color:var(--muted); }
 .pager button { font:inherit; font-size:13px; color:var(--muted);
-  background:var(--raise); border:1px solid var(--line); border-radius:9px;
+  background:var(--raise); border:1px solid var(--line); border-radius:10px;
   padding:5px 11px; cursor:pointer; }
 .pager button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
 .pager button:disabled { opacity:.4; cursor:default; }
@@ -223,6 +223,82 @@ BURN_JS = """
 """
 
 
+# ---------------------------------------------------------------- navigation
+
+# The hosted app is server-rendered, so a click on the top bar leaves the old
+# page standing there, frozen, until the next one arrives - 287kB of it on the
+# dashboard. The rail says the click landed, and the crabigator says the wait
+# is a wait and not a hang. It only appears after 150ms, so a fast page never
+# flashes it.
+LOAD_CSS = """
+.loadrail { position:fixed; top:0; left:0; right:0; height:2px; z-index:200;
+  pointer-events:none; opacity:0; transition:opacity 160ms linear; }
+.loadrail.on { opacity:1; }
+.loadrail i { display:block; height:100%; width:0; background:var(--accent);
+  box-shadow:0 0 12px var(--accent);
+  transition:width 600ms cubic-bezier(.2,.7,.2,1); }
+.loadrail b { position:absolute; top:2px; width:56px; height:36px;
+  margin-left:-28px; left:0; background:url("/asset/crabigator-run.png") 0 0 / 448px 36px;
+  image-rendering:pixelated;
+  transition:left 600ms cubic-bezier(.2,.7,.2,1); }
+.loadrail.on b { animation:crabrun .6s steps(8) infinite; }
+@keyframes crabrun { to { background-position:-448px 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .loadrail i, .loadrail b { transition:none; }
+  .loadrail.on b { animation:none; background-position:0 0; }
+}
+"""
+
+LOAD_JS = """
+(function(){
+  const rail = document.createElement('div');
+  rail.className = 'loadrail';
+  rail.innerHTML = '<i></i><b></b>';
+  document.body.appendChild(rail);
+  const bar = rail.querySelector('i'), crab = rail.querySelector('b');
+  let timer = null, creep = null, at = 0;
+
+  function move(pct){
+    at = pct;
+    bar.style.width = pct + '%';
+    crab.style.left = pct + '%';
+  }
+  function start(){
+    if (timer) return;
+    timer = setTimeout(() => {
+      rail.classList.add('on');
+      move(18);
+      // Creeps towards 90 and stops: the page arrives when it arrives, and a
+      // bar that sits at 100 while nothing happens is a worse lie than one
+      // that is still climbing.
+      creep = setInterval(() => move(Math.min(90, at + (90 - at) * 0.18)), 400);
+    }, 150);
+  }
+  function stop(){
+    clearTimeout(timer); clearInterval(creep); timer = creep = null;
+    rail.classList.remove('on');
+    move(0);
+  }
+
+  addEventListener('click', e => {
+    if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target.closest('a[href]');
+    if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+    const url = new URL(a.href, location.href);
+    if (url.origin !== location.origin) return;
+    if (url.pathname === location.pathname && url.hash) return;   // in-page jump
+    start();
+  });
+  addEventListener('submit', e => { if (!e.defaultPrevented) start(); });
+  // Coming back from the cache shows the page instantly; the rail must not be
+  // left running on top of it.
+  addEventListener('pageshow', stop);
+  addEventListener('pagehide', stop);
+})();
+"""
+
+
 def shell(title: str, body: str, *, user=None, extra_css: str = "",
           scripts: str = "") -> str:
     """Common HTML skeleton. Same tokens as the local dashboard."""
@@ -236,8 +312,9 @@ def shell(title: str, body: str, *, user=None, extra_css: str = "",
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title>{w.favicon_link(ICON)}'
-            f'<style>{w.REPORT_CSS}{AUTH_CSS}{extra_css}</style></head><body>'
-            f'<main>{bar}{body}</main>{scripts}</body></html>')
+            f'<style>{w.REPORT_CSS}{AUTH_CSS}{LOAD_CSS}{extra_css}</style></head><body>'
+            f'<main>{bar}{body}</main>'
+            f'<script>{LOAD_JS}</script>{scripts}</body></html>')
 
 
 def login_page(error: str = "", note: str = "") -> str:
@@ -415,14 +492,14 @@ TOGETHER_CSS = """
   box-shadow:var(--shadow); overflow:hidden; }
 .person > header { padding:16px 18px 12px; border-bottom:1px solid var(--line);
   display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-.person h3 { margin:0; font-size:18px; font-weight:640; letter-spacing:-.015em; }
-.person .meta { color:var(--faint); font-size:12px; }
+.person h3 { margin:0; font-size:18px; font-weight:650; letter-spacing:-.015em; }
+.person .meta { color:var(--faint); font-size:12.5px; }
 .person .group { padding:12px 18px 4px; }
-.person .group h4 { margin:0 0 8px; font-size:10.5px; letter-spacing:.09em;
+.person .group h4 { margin:0 0 8px; font-size:11px; letter-spacing:.09em;
   text-transform:uppercase; color:var(--faint); font-weight:650; }
 .titlelist { list-style:none; margin:0 0 12px; padding:0; }
 .titlelist li { display:flex; justify-content:space-between; gap:12px; padding:5px 0;
-  border-bottom:1px solid var(--line-soft); font-size:14.5px; }
+  border-bottom:1px solid var(--line-soft); font-size:14px; }
 .titlelist li:last-child { border-bottom:0; }
 .titlelist .covs { display:flex; gap:10px; white-space:nowrap; }
 .titlelist .cov { color:var(--muted); font-variant-numeric:tabular-nums;
@@ -441,7 +518,7 @@ TOGETHER_CSS = """
   border:2px solid var(--raise); background:var(--sunk); }
 .avatar.blank { display:grid; place-items:center; font:600 20px/1 var(--sans, sans-serif);
   color:var(--faint); }
-.bio { color:var(--muted); font-size:13.5px; margin:2px 0 0; }
+.bio { color:var(--muted); font-size:13px; margin:2px 0 0; }
 .profileform { display:grid; gap:14px; }
 .profileform .row2 { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; }
 .profileform input[type=file] { font-size:13px; color:var(--muted); }
@@ -455,7 +532,7 @@ TOGETHER_CSS = """
 .addbtn:disabled { opacity:.5; cursor:default; }
 .addbtn.done { color:var(--good); border-color:var(--good); }
 .profilewrap { max-width:620px; margin:0 auto; }
-.backlink { padding-top:18px; margin:0; font-size:13.5px; }
+.backlink { padding-top:18px; margin:0; font-size:13px; }
 .backlink a { color:var(--muted); border:0; }
 .backlink a:hover { color:var(--accent); }
 .nowplaying { display:flex; gap:16px; align-items:center; padding:16px 18px;
@@ -464,11 +541,11 @@ TOGETHER_CSS = """
   flex:none; background:var(--line); box-shadow:var(--shadow); }
 .nowplaying .lbl { font:650 10px/1 var(--sans, sans-serif); letter-spacing:.11em;
   text-transform:uppercase; color:var(--accent); }
-.nowplaying h4 { margin:5px 0 4px; font-size:19px; line-height:1.25;
-  letter-spacing:-.015em; font-weight:640; }
+.nowplaying h4 { margin:5px 0 4px; font-size:20px; line-height:1.25;
+  letter-spacing:-.015em; font-weight:650; }
 .nowplaying .covs { display:flex; gap:10px; }
 .vs { display:inline-flex; gap:6px; align-items:baseline; margin-left:8px;
-  font-size:12px; color:var(--faint); white-space:nowrap; }
+  font-size:12.5px; color:var(--faint); white-space:nowrap; }
 .vs b { color:var(--accent); font-variant-numeric:tabular-nums; }
 .titlelist .both { color:var(--accent); font-weight:600; }
 .overlap { background:var(--accent-soft); border:1px solid var(--line);
