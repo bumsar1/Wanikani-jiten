@@ -607,8 +607,14 @@ def tier(name):
     for sid, subj in (cache.get("subjects") or {}).items():
         if not lo <= subj["level"] <= hi:
             continue
-        stage = stages.get(sid, 0)
-        row = {"c": subj["characters"], "l": subj["level"], "s": stage}
+        # The meanings ride along rather than waiting for a click each: they
+        # double the answer to 83kB, which is 26kB once the server compresses
+        # it, and they turn every tile in the panel into something you can ask
+        # about without another round trip.
+        row = {"c": subj["characters"], "l": subj["level"],
+               "s": stages.get(sid, 0),
+               "m": subj.get("meaning") or "",
+               "r": "、".join(subj.get("readings") or [])}
         (kanji if subj["type"] == "kanji" else words).append(row)
     key = lambda r: (r["l"], r["c"])
     kanji.sort(key=key)

@@ -96,6 +96,23 @@ AUTH_CSS = """
 .tierbox .wd { font-size:14px; padding:3px 9px; border-radius:var(--r-pill);
   border:1px solid var(--line); color:var(--muted); background:var(--bg); }
 .tierbox .wd.in { animation:tilein 300ms var(--ease) both; }
+.tierbox .k, .tierbox .wd { cursor:pointer; }
+.tierbox .k.sel { outline:2px solid var(--fg); outline-offset:2px; }
+.tierbox .wd.sel { border-color:var(--accent); color:var(--accent); }
+
+/* The answer to a click, in one place under the panel rather than a tooltip
+   that follows the pointer around. It sticks, so it is still there when you
+   have scrolled down a few levels looking for the next one. */
+.pick { position:sticky; bottom:0; display:flex; align-items:center; gap:var(--s3);
+  margin-top:var(--s3); padding:10px 14px; border-radius:var(--r-box);
+  border:1px solid var(--line); background:var(--bg);
+  animation:settle 220ms var(--ease) both; }
+.pick[hidden] { display:none; }
+.pick .big { font-size:30px; line-height:1; }
+.pick .what { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.pick .what b { font-size:15px; }
+.pick .rd { color:var(--muted); font-size:14px; }
+.pick .sub { margin:0; font-size:12.5px; }
 .tierbox .wd.on { color:var(--fg); border-color:var(--good); }
 .tierbox .more { color:var(--faint); font-size:13px; margin-top:var(--s2); }
 
@@ -322,18 +339,22 @@ TIER_JS = """
       tiles.map((k, col) => {
         const wait = Math.round(row * step + col * 3);
         if (wait > front) front = wait;
-        return `<span class="k in b-${BAND(k.s)}" style="animation-delay:${wait}ms">${k.c}</span>`;
+        return `<span class="k in b-${BAND(k.s)}" data-i="${k.i}"` +
+               ` style="animation-delay:${wait}ms">${k.c}</span>`;
       }).join('') +
       '</div></div>').join('');
   }
 
   function draw(d){
     const wordCap = 240;
+    // Number them before the rows are built, or the tiles carry no id and a
+    // click has nothing to look up.
+    d.kanji.forEach((k, i) => { k.i = 'k' + i; });
     const kanjiHtml = rows(d.kanji);
     // The words come in behind the kanji, quickly, so the panel reads top to
     // bottom once rather than everywhere at once.
     const words = d.words.slice(0, wordCap).map((x, i) =>
-      `<span class="wd in${x.s >= 5 ? ' on' : ''}"` +
+      `<span class="wd in${x.s >= 5 ? ' on' : ''}" data-i="w${i}"` +
       ` style="animation-delay:${Math.round(front + 60 + i * 1.6)}ms">${x.c}</span>`)
       .join('');
     const rest = d.words.length - wordCap;
@@ -345,24 +366,58 @@ TIER_JS = """
       `<b>${d.passed.words.toLocaleString()}</b> passed</p>` +
       kanjiHtml +
       `<div class="words">${words}</div>` +
-      (rest > 0 ? `<p class="more">and ${rest.toLocaleString()} more words</p>` : '');
+      (rest > 0 ? `<p class="more">and ${rest.toLocaleString()} more words</p>` : '') +
+      '<div class="pick" id="tierpick" hidden></div>';
+  }
+
+  const STAGE = s => s >= 9 ? 'Burned' : s >= 8 ? 'Enlightened' : s >= 7 ? 'Master'
+                   : s >= 5 ? 'Guru' : s >= 1 ? 'Apprentice' : 'not started';
+
+  // Every tile and every chip answers what it means, without leaving the page.
+  // The meanings came down with the panel, so this asks nobody anything.
+  function pick(el, d){
+    const id = el.dataset.i;
+    if (!id) return;
+    const it = id[0] === 'w' ? d.words[+id.slice(1)] : d.kanji[+id.slice(1)];
+    if (!it) return;
+    const out = document.getElementById('tierpick');
+    const kind = id[0] === 'w' ? 'vocabulary' : 'kanji';
+    const url = 'https://www.wanikani.com/' + kind + '/' + encodeURIComponent(it.c);
+    out.innerHTML =
+      `<span class="big">${it.c}</span>` +
+      `<span class="what"><b>${it.m || '&mdash;'}</b>` +
+      (it.r ? `<span class="rd">${it.r}</span>` : '') +
+      `<span class="sub">level ${it.l} &middot; ${STAGE(it.s)} &middot; ` +
+      `<a href="${url}" target="_blank" rel="noopener">on WaniKani &#8599;</a>` +
+      `</span></span>`;
+    out.hidden = false;
+    for (const other of box.querySelectorAll('.k.sel, .wd.sel'))
+      other.classList.remove('sel');
+    el.classList.add('sel');
   }
 
   async function show(btn){
     const name = btn.dataset.tier;
     rungs.forEach(r => r.setAttribute('aria-expanded', String(r === btn)));
     box.hidden = false;
-    if (cache.has(name)){ draw(cache.get(name)); return; }
+    if (cache.has(name)){ draw(cache.get(name)); wire(cache.get(name)); return; }
     // A shape where the answer will be, rather than a spinner somewhere else.
     box.innerHTML = '<div class="skel"><i></i><i></i><i></i></div>';
     try {
       const d = await (await fetch('/tier/' + encodeURIComponent(name))).json();
       cache.set(name, d);
-      if (box.hidden === false) draw(d);
+      if (box.hidden === false){ draw(d); wire(d); }
     } catch (e){
       box.innerHTML = '<p class="sub">Could not load that one. Try again?</p>';
     }
   }
+
+  let showing = null;
+  function wire(d){ showing = d; }
+  box.addEventListener('click', e => {
+    const el = e.target.closest('.k, .wd');
+    if (el && showing) pick(el, showing);
+  });
 
   for (const btn of rungs){
     btn.addEventListener('click', () => {
