@@ -68,6 +68,69 @@ AUTH_CSS = """
 .tier .verse::before { content:"“"; color:var(--accent); margin-right:2px; }
 .tier .verse::after { content:"”"; color:var(--accent); margin-left:1px; }
 
+/* Thirty days of what could burn. Bars rather than a table, because the
+   question is which week is heavy, not what Tuesday's exact number is. */
+.burncal { display:flex; align-items:flex-end; gap:3px; height:104px;
+  margin:0 0 var(--s4); padding:var(--s3) var(--s3) 0;
+  border:1px solid var(--line); border-radius:var(--r-panel);
+  background:var(--raise); box-shadow:var(--shadow); }
+.burncal .bar { flex:1 1 0; display:flex; flex-direction:column;
+  align-items:center; justify-content:flex-end; height:100%; min-width:0;
+  cursor:default; }
+.burncal .bar i { display:block; width:100%; border-radius:3px 3px 0 0;
+  background:var(--accent); opacity:.85;
+  transition:opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  transform-origin:bottom; animation:grow 420ms var(--ease) both; }
+.burncal .bar.we i { background:var(--good); }
+.burncal .bar.none i { background:var(--line); }
+.burncal .bar:hover i { opacity:1; transform:scaleY(1.04); }
+.burncal .bar em { font-style:normal; font-size:10px; color:var(--faint);
+  margin-top:4px; font-variant-numeric:tabular-nums; }
+@keyframes grow { from { transform:scaleY(0); } }
+.burncal .bar:nth-child(n+2) i { animation-delay:20ms; }
+.burncal .bar:nth-child(n+8) i { animation-delay:60ms; }
+.burncal .bar:nth-child(n+15) i { animation-delay:100ms; }
+.burncal .bar:nth-child(n+22) i { animation-delay:140ms; }
+
+/* The level-up. Loud by the standards of this page, which is a low bar, and
+   gone again at the next refresh. */
+.levelup { display:flex; align-items:center; gap:var(--s4); position:relative;
+  overflow:hidden; margin:0 0 var(--s3); padding:var(--s3) var(--s4);
+  border:1px solid var(--accent); border-radius:var(--r-panel);
+  background:linear-gradient(100deg,var(--accent-soft),var(--raise) 60%);
+  box-shadow:0 12px 40px -22px var(--accent);
+  animation:settle 420ms var(--ease) both; }
+.levelup .crab { image-rendering:pixelated; flex:none; width:112px; height:72px;
+  animation:hop 900ms var(--ease) 220ms 1; }
+@keyframes hop {
+  0%   { transform:translateY(26px); opacity:0; }
+  35%  { transform:translateY(-14px); opacity:1; }
+  60%  { transform:translateY(0); }
+  70%  { transform:translateY(-5px); }
+  100% { transform:translateY(0); }
+}
+.levelup .say { min-width:0; }
+.levelup h3 { margin:0; font-size:22px; letter-spacing:-.015em; }
+.levelup h3 b { color:var(--accent); }
+.levelup .sub { margin:2px 0 0; }
+.levelup .verse { margin:8px 0 0; font-style:italic; font-size:15px;
+  max-width:46ch; }
+.levelup .tierart { width:150px; height:100px; object-fit:cover; flex:none;
+  border-radius:var(--r-box); margin-left:auto; }
+@media (max-width:700px) { .levelup .tierart { display:none; } }
+
+/* What is behind a delta. */
+.card button.d { font:inherit; font-size:12.5px; font-weight:650; padding:0;
+  border:0; background:none; color:var(--accent); cursor:pointer;
+  border-bottom:1px dashed var(--accent); border-radius:0; margin-top:5px; }
+.card button.d:hover { filter:brightness(1.15); background:none; }
+.card .newly { display:flex; flex-wrap:wrap; gap:4px; margin-top:9px; }
+.card .newly[hidden] { display:none; }
+.card .ni { font-size:15px; padding:1px 6px; border-radius:var(--r-ctl);
+  background:var(--accent-soft); color:var(--accent);
+  animation:tilein 260ms var(--ease) both; }
+.card .ni.more { background:none; color:var(--faint); }
+
 .ladder { display:grid; gap:var(--s3); margin:0 0 var(--s4);
   grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
 .rung { margin:0; border:1px solid var(--line); border-radius:var(--r-panel);
@@ -311,6 +374,38 @@ DN_JS = """
     }
     btn.classList.toggle('done', opening);
   });
+})();
+"""
+
+CARD_JS = """
+(function(){
+  // He jumps, he lands. Two files, so the swap happens when the hop ends
+  // rather than being animated as one sheet.
+  const crab = document.querySelector('.levelup .crab');
+  if (crab){
+    crab.addEventListener('animationend', () => {
+      crab.src = '/asset/crabigator-land.png';
+      setTimeout(() => { crab.src = '/asset/crabigator-idle.png'; }, 420);
+    }, {once: true});
+  }
+
+  // The chips are already on the page; this only decides whether they are
+  // shown, and staggers them so a wall of thirty becomes a run of thirty.
+  for (const btn of document.querySelectorAll('.card button.d')){
+    const box = btn.nextElementSibling;
+    if (!box) continue;
+    btn.addEventListener('click', () => {
+      const opening = box.hidden;
+      box.hidden = !opening;
+      btn.setAttribute('aria-expanded', String(opening));
+      if (opening)
+        [...box.children].forEach((c, i) => {
+          c.style.animation = 'none';
+          void c.offsetWidth;
+          c.style.animation = `tilein 260ms var(--ease) ${Math.round(i * 12)}ms both`;
+        });
+    });
+  }
 })();
 """
 
@@ -1377,6 +1472,83 @@ def tier_of(level: int):
     return TIERS[-1]
 
 
+def burn_calendar(cache, days: int = 30) -> str:
+    """The next thirty days of what could burn, as thirty bars.
+
+    The list answers "what is next"; this answers "when is the week that will
+    hurt". Same numbers, read sideways.
+    """
+    counts = cache.get("burning_days")
+    if not counts:
+        # A snapshot from before the count existed still carries the dates of
+        # the nearest few hundred, and the near days - the ones this is about -
+        # are complete in there anyway.
+        counts = {}
+        for at in (cache.get("burning") or {}).values():
+            counts[at[:10]] = counts.get(at[:10], 0) + 1
+    if not counts:
+        return ""
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    start = calendar.timegm(time.strptime(today, "%Y-%m-%d"))
+    row, top = [], 0
+    for i in range(days):
+        t = time.gmtime(start + i * 86400)
+        key = time.strftime("%Y-%m-%d", t)
+        n = counts.get(key, 0)
+        top = max(top, n)
+        row.append((key, t, n))
+    if not top:
+        return ""
+    # Everything from before today lands in the first bar: those reviews are
+    # waiting now, they did not evaporate.
+    overdue = sum(n for day, n in counts.items() if day < today)
+    if overdue:
+        key, t, n = row[0]
+        row[0] = (key, t, n + overdue)
+        top = max(top, row[0][2])
+
+    bars = []
+    for key, t, n in row:
+        h = 6 + round(94 * n / top) if n else 3
+        weekend = t.tm_wday >= 5
+        label = time.strftime("%a %d %b", t)
+        bars.append(
+            f'<span class="bar{" we" if weekend else ""}{" none" if not n else ""}"'
+            f' title="{label}: {n:,}"><i style="height:{h}%"></i>'
+            f'<em>{t.tm_mday}</em></span>')
+    note = (f'{overdue:,} of them are waiting in your queue right now. '
+            if overdue else "")
+    return (f'<p class="sub">{note}The tallest day in the next {days} is '
+            f'<b>{top:,}</b>.</p>'
+            f'<div class="burncal">{"".join(bars)}</div>')
+
+
+def levelup_banner(extras, level: int) -> str:
+    """The one moment the app used to walk straight past.
+
+    It shows until the next refresh rotates the snapshots, which is the same
+    life as the "+31 since last refresh" beside it - both are answers to "what
+    happened while I was away".
+    """
+    up = extras.get("leveled")
+    if not up:
+        return ""
+    was, now = up["from"], up["to"]
+    old_tier, new_tier = tier_of(was)[0], tier_of(now)[0]
+    moved = old_tier != new_tier
+    art = (f'<img class="tierart" src="/asset/tier-{new_tier.lower()}.webp"'
+           f' alt="" width="720" height="480">' if moved else "")
+    line = LEVEL_LINES.get(now, "")
+    return (f'<div class="levelup" id="levelup">'
+            f'<img class="crab" src="/asset/crabigator-jump.png" alt=""'
+            f' width="112" height="72">'
+            f'<div class="say"><h3>Level {was} &rarr; <b>{now}</b></h3>'
+            + (f'<p class="sub">and out of {old_tier} into <b>{new_tier}</b></p>'
+               if moved else f'<p class="sub">still in {new_tier}</p>')
+            + (f'<p class="verse">{esc(line)}</p>' if line else "")
+            + f'</div>{art}</div>')
+
+
 def tier_strip(level: int) -> str:
     """Where you are on the climb, on the page you read every day."""
     name, lo, hi = tier_of(level)
@@ -1445,8 +1617,17 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
          f'data from {esc((cache.get("fetched_at") or "")[:16].replace("T", " "))}'
          f'</p></div></div>', w.NAV_SLOT]
 
-    def card(n, label, delta=None):
+    def card(n, label, delta=None, items=None):
         d = f'<div class="d">{delta:+d} since last refresh</div>' if delta else ""
+        # A count with the things behind it. "+31 kanji" is a receipt; the
+        # thirty-one characters are the thing you actually wanted to see.
+        if d and items:
+            chips = "".join(f'<span class="ni">{esc(c)}</span>' for c in items[:120])
+            more = (f'<span class="ni more">+{len(items) - 120}</span>'
+                    if len(items) > 120 else "")
+            d = (f'<button class="d" type="button" aria-expanded="false">'
+                 f'{delta:+d} since last refresh</button>'
+                 f'<div class="newly" hidden>{chips}{more}</div>')
         return (f'<div class="card"><div class="n">{n}</div>'
                 f'<div class="l">{label}</div>{d}</div>')
 
@@ -1460,8 +1641,10 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
     if on_today:
         h.append('<div class="cards">')
         h.append(card(lvl, "level"))
-        h.append(card(len(known["kanji_known"]), "kanji known", extras.get("d_kanji")))
-        h.append(card(len(known["words_known_set"]), "words known", extras.get("d_words")))
+        h.append(card(len(known["kanji_known"]), "kanji known",
+                      extras.get("d_kanji"), extras.get("new_kanji")))
+        h.append(card(len(known["words_known_set"]), "words known",
+                      extras.get("d_words"), extras.get("new_words")))
         if decks:
             best = max(decks, key=lambda r: r[1]["kanji_cov_occ"])
             h.append(card(f'{best[1]["kanji_cov_occ"]:.0f}%',
@@ -1477,6 +1660,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         h.append("</div>")
         # The bar and the counters are one thought - where WaniKani has got you -
         # so they sit together at the top rather than as a section to scroll to.
+        h.append(levelup_banner(extras, lvl))
         h.append(tier_strip(lvl))
         h.append(w.level_bar_html(w.level_progress(cache), w.wk_pace(cache)))
         counts = w.month_totals(cache)
@@ -1684,6 +1868,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
                  f", showing the soonest {len(rows):,} of {total:,}")
         h.append(f'<p class="sub"><b>{due:,}</b> in your queue now &middot; '
                  f'<b>{week:,}</b> within the week{shown}.</p>')
+        h.append(burn_calendar(cache))
         h.append('<p class="sub">Enlightened items, whose next review is the one '
                  'that burns them &mdash; if you answer it correctly. Get it '
                  'wrong and the item drops back down for months.</p>')
@@ -1820,7 +2005,7 @@ CSS_BUNDLE = _bundle(w.REPORT_CSS, AUTH_CSS, LOAD_CSS, MOBILE_CSS, BURN_CSS,
 CORE_JS = _bundle(LOAD_JS, MOBILE_JS, w.SORT_JS)
 DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
                   w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS,
-                  TIER_JS)
+                  TIER_JS, CARD_JS)
 
 BUNDLES: dict[str, tuple[str, str]] = {}
 

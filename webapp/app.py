@@ -448,6 +448,15 @@ def _page(which: str):
         extras["d_kanji"] = len(known["kanji_known"]) - len(old["kanji_known"])
         extras["d_words"] = (len(known["words_known_set"])
                              - len(old["words_known_set"]))
+        # The counts were the whole answer, and "+31 kanji" is not an answer,
+        # it is a receipt. Both snapshots are right here, so name them.
+        extras["new_kanji"] = sorted(known["kanji_known"] - old["kanji_known"])
+        extras["new_words"] = sorted(known["words_known_set"]
+                                     - old["words_known_set"])
+        # And the one moment the app used to pass over in silence.
+        if (cache.get("level") or 0) > (prev.get("level") or 0):
+            extras["leveled"] = {"from": prev.get("level") or 0,
+                                 "to": cache.get("level") or 0}
         old_stage = prev.get("assignments", {})
         extras["moved_up"] = {
             s["characters"] for sid, s in cache["subjects"].items()

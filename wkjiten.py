@@ -250,6 +250,12 @@ def wk_fetch(token: str) -> dict:
             ready.append((st["at"], str(sid)))
     ready.sort()
     burning = {sid: at for at, sid in ready[:400]}
+    # A count per day for every one of them, not only the nearest few hundred:
+    # it is a few dozen numbers, and it turns the list into a week you can see
+    # coming. WaniKani stamps these in UTC, so the days are UTC days.
+    burning_days: Counter[str] = Counter()
+    for at, _sid in ready:
+        burning_days[at[:10]] += 1
 
     progressions = [
         {"level": p["data"]["level"], "started_at": p["data"].get("started_at"),
@@ -315,6 +321,7 @@ def wk_fetch(token: str) -> dict:
         "level_kanji": level_kanji,
         "burning": burning,
         "burning_total": len(ready),
+        "burning_days": dict(sorted(burning_days.items())),
         "answers": answers,
     }
 
