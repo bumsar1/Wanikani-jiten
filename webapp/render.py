@@ -195,7 +195,7 @@ AUTH_CSS = """
 .rung .cap b { color:var(--fg); font-size:14px; }
 .rung[aria-expanded="true"] { border-color:var(--accent); }
 .rung[aria-expanded="true"] img { filter:none; }
-.rung.done img { filter:grayscale(1) brightness(.55); }
+.rung.past img { filter:grayscale(1) brightness(.55); }
 .rung.ahead img { filter:brightness(.75) saturate(.7); }
 .rung.now { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent),
   0 10px 30px -12px var(--accent); }
@@ -244,15 +244,7 @@ AUTH_CSS = """
 .tierbox .b-enlightened { background:#0093dd; }
 .tierbox .b-burned      { background:#8a7355; }
 
-/* A shape in the right place beats a spinner in the middle of nowhere. */
-.skel { display:grid; gap:8px; }
-.skel i { display:block; height:26px; border-radius:var(--r-ctl);
-  background:linear-gradient(90deg,var(--line-soft),var(--line),var(--line-soft));
-  background-size:220% 100%; animation:shimmer 1.1s linear infinite; }
-.skel i:nth-child(2) { width:82%; }
-.skel i:nth-child(3) { width:64%; }
-@keyframes shimmer { from { background-position:120% 0; }
-                     to   { background-position:-120% 0; } }
+/* The skeleton lives in REPORT_CSS now - five panels use it. */
 .topbar nav { margin:0; }
 form.inline { display:inline; }
 .code { font-family:ui-monospace,Menlo,Consolas,monospace; background:var(--bg);
@@ -1752,8 +1744,10 @@ def tier_ladder(level: int) -> str:
     here = tier_of(level)[0]
     cards = []
     for name, lo, hi in TIERS:
+        # Not "done": these are buttons, and button.done is the generic green
+        # confirmation style - a passed stretch was picking it up by accident.
         state = ("now" if name == here else
-                 "done" if hi < level else "ahead")
+                 "past" if hi < level else "ahead")
         cards.append(
             f'<button type="button" class="rung {state}" data-tier="{name.lower()}"'
             f' aria-expanded="false">'
@@ -1850,6 +1844,12 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         if counts:
             h.append(w.counters_html(counts))
         h.append(w.BROWSE_SLOT)
+
+    if page == "levels":
+        h.append(h2("The climb"))
+        h.append('<p class="sub">WaniKani cuts the sixty levels into six and '
+                 'gives them names. You are somewhere inside one of them.</p>')
+        h.append(tier_ladder(lvl))
 
     if not decks:
         h.append(h2("Your titles"))
@@ -1962,12 +1962,6 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         h.append(h2("What each level would buy you"))
         h.append(w.CHART_HTML)
         h.append(w.SLIDER_HTML)
-
-    if page == "levels":
-        h.append(h2("The climb"))
-        h.append('<p class="sub">WaniKani cuts the sixty levels into six and '
-                 'gives them names. You are somewhere inside one of them.</p>')
-        h.append(tier_ladder(lvl))
 
     # Kanji grid
     occ: Counter[str] = Counter()

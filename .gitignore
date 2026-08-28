@@ -19,3 +19,11 @@ jimaku_key.txt
 nihongo_key.txt
 Sprite set.png
 death-note-light-yagami.gif
+# The tier art at full size. Only the webp derivatives are served, and six
+# 1.5MB files is most of what a clone would download.
+assets/Pleasant.png
+assets/Painful.png
+assets/Death.png
+assets/Hell.png
+assets/Paradise.png
+assets/Reality.png

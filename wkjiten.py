@@ -2696,6 +2696,21 @@ nav a:hover { color:var(--accent); }
   letter-spacing:.08em; margin-top:3px; font-weight:600; }
 .card .d { color:var(--accent); font-size:12.5px; font-weight:650; margin-top:5px; }
 
+/* Waiting, wherever it happens: a shape the size of the answer, in the place
+   the answer will appear. "Searching..." says the same thing and then jumps
+   when the real content lands on top of it. */
+.skel { display:grid; gap:8px; }
+.skel i { display:block; height:26px; border-radius:var(--r-ctl);
+  background:linear-gradient(90deg,var(--line-soft),var(--line),var(--line-soft));
+  background-size:220% 100%; animation:shimmer 1.1s linear infinite; }
+.skel i:nth-child(2) { width:82%; }
+.skel i:nth-child(3) { width:64%; }
+.skel i:nth-child(4) { width:71%; }
+.skel.one { display:inline-block; width:14em; vertical-align:-3px; }
+.skel.one i { height:14px; }
+@keyframes shimmer { from { background-position:120% 0; }
+                     to   { background-position:-120% 0; } }
+
 /* controls
    These lived at the bottom of BROWSE_CSS, which only the dashboard loads, so
    login, register, settings, invites, together and the saved report were all
@@ -2870,8 +2885,7 @@ GAP_JS = """
 
   async function load(btn){
     box.hidden = false;
-    box.innerHTML = '<p class="empty">Asking jiten.moe which words you are ' +
-                    'missing&hellip;</p>';
+    box.innerHTML = '<div class="skel"><i></i><i></i><i></i></div>';
     box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
     let d;
     try {
@@ -3047,7 +3061,7 @@ SUBS_JS = """
 
   async function load(){
     box.hidden = false;
-    box.innerHTML = '<p class="empty">Asking jimaku&hellip;</p>';
+    box.innerHTML = '<div class="skel"><i></i><i></i></div>';
     let d;
     try { d = await (await fetch(`/subs/${entry}?dual=${dual ? 1 : 0}`)).json(); }
     catch (e){ box.innerHTML = '<p class="empty">Could not reach jimaku.</p>'; return; }
@@ -3344,7 +3358,7 @@ REACH_JS = """
     const floor = Math.max(0, pct - 20);
     if (floor) url += '&coverageMin=' + floor;
 
-    box.innerHTML = '<p class="empty">Looking&hellip;</p>';
+    box.innerHTML = '<div class="skel"><i></i><i></i></div>';
     let d;
     try { d = await (await fetch(url)).json(); }
     catch (e){ box.innerHTML = '<p class="empty">Lookup failed.</p>'; return; }
@@ -3819,7 +3833,7 @@ GRID_JS = """
     // Example words come from Jiten and so need the proxy; the saved file
     // simply does without them.
     const slot = document.getElementById('kwords');
-    slot.textContent = 'looking up words…';
+    slot.innerHTML = '<span class="skel one"><i></i></span>';
     try {
       const r = await fetch(`/api/kanji/${encodeURIComponent(k.c)}`);
       const d = await r.json();
@@ -4083,7 +4097,8 @@ async function search(){
   const genres = picked('g'), tags = picked('t');
   if (!q && !type && !min && !genres && !tags){ $('#results').innerHTML =
     '<p class="empty">Type a title and press Enter, or pick a filter.</p>'; return; }
-  $('#results').innerHTML = '<p class="empty">Searching&hellip;</p>';
+  // A shape where the rows will be, rather than a word where they will not.
+  $('#results').innerHTML = '<div class="skel"><i></i><i></i><i></i><i></i></div>';
   let url = `/api/media-deck/get-media-decks?sortBy=${sort}&sortOrder=1`;
   if (q) url += `&titleFilter=${encodeURIComponent(q)}`;
   if (type) url += `&mediaType=${type}`;
