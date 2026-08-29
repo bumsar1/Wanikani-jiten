@@ -3739,12 +3739,11 @@ GRID_JS = """
   ];
   const band = s => s >= 9 ? 5 : s >= 8 ? 4 : s >= 7 ? 3 : s >= 5 ? 2 : s >= 1 ? 1 : 0;
   const max = Math.max(1, ...G.filter(k => !k.k).map(k => k.n));
-  // The sweep is a welcome, not a habit: once per session, so the twentieth
-  // visit to this page is simply the grid, already there.
-  let seen = false;
-  try { seen = sessionStorage.getItem('wkjiten:grid') === '1'; } catch (e) {}
-  let mode = 'srs', scope = 'mine', drawn = false, wave = !seen;
-  try { sessionStorage.setItem('wkjiten:grid', '1'); } catch (e) {}
+  // Every arrival, because this is the page you came to look at the grid on
+  // and the sweep is how it arrives. Still only the first draw: switching
+  // colour mode or scope redraws instantly, which is a filter and not an
+  // arrival.
+  let mode = 'srs', scope = 'mine', drawn = false, wave = true;
 
   // Resolve the themed colours once and blend numerically. Leaving 2,000-odd
   // color-mix() calls in inline styles makes every style recalculation on the
