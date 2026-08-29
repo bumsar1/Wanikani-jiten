@@ -2850,6 +2850,19 @@ footer { color:var(--faint); font-size:12.5px; margin-top:56px;
   .mark { width:40px; height:40px; border-radius:10px; }
   h2 { margin-top:38px; }
 }
+@media (max-width:700px) {
+  /* Same reason: a 13px checkbox is a coin toss with a thumb. */
+  input[type=checkbox], input[type=radio] { width:18px; height:18px; }
+  .tagmenu label, .genres label { padding:5px 0; }
+  /* A phone has no room to spare, and min-width:540px was a desktop promise.
+     Let a table be as wide as its content needs and no wider; the ones that
+     still cannot fit become cards (the webapp does that part). */
+  table { font-size:13.5px; min-width:0; }
+  /* 9em of first column is a third of the screen before a number appears. */
+  table.tight td:first-child:not(.num) { min-width:0; }
+  table.grouped, table.nt { min-width:0; table-layout:auto; }
+  td, th { padding:7px 9px; }
+}
 """
 
 
@@ -3688,6 +3701,11 @@ GRID_HTML = """
       <button data-scope="all">all 60</button>
     </div>
   </div>
+  <div class="gridfind">
+    <input id="kfind" type="search" autocomplete="off" spellcheck="false"
+           placeholder="find a kanji, a meaning or a reading">
+    <span id="kfindout"></span>
+  </div>
   <div id="legend" class="legend-row"></div>
   <div id="gridout" class="gridout"></div>
   <div id="kdetail" class="kdetail"><span class="hint">Pick a kanji to see its
@@ -3868,6 +3886,39 @@ GRID_JS = """
       draw();
     });
   }
+  // Two thousand tiles and no way to find one of them. The meanings and
+  // readings came down with the grid, so this asks nobody anything: it dims
+  // what does not match rather than removing it, because where a kanji sits -
+  // which level, next to what - is half of what you came to see.
+  const find = document.getElementById('kfind');
+  const found = document.getElementById('kfindout');
+  if (find){
+    let last = '';
+    const run = () => {
+      const q = find.value.trim().toLowerCase();
+      if (q === last) return;
+      last = q;
+      out.classList.toggle('finding', !!q);
+      if (!q){ found.textContent = ''; 
+        out.querySelectorAll('.k.hit').forEach(t => t.classList.remove('hit'));
+        return; }
+      const want = new Map(G.map(k => [k.c, k]));
+      let n = 0, first = null;
+      for (const tile of out.querySelectorAll('.k')){
+        const k = want.get(tile.dataset.c);
+        const hit = !!k && (k.c === q || k.c.includes(q) ||
+                            (k.m || '').toLowerCase().includes(q) ||
+                            (k.r || '').includes(q));
+        tile.classList.toggle('hit', hit);
+        if (hit){ n++; if (!first) first = tile; }
+      }
+      found.textContent = n ? `${n} match${n === 1 ? '' : 'es'}` : 'nothing';
+      if (first) first.scrollIntoView({block: 'center', behavior: 'smooth'});
+    };
+    find.addEventListener('input', run);
+    find.addEventListener('search', run);
+  }
+
   pick('[data-mode]', b => { mode = b.dataset.mode; });
   pick('[data-scope]', b => { scope = b.dataset.scope; });
 
@@ -3934,6 +3985,20 @@ GRID_CSS = """
    being filled in. The delay per tile is set where the tile is built. */
 .k.in { animation:tilein 340ms var(--ease) both; }
 .k.sel { outline:2px solid var(--fg); outline-offset:2px; z-index:1; }
+/* Searching dims rather than hides: which level a kanji sits on, and what it
+   sits next to, is half of what the grid is for. */
+.gridout.finding .k { opacity:.16; filter:saturate(.4); }
+.gridout.finding .k.hit { opacity:1; filter:none;
+  outline:2px solid var(--accent); outline-offset:2px; z-index:1; }
+.gridfind { display:flex; align-items:center; gap:10px; margin:10px 0 2px; }
+.gridfind input { flex:1 1 260px; max-width:340px; font:inherit; font-size:14px;
+  padding:7px 12px; border-radius:var(--r-pill); border:1px solid var(--line);
+  background:var(--bg); color:var(--fg); }
+.gridfind input:focus { outline:none; border-color:var(--accent); }
+.gridfind span { font-size:12.5px; color:var(--muted);
+  font-variant-numeric:tabular-nums; }
+
+}
 @keyframes tilein {
   from { opacity:0; transform:translateY(9px) scale(.86); }
   60%  { opacity:1; }
@@ -3941,6 +4006,16 @@ GRID_CSS = """
 .k { width:27px; height:27px; border-radius:6px; font-size:16px; line-height:27px;
   text-align:center; color:#fff; cursor:pointer; user-select:none;
   text-shadow:0 1px 2px rgba(0,0,0,.35); }
+
+@media (max-width:700px) {
+  /* A tile is a button on a phone, and a 27px button is a button you miss.
+     Fewer per row is the price, and the grid was always going to be tall.
+     This sits after .k rather than with the other phone rules because it has
+     to win on order - both selectors weigh the same. */
+  .k { width:32px; height:32px; line-height:32px; font-size:19px;
+       border-radius:7px; }
+  .gridfind { flex-wrap:wrap; }
+  .gridfind input { max-width:none; }
 .k:hover { outline:2px solid var(--fg); outline-offset:1px; }
 /* Sticks to the foot of the window while you scroll the grid: the answer to
    "what is this one" should not be somewhere else by the time you have found

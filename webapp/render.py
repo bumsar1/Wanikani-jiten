@@ -292,9 +292,10 @@ form.inline { display:inline; }
 
 
 MOBILE_CSS = """
-/* A phone gets one thing at a time: every section folds to its heading, and
-   the jump links become a bar that stays put while you scroll. The wide layout
-   is untouched - this is the same page, read on a narrow screen. */
+/* The phone gets the same page, not a folded-up version of it. Sections used
+   to collapse to their headings back when all of them shared one page; the
+   split made that a tax - four sections behind four taps - so the jump bar
+   carries it alone now, staying put while you scroll. */
 @media (max-width:700px) {
   main > nav { position:sticky; top:0; z-index:30; flex-wrap:nowrap;
     overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;
@@ -302,99 +303,106 @@ MOBILE_CSS = """
     background:var(--bg); border-bottom:1px solid var(--line); }
   main > nav::-webkit-scrollbar { display:none; }
   main > nav a { white-space:nowrap; padding:7px 12px; font-size:13px; }
+  main > h2 { scroll-margin-top:54px; }
 
-  h2.acc { display:flex; align-items:center; gap:10px; cursor:pointer;
-    margin:0; padding:16px 2px; border-bottom:1px solid var(--line);
-    scroll-margin-top:54px; }
-  h2.acc::after { content:"+"; margin-left:auto; font-size:18px; font-weight:400;
-    color:var(--faint); line-height:1; }
-  h2.acc.open { color:var(--accent); }
-  h2.acc.open::after { content:"–"; color:var(--accent); }
-  .acc-hidden { display:none !important; }
+  /* A seven-column table in a 345px window is a row you read by dragging it
+     sideways past its own title. Those become cards - one per row, the title
+     across the top, the figures in pairs underneath, each carrying the column
+     name it lost. Only the tables that genuinely do not fit; a three-column
+     one stays a table, because a table is better when it fits. */
+  .rowcards, .rowcards tbody { display:block; }
+  /* table {min-width:540px} and .grouped's fixed layout are what made it wide
+     in the first place; both have to go before the rows can be cards. */
+  .rowcards { border:none; min-width:0; width:100%; table-layout:auto; }
+  .rowcards tr { display:grid; grid-template-columns:1fr 1fr; gap:1px 14px;
+    border:1px solid var(--line); border-radius:var(--r-box);
+    padding:11px 13px; margin:9px 0; background:var(--raise); }
+  .rowcards td { border:none; padding:3px 0; font-size:13.5px;
+    min-width:0; white-space:normal; }
+  .rowcards td:first-child { grid-column:1 / -1; font-size:15px;
+    padding-bottom:5px; white-space:normal; }
+  .rowcards td.num { display:flex; justify-content:space-between; gap:10px;
+    align-items:baseline; text-align:right; }
+  .rowcards td.num::before { content:attr(data-l); color:var(--faint);
+    font-size:11.5px; text-align:left; }
+  .rowcards td.num:empty { display:none; }
+  .rowcards td.wide, .rowcards td.acts { grid-column:1 / -1; text-align:left; }
+
+  /* The header row still sorts, so it stays - as a strip of chips above the
+     cards rather than a row of columns that no longer exist. */
+  .rowcards tr.hrow { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none;
+    background:none; border:none; border-radius:0; padding:0 0 4px;
+    margin:0 0 2px; }
+  .rowcards tr.hrow::-webkit-scrollbar { display:none; }
+  .rowcards tr.hrow th { border:1px solid var(--line); border-radius:var(--r-pill);
+    padding:5px 11px; font-size:12px; white-space:nowrap; background:var(--bg); }
+  .wrap.flat { overflow-x:visible; background:none; border:none;
+    box-shadow:none; border-radius:0; }
 }
 """
+
+
 
 MOBILE_JS = """
 (function(){
   const NARROW = 700;
-  const main = document.querySelector('main');
-  if (!main) return;
-
-  // Each h2 owns everything up to the next one. Grouping it here means no
-  // section had to be written twice to be foldable, and the hero, the cards
-  // and the footer - which belong to no heading - stay put.
-  const groups = [];
-  let cur = null;
-  for (const el of [...main.children]){
-    if (el.tagName === 'H2'){ cur = {head: el, body: []}; groups.push(cur); }
-    else if (el.tagName === 'FOOTER'){ cur = null; }
-    else if (cur){ cur.body.push(el); }
+  // Each cell keeps the name of the column it is about to lose, so the card
+  // can say "jiten 64.9%" where the table said it with a heading far above.
+  // Done here rather than in every table's generator: five tables, five
+  // shapes, one rule - and a table that already fits is left alone.
+  function card(t){
+    const head = t.rows[0];
+    if (!head || !head.querySelector('th')) return;
+    // Five columns never fit a phone, and that is decided on the count alone:
+    // a table injected by search arrives before it has been laid out, so its
+    // measured width is zero at exactly the moment we are asked about it.
+    // Fewer columns might fit, and those get measured - or skipped until they
+    // can be.
+    if (head.cells.length < 5){
+      const room = (t.parentElement || t).clientWidth;
+      if (!room || t.scrollWidth < room * 1.3) return;
+    }
+    const label = [...head.cells].map(c => c.textContent.trim());
+    head.classList.add('hrow');
+    for (const row of [...t.rows].slice(1))
+      [...row.cells].forEach((c, i) => {
+        if (label[i] && !c.dataset.l) c.dataset.l = label[i];
+      });
+    t.classList.add('rowcards');
+    if (t.parentElement && t.parentElement.classList.contains('wrap'))
+      t.parentElement.classList.add('flat');
   }
-  if (!groups.length) return;
-
-  let on = false;
-  const isOpen = g => g.head.classList.contains('open');
-  function show(g, open){
-    g.head.classList.toggle('open', open);
-    g.body.forEach(el => el.classList.toggle('acc-hidden', !open));
-    // The heading is the fold now, so a section that keeps its own content
-    // behind a "show me" summary would cost two taps to read. Open those on
-    // the way in - but only the content ones: the tag picker is a menu
-    // wearing a <details>, and it has to stay shut.
-    if (!open) return;
-    for (const el of g.body){
-      if (el.matches && el.matches('details.fold')) el.open = true;
-      if (el.querySelectorAll)
-        el.querySelectorAll('details.fold').forEach(d => { d.open = true; });
+  function uncard(t){
+    // Turning a phone sideways is not a reason to keep reading cards.
+    t.classList.remove('rowcards');
+    if (t.rows[0]) t.rows[0].classList.remove('hrow');
+    if (t.parentElement) t.parentElement.classList.remove('flat');
+  }
+  function sync(){
+    const narrow = innerWidth <= NARROW;
+    for (const t of document.querySelectorAll('main table')){
+      const is = t.classList.contains('rowcards');
+      if (narrow && !is) card(t);
+      else if (!narrow && is) uncard(t);
     }
   }
-  function enable(){
-    on = true;
-    groups.forEach(g => {
-      g.head.classList.add('acc');
-      g.head.setAttribute('role', 'button');
-      g.head.setAttribute('tabindex', '0');
-      show(g, false);
-    });
-  }
-  function disable(){
-    on = false;
-    groups.forEach(g => {
-      g.head.classList.remove('acc', 'open');
-      g.head.removeAttribute('role');
-      g.head.removeAttribute('tabindex');
-      g.body.forEach(el => el.classList.remove('acc-hidden'));
-    });
-  }
-
-  groups.forEach(g => {
-    const toggle = () => { if (on) show(g, !isOpen(g)); };
-    g.head.addEventListener('click', toggle);
-    g.head.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); }
-    });
-  });
-
-  // A jump link has to open what it jumps to, or the anchor lands on a closed
-  // heading and the tap looks like it did nothing. Runs before the browser
-  // scrolls, so it lands on the section rather than above it.
-  document.addEventListener('click', e => {
-    const a = e.target.closest('a[href^="#"]');
-    if (!a || !on) return;
-    const g = groups.find(g => g.head.id === a.getAttribute('href').slice(1));
-    if (g) show(g, true);
-  });
-
-  function sync(){
-    const narrow = window.innerWidth <= NARROW;
-    if (narrow && !on) enable();
-    else if (!narrow && on) disable();
-  }
-  addEventListener('resize', sync);
   sync();
+  addEventListener('resize', sync);
+  // Search results, word lists and the burn pager all arrive after the page
+  // does, and a table that appears later still has to become cards.
+  const main = document.querySelector('main');
+  if (main && window.MutationObserver){
+    // A timer rather than requestAnimationFrame: rAF does not run while the
+    // tab is in the background, and a table that arrived there would stay a
+    // table until something else woke the page.
+    let queued = 0;
+    new MutationObserver(() => {
+      clearTimeout(queued);
+      queued = setTimeout(sync, 16);
+    }).observe(main, {childList: true, subtree: true});
+  }
 })();
 """
-
 
 BURN_CSS = """
 .pager { display:flex; align-items:center; gap:12px; margin:10px 0 2px;
@@ -442,8 +450,8 @@ BURN_CSS = """
 @media (max-width:700px) {
   #burn { min-width:0; font-size:13px; }
   #burn th, #burn td { padding-left:9px; padding-right:9px; }
-  #burn th:nth-child(4), #burn td:nth-child(4),
-  #burn th:nth-child(5), #burn td:nth-child(5) { display:none; }
+  #burn:not(.rowcards) th:nth-child(4), #burn:not(.rowcards) td:nth-child(4),
+  #burn:not(.rowcards) th:nth-child(5), #burn:not(.rowcards) td:nth-child(5) { display:none; }
 }
 """
 
