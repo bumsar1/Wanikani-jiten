@@ -89,7 +89,8 @@ AUTH_CSS = """
 /* Shown only while a page is genuinely slow to arrive. It fades in after
    600ms - past every ordinary load, which arrive in under a hundred - and
    leaves as soon as the document finishes parsing. */
-.splash { position:fixed; inset:0; z-index:300; display:flex;
+.splash { position:fixed; top:0; left:0; right:0; bottom:0; z-index:300;
+  display:flex;
   flex-direction:column; align-items:center; justify-content:center; gap:var(--s4);
   background:var(--bg); opacity:0; pointer-events:none;
   transition:opacity 220ms var(--ease); }
@@ -915,6 +916,12 @@ SPLASH = """<script>
     shown = Date.now();
     made = document.createElement('div');
     made.className = 'splash on';
+    // Start below the top bar rather than over it. The bar is painted in the
+    // first forty milliseconds and is the same bar on the page that follows,
+    // so covering it up just to uncover it again is a flicker for nothing.
+    // Measured rather than assumed, because it wraps on a narrow window.
+    var bar = document.querySelector('.topbar');
+    if (bar) made.style.top = Math.round(bar.getBoundingClientRect().bottom) + 'px';
     made.innerHTML =
       '<video muted loop playsinline autoplay disablepictureinpicture></video>' +
       '<p>Writing out all your kanji\u2026</p>';
