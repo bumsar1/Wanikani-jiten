@@ -95,12 +95,7 @@ AUTH_CSS = """
   transition:opacity 220ms var(--ease); }
 .splash.on { opacity:1; }
 .splash.gone { opacity:0; }
-/* Something in the shape of the page while the rest of it is being worked
-   out, so the first 300ms are not a blank screen either. */
-.preskel { padding:var(--s5) 0 0; }
-.preskel .skel i:nth-child(1) { height:44px; }
-.preskel .skel i:nth-child(2) { height:120px; width:100%; }
-.preskel .skel i:nth-child(3) { height:80px; width:100%; }
+.splash video { pointer-events:none; }
 .splash video { width:min(420px,72vw); border-radius:var(--r-panel);
   border:1px solid var(--line); box-shadow:var(--lift); background:var(--raise); }
 .splash p { margin:0; color:var(--muted); font-size:15px; letter-spacing:.01em; }
@@ -907,46 +902,42 @@ LOAD_JS = """
 """
 
 
-SPLASH = '''<div class="preskel" id="preskel">
-  <div class="skel"><i></i><i></i><i></i></div>
-</div>
-<div class="splash" id="splash">
-  <video muted loop playsinline preload="none"></video>
-  <p>Writing out all your kanji&hellip;</p>
-</div>
-<script>
+SPLASH = """<script>
 (function(){
-  var s = document.getElementById('splash');
-  var sk = document.getElementById('preskel');
-  if (!s) return;
-  var v = s.querySelector('video'), shown = 0;
+  // Nothing is in the document to begin with. A page that arrives in ninety
+  // milliseconds - which is nearly all of them - should not have a loading
+  // screen and three grey bars in its markup at all, waiting to be taken out
+  // again; the last version flashed both on every click.
+  var main = document.currentScript.parentNode;
+  var made = null, shown = 0;
 
-  // Late enough that an ordinary load never sees it, early enough that a slow
-  // one is not a blank screen for most of its wait.
   var t = setTimeout(function(){
     shown = Date.now();
-    s.classList.add('on');
+    made = document.createElement('div');
+    made.className = 'splash on';
+    made.innerHTML =
+      '<video muted loop playsinline autoplay disablepictureinpicture></video>' +
+      '<p>Writing out all your kanji\u2026</p>';
+    var v = made.querySelector('video');
     v.innerHTML = '<source src="/asset/deathnote.webm" type="video/webm">'
                 + '<source src="/asset/deathnote.mp4" type="video/mp4">';
-    v.load();
+    document.body.appendChild(made);
     var p = v.play();
     if (p && p.catch) p.catch(function(){});
   }, 300);
 
   addEventListener('DOMContentLoaded', function(){
     clearTimeout(t);
-    if (sk) sk.remove();
-    // Once it is up it stays up for a moment. Appearing and leaving in the
-    // same breath is worse than never appearing at all - which is what the
-    // 600ms threshold was doing.
-    var left = shown ? Math.max(0, 900 - (Date.now() - shown)) : 0;
+    if (!made) return;
+    // Once it is up it stays a moment: appearing and leaving in the same
+    // breath is worse than never appearing.
     setTimeout(function(){
-      s.classList.add('gone');
-      setTimeout(function(){ s.remove(); }, 280);
-    }, left);
+      made.classList.add('gone');
+      setTimeout(function(){ made.remove(); }, 280);
+    }, Math.max(0, 900 - (Date.now() - shown)));
   });
 })();
-</script>'''
+</script>"""
 
 
 def prelude(title: str, user=None, page: str = "") -> str:
