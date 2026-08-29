@@ -68,8 +68,7 @@ AUTH_CSS = """
 .tierbar { height:4px; border-radius:var(--r-pill); background:var(--line-soft);
   margin:9px 0 0; max-width:280px; overflow:hidden; }
 .tierbar i { display:block; height:100%; border-radius:var(--r-pill);
-  background:var(--accent); animation:grow 600ms var(--ease) both;
-  transform-origin:left; }
+  background:var(--accent); transform-origin:left; }
 /* What is next, and when at the speed you actually go. */
 .tier .next { display:flex; align-items:center; gap:var(--s3); margin-left:auto;
   padding-left:var(--s4); border-left:1px solid var(--line); align-self:stretch; }
@@ -119,8 +118,7 @@ AUTH_CSS = """
 .burned { display:flex; align-items:flex-start; gap:var(--s3); flex-wrap:wrap;
   margin:0 0 var(--s3); padding:var(--s3) var(--s4);
   border:1px solid var(--line); border-radius:var(--r-panel);
-  background:var(--raise); box-shadow:var(--shadow);
-  animation:settle 380ms var(--ease) both; }
+  background:var(--raise); box-shadow:var(--shadow); }
 .burned .say { flex:1 1 320px; min-width:0; }
 .burned h3 { margin:0; font-size:18px; letter-spacing:-.01em; }
 .burned .sub { margin:2px 0 0; }
@@ -139,15 +137,12 @@ AUTH_CSS = """
 .heat .grid { display:flex; gap:3px; min-width:640px; }
 .heat .wk { display:grid; grid-template-rows:repeat(7,1fr); gap:3px; flex:1 1 0; }
 .heat i { display:block; aspect-ratio:1; border-radius:2px;
-  background:var(--line-soft); animation:settle 300ms var(--ease) both; }
+  background:var(--line-soft); }
 .heat i.pad { background:none; }
 .heat i.d1 { background:color-mix(in oklab, var(--accent) 28%, var(--line-soft)); }
 .heat i.d2 { background:color-mix(in oklab, var(--accent) 52%, var(--line-soft)); }
 .heat i.d3 { background:color-mix(in oklab, var(--accent) 76%, var(--line-soft)); }
 .heat i.d4 { background:var(--accent); }
-.heat .wk:nth-child(4n) i { animation-delay:40ms; }
-.heat .wk:nth-child(4n+2) i { animation-delay:80ms; }
-.heat .wk:nth-child(4n+3) i { animation-delay:120ms; }
 .heat i:not(.pad) { cursor:default; }
 .heat i.lit { outline:2px solid var(--fg); outline-offset:1px; border-radius:3px; }
 /* The line above the grid is the readout, so the eye does not have to leave
@@ -168,17 +163,13 @@ AUTH_CSS = """
 .burncal .bar i { display:block; width:100%; border-radius:3px 3px 0 0;
   background:var(--accent); opacity:.85;
   transition:opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
-  transform-origin:bottom; animation:grow 420ms var(--ease) both; }
+  transform-origin:bottom; }
 .burncal .bar.we i { background:var(--good); }
 .burncal .bar.none i { background:var(--line); }
 .burncal .bar:hover i { opacity:1; transform:scaleY(1.04); }
 .burncal .bar em { font-style:normal; font-size:10px; color:var(--faint);
   margin-top:4px; font-variant-numeric:tabular-nums; }
 @keyframes grow { from { transform:scaleY(0); } }
-.burncal .bar:nth-child(n+2) i { animation-delay:20ms; }
-.burncal .bar:nth-child(n+8) i { animation-delay:60ms; }
-.burncal .bar:nth-child(n+15) i { animation-delay:100ms; }
-.burncal .bar:nth-child(n+22) i { animation-delay:140ms; }
 
 /* The level-up. Loud by the standards of this page, which is a low bar, and
    gone again at the next refresh. */
@@ -186,8 +177,7 @@ AUTH_CSS = """
   overflow:hidden; margin:0 0 var(--s3); padding:var(--s3) var(--s4);
   border:1px solid var(--accent); border-radius:var(--r-panel);
   background:linear-gradient(100deg,var(--accent-soft),var(--raise) 60%);
-  box-shadow:0 12px 40px -22px var(--accent);
-  animation:settle 420ms var(--ease) both; }
+  box-shadow:0 12px 40px -22px var(--accent); }
 .levelup .crab { image-rendering:pixelated; flex:none; width:112px; height:72px;
   animation:hop 900ms var(--ease) 220ms 1; }
 @keyframes hop {
@@ -732,11 +722,17 @@ BURN_JS = """
 # is a wait and not a hang. It only appears after 150ms, so a fast page never
 # flashes it.
 LOAD_CSS = """
-.loadrail { position:fixed; top:0; left:0; right:0; height:2px; z-index:200;
-  pointer-events:none; opacity:0; transition:opacity 160ms linear; }
+/* The rail used to run across the top of the window on every click, which is
+   a lot of movement for pages that arrive in under a tenth of a second. It
+   belongs to the waiting, so it lives in the waiting screen now: under the
+   clip, the width of it. */
+.loadrail { position:relative; width:min(420px,72vw); height:3px;
+  margin-top:2px; pointer-events:none; opacity:0;
+  transition:opacity 160ms linear; overflow:visible;
+  background:var(--line); border-radius:var(--r-pill); }
 .loadrail.on { opacity:1; }
 .loadrail i { display:block; height:100%; width:0; background:var(--accent);
-  box-shadow:0 0 12px var(--accent); }
+  border-radius:var(--r-pill); box-shadow:0 0 12px var(--accent); }
 .loadrail b { position:absolute; top:2px; left:0; width:70px; height:45px;
   margin-left:-38px;
   background:url("/asset/crabigator-run.png") 0 0 / 560px 45px;
@@ -787,14 +783,18 @@ html[data-dir="back"]::view-transition-new(root) { animation:inleft 320ms var(--
 /* Arriving under its own steam, for browsers that do not do the above and for
    the first load of the session: the sections come up in order, quickly enough
    that it reads as the page settling rather than as a performance. */
-main > *:not(.topbar):not(nav) { animation:settle 380ms var(--ease) both; }
-main > *:nth-child(2)  { animation-delay:20ms; }
-main > *:nth-child(3)  { animation-delay:45ms; }
-main > *:nth-child(4)  { animation-delay:70ms; }
-main > *:nth-child(5)  { animation-delay:95ms; }
-main > *:nth-child(6)  { animation-delay:115ms; }
-main > *:nth-child(n+7) { animation-delay:135ms; }
-@keyframes settle { from { opacity:0; transform:translateY(12px); } }
+/* One movement per page, and a short one. Everything used to arrive twice:
+   the section rose, and then the four hundred squares inside it rose too. */
+main > *:not(.topbar):not(nav) { animation:settle 260ms var(--ease) both; }
+main > *:nth-child(2)  { animation-delay:15ms; }
+main > *:nth-child(3)  { animation-delay:30ms; }
+main > *:nth-child(4)  { animation-delay:45ms; }
+main > *:nth-child(n+5) { animation-delay:60ms; }
+@keyframes settle { from { opacity:0; transform:translateY(6px); } }
+
+/* A page the browser has already cross-faded does not need to arrive a second
+   time under its own power. */
+html[data-vt="1"] main > * { animation:none; }
 
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root), ::view-transition-new(root),
@@ -804,76 +804,12 @@ main > *:nth-child(n+7) { animation-delay:135ms; }
 
 LOAD_JS = """
 (function(){
-  const rail = document.createElement('div');
-  rail.className = 'loadrail';
-  rail.innerHTML = '<i></i><b></b>';
-  document.body.appendChild(rail);
-  const CROSS = 900;          // one run across, in ms - keep in step with the CSS
-  const FLAG = 'wkjiten:navigating';
-  let timer = null, shown = 0;
-
-  function note(obj){
-    try { sessionStorage.setItem(FLAG, JSON.stringify(obj)); } catch (e) {}
-  }
-  function show(at){
-    rail.classList.add('on');
-    shown = performance.now();
-    if (at) note({t: Date.now(), shown: at});
-  }
-  function start(){
-    if (timer) return;
-    // The loader lives on the page being left, and that page is destroyed the
-    // moment the next one commits - locally that is under a millisecond, so he
-    // never got off the mark. Hand him over instead: the click leaves a note,
-    // and the arriving page picks it up.
-    note({t: Date.now(), shown: 0});
-    timer = setTimeout(() => show(Date.now()), 80);
-  }
-  function stop(){
-    clearTimeout(timer); timer = null;
-    rail.classList.remove('on');
-  }
-
-  // Arriving from a click of our own: show it now, and keep it up until the
-  // page has finished loading AND he has had time to cross once. Anything
-  // else - a typed URL, a fresh tab - starts quiet.
-  let handover = null;
-  try {
-    handover = JSON.parse(sessionStorage.getItem(FLAG) || 'null');
-    sessionStorage.removeItem(FLAG);
-  } catch (e) {}
-  if (handover && Date.now() - handover.t < 10000){
-    // If he was already running when the page was left, pick him up mid-stride
-    // rather than putting him back on the start line. A negative delay is the
-    // animation saying "assume this much has already happened", which is what
-    // stops him crossing twice for one click.
-    let carried = 0;
-    if (handover.shown){
-      carried = (Date.now() - handover.shown) % CROSS;
-      for (const el of [rail.querySelector('i'), rail.querySelector('b')])
-        el.style.animationDelay = `-${carried}ms` + (el.tagName === 'B' ? `, -${carried}ms` : '');
-    }
-    show(0);
-    const done = () => {
-      // What is left of *his* lap, not a fresh one - he is already part way in.
-      const left = Math.max(0, (CROSS - carried) - (performance.now() - shown));
-      setTimeout(stop, left);
-    };
-    if (document.readyState === 'complete') done();
-    else addEventListener('load', done);
-  }
-
-  addEventListener('click', e => {
-    if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const a = e.target.closest('a[href]');
-    if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
-    const url = new URL(a.href, location.href);
-    if (url.origin !== location.origin) return;
-    if (url.pathname === location.pathname && url.hash) return;   // in-page jump
-    start();
-  });
-  addEventListener('submit', e => { if (!e.defaultPrevented) start(); });
-  // Which way the tabs run, so a page can travel in the direction you moved.
+  // The rail is gone from here. It lives in the loading screen now, which only
+  // appears when there is a wait worth covering - what was left of this file
+  // was a running crocodile on every click of a page that answers in 90ms.
+  //
+  // What stays is the direction a page travels in, which the browser needs
+  // before it starts the transition between two documents.
   const ORDER = ['/', '/levels', '/kanji', '/browse'];
   const at = path => ORDER.indexOf(path);
   const DIR = 'wkjiten:from';
@@ -888,17 +824,13 @@ LOAD_JS = """
   });
   addEventListener('pagereveal', e => {
     if (!e.viewTransition) return;
+    // The browser is already carrying this page in; the sections should not
+    // also walk in under their own power.
+    document.documentElement.dataset.vt = '1';
     let from = -1;
     try { from = Number(sessionStorage.getItem(DIR)); } catch (_){}
     face(Number.isFinite(from) ? from : -1, at(location.pathname));
   });
-
-  // A restore from the back/forward cache shows the old page instantly, so the
-  // rail must not be left running on top of it. Only that case: pageshow fires
-  // on every load, and an unconditional stop here cancelled the handover in
-  // the same breath that started it.
-  addEventListener('pageshow', e => { if (e.persisted) stop(); });
-  addEventListener('pagehide', stop);
 })();
 """
 
@@ -924,7 +856,8 @@ SPLASH = """<script>
     if (bar) made.style.top = Math.round(bar.getBoundingClientRect().bottom) + 'px';
     made.innerHTML =
       '<video muted loop playsinline autoplay disablepictureinpicture></video>' +
-      '<p>Writing out all your kanji\u2026</p>';
+      '<p>Writing out all your kanji\u2026</p>' +
+      '<div class="loadrail on"><i></i><b></b></div>';
     var v = made.querySelector('video');
     v.innerHTML = '<source src="/asset/deathnote.webm" type="video/webm">'
                 + '<source src="/asset/deathnote.mp4" type="video/mp4">';

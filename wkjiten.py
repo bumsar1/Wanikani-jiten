@@ -3739,7 +3739,12 @@ GRID_JS = """
   ];
   const band = s => s >= 9 ? 5 : s >= 8 ? 4 : s >= 7 ? 3 : s >= 5 ? 2 : s >= 1 ? 1 : 0;
   const max = Math.max(1, ...G.filter(k => !k.k).map(k => k.n));
-  let mode = 'srs', scope = 'mine', drawn = false, wave = true;
+  // The sweep is a welcome, not a habit: once per session, so the twentieth
+  // visit to this page is simply the grid, already there.
+  let seen = false;
+  try { seen = sessionStorage.getItem('wkjiten:grid') === '1'; } catch (e) {}
+  let mode = 'srs', scope = 'mine', drawn = false, wave = !seen;
+  try { sessionStorage.setItem('wkjiten:grid', '1'); } catch (e) {}
 
   // Resolve the themed colours once and blend numerically. Leaving 2,000-odd
   // color-mix() calls in inline styles makes every style recalculation on the
