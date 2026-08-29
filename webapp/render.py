@@ -78,7 +78,6 @@ AUTH_CSS = """
 .tier .next .lbl { display:block; font-size:10px; font-weight:650;
   letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
 .tier .next .sub { display:block; font-size:12.5px; }
-@media (max-width:700px) { .tier .next { display:none; } }
 
 .tier .verse { margin:7px 0 0; font-size:15px; color:var(--fg); max-width:52ch;
   font-style:italic; letter-spacing:-.005em; }
@@ -195,7 +194,6 @@ AUTH_CSS = """
   max-width:46ch; }
 .levelup .tierart { width:150px; height:100px; object-fit:cover; flex:none;
   border-radius:var(--r-box); margin-left:auto; }
-@media (max-width:700px) { .levelup .tierart { display:none; } }
 
 /* What is behind a delta. */
 .card button.d { font:inherit; font-size:12.5px; font-weight:650; padding:0;
@@ -305,6 +303,15 @@ MOBILE_CSS = """
   main > nav a { white-space:nowrap; padding:7px 12px; font-size:13px; }
   main > h2 { scroll-margin-top:54px; }
 
+  /* Gathered here from the sheets they used to be scattered across. */
+  .tier .next { display:none; }
+  .levelup .tierart { display:none; }
+  #burn { min-width:0; font-size:13px; }
+  #burn th, #burn td { padding-left:9px; padding-right:9px; }
+  /* Cards show every column; only the table shape has to give two up. */
+  #burn:not(.rowcards) th:nth-child(4), #burn:not(.rowcards) td:nth-child(4),
+  #burn:not(.rowcards) th:nth-child(5), #burn:not(.rowcards) td:nth-child(5) { display:none; }
+
   /* A seven-column table in a 345px window is a row you read by dragging it
      sideways past its own title. Those become cards - one per row, the title
      across the top, the figures in pairs underneath, each carrying the column
@@ -340,7 +347,6 @@ MOBILE_CSS = """
     box-shadow:none; border-radius:0; }
 }
 """
-
 
 
 MOBILE_JS = """
@@ -447,12 +453,7 @@ BURN_CSS = """
 #burn tr.show td:nth-child(2) span, #burn tr.show td:nth-child(3) span {
   filter:none; opacity:1; user-select:auto; }
 
-@media (max-width:700px) {
-  #burn { min-width:0; font-size:13px; }
-  #burn th, #burn td { padding-left:9px; padding-right:9px; }
-  #burn:not(.rowcards) th:nth-child(4), #burn:not(.rowcards) td:nth-child(4),
-  #burn:not(.rowcards) th:nth-child(5), #burn:not(.rowcards) td:nth-child(5) { display:none; }
-}
+
 """
 
 DN_JS = """
@@ -2282,9 +2283,16 @@ def _bundle(*parts: str) -> str:
     return "\n".join(parts)
 
 
-CSS_BUNDLE = _bundle(w.REPORT_CSS, AUTH_CSS, LOAD_CSS, MOBILE_CSS, BURN_CSS,
-                     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
-                     w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS)
+# The two phone stylesheets go last, after every desktop rule they might have
+# to overrule - MOBILE_CSS for what only the webapp has (the row cards), and
+# w.PHONE_CSS for what the offline report shares. Nothing follows them, so an
+# unclosed block in either has nothing left to swallow. check_css makes sure
+# of it anyway: the whole bundle is validated before it is ever served.
+CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
+    w.REPORT_CSS, AUTH_CSS, LOAD_CSS, BURN_CSS,
+    TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
+    w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS,
+    w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.
 CORE_JS = _bundle(LOAD_JS, MOBILE_JS, w.SORT_JS)

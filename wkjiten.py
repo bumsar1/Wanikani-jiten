@@ -2844,25 +2844,6 @@ tr.gone { opacity:.42; }
 .empty { color:var(--faint); font-style:italic; padding:18px; margin:0; }
 footer { color:var(--faint); font-size:12.5px; margin-top:56px;
   border-top:1px solid var(--line); padding-top:16px; }
-@media (max-width:640px) {
-  main { padding:0 14px; }
-  .hero { padding:30px 0 20px; gap:12px; }
-  .mark { width:40px; height:40px; border-radius:10px; }
-  h2 { margin-top:38px; }
-}
-@media (max-width:700px) {
-  /* Same reason: a 13px checkbox is a coin toss with a thumb. */
-  input[type=checkbox], input[type=radio] { width:18px; height:18px; }
-  .tagmenu label, .genres label { padding:5px 0; }
-  /* A phone has no room to spare, and min-width:540px was a desktop promise.
-     Let a table be as wide as its content needs and no wider; the ones that
-     still cannot fit become cards (the webapp does that part). */
-  table { font-size:13.5px; min-width:0; }
-  /* 9em of first column is a third of the screen before a number appears. */
-  table.tight td:first-child:not(.num) { min-width:0; }
-  table.grouped, table.nt { min-width:0; table-layout:auto; }
-  td, th { padding:7px 9px; }
-}
 """
 
 
@@ -3998,7 +3979,6 @@ GRID_CSS = """
 .gridfind span { font-size:12.5px; color:var(--muted);
   font-variant-numeric:tabular-nums; }
 
-}
 @keyframes tilein {
   from { opacity:0; transform:translateY(9px) scale(.86); }
   60%  { opacity:1; }
@@ -4007,15 +3987,6 @@ GRID_CSS = """
   text-align:center; color:#fff; cursor:pointer; user-select:none;
   text-shadow:0 1px 2px rgba(0,0,0,.35); }
 
-@media (max-width:700px) {
-  /* A tile is a button on a phone, and a 27px button is a button you miss.
-     Fewer per row is the price, and the grid was always going to be tall.
-     This sits after .k rather than with the other phone rules because it has
-     to win on order - both selectors weigh the same. */
-  .k { width:32px; height:32px; line-height:32px; font-size:19px;
-       border-radius:7px; }
-  .gridfind { flex-wrap:wrap; }
-  .gridfind input { max-width:none; }
 .k:hover { outline:2px solid var(--fg); outline-offset:1px; }
 /* Sticks to the foot of the window while you scroll the grid: the answer to
    "what is this one" should not be somewhere else by the time you have found
@@ -4464,11 +4435,6 @@ tr.rowin { animation:rowin 300ms var(--ease) both; }
 .tagfoot button.go { padding:7px 16px; }
 /* Narrow screens: hang the menu off the whole row rather than off the button,
    which otherwise pushes 296px of menu past the right edge. */
-@media (max-width:640px) {
-  .controls { position:relative; }
-  .tagpick { position:static; }
-  .tagmenu { left:0; right:0; width:auto; max-width:none; }
-}
 /* buttons live in REPORT_CSS now - every page has them, not just this panel */
 td.acts { white-space:nowrap; text-align:right; }
 td.acts button, td.acts select { margin-left:5px; }
@@ -4480,6 +4446,77 @@ select.setlist.done { color:var(--good); border-color:var(--good); }
 #detail:not(:empty) { margin-top:34px; padding-top:6px;
   border-top:2px solid var(--accent); }
 """
+
+
+# Every rule that applies only to a phone lives here and nowhere else, and this
+# is appended LAST to whatever stylesheet is built from these constants. Two
+# things follow, and both of them are the point: nothing above can become
+# phone-only by accident, and nothing here needs to be placed "after .k" to
+# win an argument with it - being last is what wins. check_css refuses to
+# serve the failure that taught us this.
+PHONE_CSS = """
+@media (max-width:700px) {
+  /* A tile is a button on a phone, and a 27px button is a button you miss.
+     Fewer per row is the price, and the grid was always going to be tall.
+     */
+  .k { width:32px; height:32px; line-height:32px; font-size:19px;
+       border-radius:7px; }
+  .gridfind { flex-wrap:wrap; }
+  .gridfind input { max-width:none; }
+  /* Same reason: a 13px checkbox is a coin toss with a thumb. */
+  input[type=checkbox], input[type=radio] { width:18px; height:18px; }
+  .tagmenu label, .genres label { padding:5px 0; }
+  /* A phone has no room to spare, and min-width:540px was a desktop promise.
+     Let a table be as wide as its content needs and no wider; the ones that
+     still cannot fit become cards (the webapp does that part). */
+  table { font-size:13.5px; min-width:0; }
+  /* 9em of first column is a third of the screen before a number appears. */
+  table.tight td:first-child:not(.num) { min-width:0; }
+  table.grouped, table.nt { min-width:0; table-layout:auto; }
+  td, th { padding:7px 9px; }
+}
+
+/* Narrower still. These two were the original phone rules, written when they
+   were the only ones; they live here now so that "what changes on a phone" is
+   one question with one answer. */
+@media (max-width:640px) {
+  main { padding:0 14px; }
+  .hero { padding:30px 0 20px; gap:12px; }
+  .mark { width:40px; height:40px; border-radius:10px; }
+  h2 { margin-top:38px; }
+  .controls { position:relative; }
+  .tagpick { position:static; }
+  .tagmenu { left:0; right:0; width:auto; max-width:none; }
+}
+"""
+
+
+def check_css(name, css):
+    """Refuse to serve a stylesheet whose braces do not nest.
+
+    An unclosed @media block does not fail loudly. It quietly pulls every rule
+    after it inside itself, so half the site turns phone-only and the other
+    half looks untouched - which is a slow and confusing way to find out. One
+    missing brace once took the whole browse page with it.
+    """
+    body = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    body = re.sub(r"\"[^\"\n]*\"|'[^'\n]*'", "", body)
+    depth, line = 0, 1
+    for ch in body:
+        if ch == "\n":
+            line += 1
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                raise RuntimeError(
+                    f"{name}: closing brace with nothing open, line {line}")
+    if depth:
+        raise RuntimeError(
+            f"{name}: {depth} block(s) never closed - every rule after the "
+            f"last one is trapped inside it")
+    return css
 
 
 def build_report_html(args, key, cache, known, interactive: bool = False,
@@ -4870,6 +4907,9 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
         parts[parts.index(NAV_SLOT)] = (
             "<nav>" + "".join(f'<a href="#{s}">{esc(t)}</a>' for s, t in links)
             + "</nav>")
+        # PHONE_CSS goes on last, always, so no phone rule has to fight for
+        # position and no unclosed one can swallow a rule that follows it.
+        css += f"<style>{check_css('PHONE_CSS', PHONE_CSS)}</style>"
         return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 + favicon_link() + css + "</head><body>"
