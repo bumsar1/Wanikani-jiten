@@ -18,7 +18,7 @@ import urllib.parse
 import zipfile
 from collections import Counter
 
-from flask import (Flask, abort, redirect, request, session, url_for,
+from flask import (Flask, abort, redirect, request, session, stream_with_context, url_for,
                    Response, jsonify)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -417,6 +417,17 @@ def _page(which: str):
                 note="WaniKani did not answer in time. If the terminal is still "
                      "listing pages, give it a moment and reload; otherwise "
                      "check the token."))
+    # From here the work takes long enough to be worth saying something about,
+    # so the head goes out now and the rest follows when it is ready. The
+    # browser paints the top bar immediately, and if the wait passes 400ms it
+    # fades up a screen that says what is happening.
+    title = f'{user["username"]} - {render.PAGES[which][0].lower()}'
+    return Response(stream_with_context(_page_body(user, creds, cache, which, title)),
+                    mimetype="text/html")
+
+
+def _page_body(user, creds, cache, which: str, title: str):
+    yield render.prelude(title, user, which)
     age = store.snapshot_age_hours(user["id"]) or 0
     if age > STALE_HOURS:
         # The upload rides along, so the jiten column does not quietly fall
@@ -536,8 +547,9 @@ def _page(which: str):
             extras["nihongo_totals"] = nt["totals"]
             extras["nihongo_unmeasured"] = nt["unmeasured"]
 
-    return render.dashboard(user, cache, known, decks,
-                            store.get_history(user["id"]), extras, page=which)
+    yield render.dashboard(user, cache, known, decks,
+                           store.get_history(user["id"]), extras, page=which,
+                           partial=True)
 
 
 @app.get("/together")

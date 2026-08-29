@@ -86,6 +86,23 @@ AUTH_CSS = """
 .tier .verse::before { content:"“"; color:var(--accent); margin-right:2px; }
 .tier .verse::after { content:"”"; color:var(--accent); margin-left:1px; }
 
+/* Shown only while a page is genuinely slow to arrive. It fades in after
+   600ms - past every ordinary load, which arrive in under a hundred - and
+   leaves as soon as the document finishes parsing. */
+.splash { position:fixed; inset:0; z-index:300; display:flex;
+  flex-direction:column; align-items:center; justify-content:center; gap:var(--s4);
+  background:var(--bg); opacity:0;
+  animation:splashin 260ms var(--ease) 600ms both; }
+.splash.gone { animation:splashout 240ms var(--ease) both; pointer-events:none; }
+.splash video { width:min(420px,72vw); border-radius:var(--r-panel);
+  border:1px solid var(--line); box-shadow:var(--lift); background:var(--raise); }
+.splash p { margin:0; color:var(--muted); font-size:15px; letter-spacing:.01em; }
+@keyframes splashin { from { opacity:0; } to { opacity:1; } }
+@keyframes splashout { from { opacity:1; } to { opacity:0; } }
+@media (prefers-reduced-motion: reduce) {
+  .splash video { display:none; }
+}
+
 /* One sentence with the three numbers that were already on the page, standing
    next to each other for once. */
 .bet { margin:0 0 var(--s3); padding:var(--s3) var(--s4);
@@ -416,6 +433,19 @@ BURN_CSS = """
 /* Six columns of this needed dragging sideways on a phone. Type and level are
    the two you would not have opened the list for, so they go and the rest
    fits. */
+/* The list is a list of things you are about to be tested on, so it should not
+   hand you the answer on the way past. Reading and meaning are covered until
+   you ask for them - hover, or tap on a phone, one row at a time. */
+#burn td:nth-child(2), #burn td:nth-child(3) { position:relative; }
+#burn td:nth-child(2) span, #burn td:nth-child(3) span {
+  display:inline-block; filter:blur(5px); opacity:.75;
+  transition:filter var(--t-base) var(--ease), opacity var(--t-base) var(--ease);
+  cursor:default; user-select:none; }
+#burn tr:hover td:nth-child(2) span, #burn tr:hover td:nth-child(3) span,
+#burn tr:focus-within td:nth-child(2) span, #burn tr:focus-within td:nth-child(3) span,
+#burn tr.show td:nth-child(2) span, #burn tr.show td:nth-child(3) span {
+  filter:none; opacity:1; user-select:auto; }
+
 @media (max-width:700px) {
   #burn { min-width:0; font-size:13px; }
   #burn th, #burn td { padding-left:9px; padding-right:9px; }
@@ -670,6 +700,14 @@ BURN_JS = """
     back.disabled = page === 0;
     fwd.disabled = page >= pages - 1;
   }
+  // Hover is not a thing on a phone, so a tap uncovers a row - and taps it
+  // again to put it back, in case somebody is reading over your shoulder.
+  tbl.addEventListener('click', e => {
+    const tr = e.target.closest('tr');
+    if (tr && tr.rowIndex > 0 && !e.target.closest('a, button'))
+      tr.classList.toggle('show');
+  });
+
   back.onclick = () => { page--; draw(); };
   fwd.onclick = () => { page++; draw(); };
   // Sorting re-appends every row, so the page has to be redrawn over the new
@@ -862,9 +900,61 @@ LOAD_JS = """
 """
 
 
+SPLASH = '''<div class="splash" id="splash">
+  <video muted loop playsinline preload="none"></video>
+  <p>Writing out all your kanji&hellip;</p>
+</div>
+<script>
+(function(){
+  var s = document.getElementById('splash');
+  if (!s) return;
+  var v = s.querySelector('video');
+  // The clip is 212kB and most loads never see this at all, so it is not
+  // fetched until the page has already been slow for six hundred
+  // milliseconds - the same threshold that fades the screen in.
+  var t = setTimeout(function(){
+    v.innerHTML = '<source src="/asset/deathnote.webm" type="video/webm">'
+                + '<source src="/asset/deathnote.mp4" type="video/mp4">';
+    v.load();
+    var p = v.play();
+    if (p && p.catch) p.catch(function(){});
+  }, 600);
+  addEventListener('DOMContentLoaded', function(){
+    clearTimeout(t);
+    s.classList.add('gone');
+    setTimeout(function(){ s.remove(); }, 260);
+  });
+})();
+</script>'''
+
+
+def prelude(title: str, user=None, page: str = "") -> str:
+    """Everything the browser can paint before the answer exists.
+
+    A page that has to fetch, parse and analyse before it can say anything
+    leaves the browser on the last screen, or on nothing at all, for as long as
+    that takes. This half goes out first - it is the same head and the same top
+    bar either way - so there is something on the screen while the rest is
+    worked out.
+    """
+    return _skeleton_head(title, user, page) + SPLASH
+
+
 def shell(title: str, body: str, *, user=None, extra_css: str = "",
-          scripts: str = "", page: str = "") -> str:
-    """Common HTML skeleton. Same tokens as the local dashboard."""
+          scripts: str = "", page: str = "", partial: bool = False) -> str:
+    """Common HTML skeleton. Same tokens as the local dashboard.
+
+    With partial=True this returns only what follows the top bar, for the
+    streamed pages whose head went out before the work started.
+    """
+    if partial:
+        return (f'{body}</main>'
+                f'<script src="{CORE_URL}" defer></script>{scripts}</body></html>')
+    return (_skeleton_head(title, user, page) + body + '</main>'
+            + f'<script src="{CORE_URL}" defer></script>{scripts}</body></html>')
+
+
+def _skeleton_head(title: str, user=None, page: str = "") -> str:
     bar = ""
     if user:
         tabs = [("/", "today", "today"), ("/levels", "levels", "levels"),
@@ -882,9 +972,7 @@ def shell(title: str, body: str, *, user=None, extra_css: str = "",
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title>{w.favicon_link(ICON)}'
             f'<link rel="stylesheet" href="{CSS_URL}">'
-            f'{extra_css}</head><body>'
-            f'<main>{bar}{body}</main>'
-            f'<script src="{CORE_URL}" defer></script>{scripts}</body></html>')
+            f'</head><body><main>{bar}')
 
 
 def login_page(error: str = "", note: str = "") -> str:
@@ -1832,7 +1920,8 @@ PAGES = {
 }
 
 
-def dashboard(user, cache, known, decks, history, extras, page: str = "today") -> str:
+def dashboard(user, cache, known, decks, history, extras, page: str = "today",
+              partial: bool = False) -> str:
     """decks is a list of (deck dict, analysis dict) for the user's titles."""
     lvl = cache.get("level") or 0
     subjects, assignments = cache["subjects"], cache["assignments"]
@@ -2119,8 +2208,9 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
                    + urllib.parse.quote(s.get("slug") or ch))
             h.append(f'<tr><td class="kanji"><a href="{url}" target="_blank"'
                      f' rel="noopener">{esc(ch)}</a></td>'
-                     f'<td>{esc("、".join(s.get("readings") or []))}</td>'
-                     f'<td>{esc(s.get("meaning") or "")}</td><td>{kind}</td>'
+                     f'<td><span>{esc("、".join(s.get("readings") or []))}</span></td>'
+                     f'<td><span>{esc(s.get("meaning") or "")}</span></td>'
+                     f'<td>{kind}</td>'
                      f'<td class="num">{s["level"]}</td>'
                      f'<td data-sort="{t if t != float("inf") else 0:.0f}">'
                      f'{label}</td></tr>')
@@ -2197,7 +2287,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today") -
         data.append(f"const TAGS={json.dumps(extras.get('tags', []), ensure_ascii=False)};")
 
     title = f'{user["username"]} - {PAGES[page][0].lower()}'
-    return shell(title, body, user=user, page=page,
+    return shell(title, body, user=user, page=page, partial=partial,
                  scripts=f'<script>{"".join(data)}</script>' + DASH_TAG)
 
 

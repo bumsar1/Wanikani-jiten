@@ -3849,7 +3849,13 @@ GRID_JS = """
   // One delegated listener beats 2,000 closures.
   out.addEventListener('click', e => {
     const tile = e.target.closest('.k');
-    if (tile) show(tile.dataset.c);
+    if (!tile) return;
+    // Two thousand tiles look alike, and the one you just asked about should
+    // not be among the ones you have not.
+    const was = out.querySelector('.k.sel');
+    if (was) was.classList.remove('sel');
+    tile.classList.add('sel');
+    show(tile.dataset.c);
   });
   function pick(sel, set){
     document.querySelectorAll(sel).forEach(b => b.onclick = () => {
@@ -3923,6 +3929,7 @@ GRID_CSS = """
 /* Two thousand tiles landing at once is a slab; a diagonal makes it a grid
    being filled in. The delay per tile is set where the tile is built. */
 .k.in { animation:tilein 340ms var(--ease) both; }
+.k.sel { outline:2px solid var(--fg); outline-offset:2px; z-index:1; }
 @keyframes tilein {
   from { opacity:0; transform:translateY(9px) scale(.86); }
   60%  { opacity:1; }
@@ -3931,9 +3938,14 @@ GRID_CSS = """
   text-align:center; color:#fff; cursor:pointer; user-select:none;
   text-shadow:0 1px 2px rgba(0,0,0,.35); }
 .k:hover { outline:2px solid var(--fg); outline-offset:1px; }
+/* Sticks to the foot of the window while you scroll the grid: the answer to
+   "what is this one" should not be somewhere else by the time you have found
+   the next one you want to ask about. */
 .kdetail { display:flex; align-items:center; gap:16px; margin-top:12px;
   min-height:62px; border:1px solid var(--line);
-  border-radius:10px; padding:12px 16px; }
+  border-radius:10px; padding:12px 16px;
+  position:sticky; bottom:10px; z-index:5;
+  background:var(--raise); box-shadow:var(--lift); }
 .kdetail .big { font-size:40px; line-height:1; border:0; }
 .kdetail .big:hover { color:var(--accent); }
 .kdetail .rd { color:var(--accent); }
