@@ -1443,9 +1443,11 @@ def pile(r) -> str:
     """
     n = r.get("waiting")
     if n is None:
-        return ('<span class="chip none" title="This account has not been '
-                'refreshed since the waiting count was added. It appears after '
-                'their next refresh.">&mdash;</span>')
+        who = "Yours is being fetched now" if r.get("me") else (
+              "Theirs arrives the next time they open the site")
+        return ('<span class="chip none" title="This snapshot was taken before '
+                'the waiting count existed, so there is nothing to add up yet. '
+                f'{who} - reload in a moment.">&mdash;</span>')
     age = r.get("age") or 0
     if age < 1:
         return (f'<span class="chip" title="Reviews waiting, from a refresh '

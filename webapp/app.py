@@ -426,10 +426,27 @@ def _page(which: str):
                     mimetype="text/html")
 
 
+def needs_refresh(age_hours: float | None, cache: dict | None) -> bool:
+    """Whether to pull this account again before the next page.
+
+    Age is the usual reason. The other one is a snapshot taken before a field
+    existed: it can be twenty minutes old and still have nothing to say, and
+    waiting eighteen hours to find that out - or expecting someone to know to
+    press a button - is not a plan. The ten-minute floor is what keeps a fetch
+    that keeps failing from being retried on every single page load.
+    """
+    age = age_hours or 0
+    if age > STALE_HOURS:
+        return True
+    # Whether the key is there, not whether it is truthy: an account with
+    # nothing waiting stores an empty one, and asking the truthiness would
+    # refetch that account on every page load for ever.
+    return "reviews" not in (cache or {}) and age > 1 / 6
+
+
 def _page_body(user, creds, cache, which: str, title: str):
     yield render.prelude(title, user, which)
-    age = store.snapshot_age_hours(user["id"]) or 0
-    if age > STALE_HOURS:
+    if needs_refresh(store.snapshot_age_hours(user["id"]), cache):
         # The upload rides along, so the jiten column does not quietly fall
         # behind what WaniKani has taught you since. It only ever adds words.
         threading.Thread(target=refresh_wanikani,
@@ -633,6 +650,15 @@ def together():
                    True)
     if mine:
         race.append(mine)
+        # This is the page where a missing count shows as a dash, so it is the
+        # page that should go and get it rather than pointing at a button.
+        if mine["waiting"] is None and needs_refresh(mine["age"], {}):
+            creds = creds_of(user)
+            if creds.get("wk_token"):
+                threading.Thread(target=refresh_wanikani,
+                                 args=(user["id"], creds["wk_token"],
+                                       creds.get("jiten_key")),
+                                 daemon=True).start()
     race.sort(key=lambda r: (r["level"] + r["frac"]), reverse=True)
 
     vis = store.get_visibility(user["id"])
