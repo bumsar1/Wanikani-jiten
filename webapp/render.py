@@ -303,6 +303,19 @@ MOBILE_CSS = """
   main > nav a { white-space:nowrap; padding:7px 12px; font-size:13px; }
   main > h2 { scroll-margin-top:54px; }
 
+  /* The race, on a phone: the name goes above its own lane, so the track
+     keeps the width instead of losing a third of it to a column of names. */
+  .racegrid { grid-template-columns:1fr max-content; column-gap:10px; }
+  /* Six tier names do not fit 345px, and half a name is worse than none.
+     The bands stay as the rules behind the track; only the words go. */
+  .racegrid > .bands { grid-column:1 / -1; }
+  .racegrid > .bands span { display:none; }
+  .racegrid > .who { grid-column:1 / -1; padding:10px 0 0; font-size:12.5px; }
+  .racegrid > .lv { font-size:11.5px; }
+  .track { height:34px; }
+  /* The table has seven columns, so the row-card treatment takes it over on a
+     phone and every figure keeps its name. Nothing to hide here. */
+
   /* Gathered here from the sheets they used to be scattered across. */
   .tier .next { display:none; }
   .levelup .tierart { display:none; }
@@ -351,7 +364,12 @@ MOBILE_CSS = """
 
 MOBILE_JS = """
 (function(){
-  const NARROW = 700;
+  // Ask the stylesheet, do not measure. window.innerWidth grows when something
+  // on the page overflows, so a table too wide for the phone would push the
+  // measurement past the breakpoint and the code that turns it into cards -
+  // the very thing that would have stopped the overflow - never ran. matchMedia
+  // reads the same breakpoint the CSS does, so the two cannot disagree.
+  const PHONE = matchMedia('(max-width: 700px)');
   // Each cell keeps the name of the column it is about to lose, so the card
   // can say "jiten 64.9%" where the table said it with a heading far above.
   // Done here rather than in every table's generator: five tables, five
@@ -385,7 +403,7 @@ MOBILE_JS = """
     if (t.parentElement) t.parentElement.classList.remove('flat');
   }
   function sync(){
-    const narrow = innerWidth <= NARROW;
+    const narrow = PHONE.matches;
     for (const t of document.querySelectorAll('main table')){
       const is = t.classList.contains('rowcards');
       if (narrow && !is) card(t);
@@ -393,6 +411,7 @@ MOBILE_JS = """
     }
   }
   sync();
+  PHONE.addEventListener('change', sync);
   addEventListener('resize', sync);
   // Search results, word lists and the burn pager all arrive after the page
   // does, and a table that appears later still has to become cards.
@@ -1212,6 +1231,13 @@ def share_panel(visibility: str, token: str, base_url: str, username: str,
                 share_stats: bool = False) -> str:
     """One control, four levels, each containing the one before it."""
     checked = "checked" if share_stats else ""
+    # Private wins over the box, which is the safe way round but not the
+    # obvious one: tick it while set to "Just me" and nothing happens at all.
+    warn = ("" if visibility != "private" or not share_stats else
+            '<p class="warn">Your lists are set to <b>Just me</b>, so nothing '
+            'is shared and you will not appear on the race &mdash; not even '
+            'with this box ticked. Private wins. Pick who can see your lists '
+            'above to join in.</p>')
     opts = "".join(
         f'<option value="{v}"{" selected" if v == visibility else ""}>'
         f'{esc(w_labels[v])}</option>' for v in w_levels)
@@ -1252,9 +1278,13 @@ def share_panel(visibility: str, token: str, base_url: str, username: str,
             Include my WaniKani stats</label>
           <noscript><button>Save</button></noscript>
         </form>
+        {warn}
         <p class="sub" style="margin:10px 0 0">Shared: the title, whether you are
-        watching, planning or finished, and your coverage on it. Never your keys,
-        your reviews or anything from WaniKani.</p>
+        watching, planning or finished, and your coverage on it. Never your keys.
+        <b>With the box ticked</b>, also your WaniKani level and how far into it
+        you are, your lifetime answer total and accuracy, and how many items you
+        have passed this month &mdash; enough for the race on this page. Never
+        the items themselves, and never anything you have written.</p>
         {links}
       </div>"""
 
@@ -1307,11 +1337,164 @@ def profile_panel(profile: dict, user, choices=None) -> str:
       </div>"""
 
 
+
+RACE_CSS = """
+.race { border:1px solid var(--line); border-radius:var(--r-box);
+  background:var(--raise); padding:16px 18px 14px; margin:0 0 18px;
+  box-shadow:var(--shadow); }
+.race h3 { margin:0 0 3px; font-size:15px; letter-spacing:-.01em; }
+.race .sub { margin:0 0 16px; }
+
+/* Bands and lanes share one grid, so a tier label sits exactly above the
+   stretch of track it names. They were two grids once and the backdrop lied
+   about where everybody was standing. */
+.racegrid { display:grid; grid-template-columns:104px 1fr max-content;
+  column-gap:14px; align-items:center; }
+/* The finish. Without it the track just stops, and where it stops is the
+   whole distance the two of you are arguing about. */
+.racegrid > .bands { position:relative; }
+.racegrid > .bands::after { content:"60"; position:absolute; right:0; top:0;
+  color:var(--muted); letter-spacing:0; font-size:10px; }
+.racegrid > .bands { display:grid; grid-template-columns:repeat(6,1fr);
+  font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--faint); margin-bottom:6px; }
+.racegrid > .bands span { padding-left:6px; }
+.racegrid > .who { font-size:13px; color:var(--muted); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; padding:7px 0; }
+.racegrid > .who.mine { color:var(--fg); font-weight:600; }
+.racegrid > .lv { font-size:12.5px; color:var(--muted); white-space:nowrap;
+  font-variant-numeric:tabular-nums; text-align:right; line-height:1.45; }
+.racegrid > .lv b { display:block; font-weight:400; color:var(--fg); }
+.racegrid > .lv .gap { font-size:11.5px; color:var(--faint); }
+.racegrid > .lv.mine { color:var(--accent); }
+
+.track { position:relative; height:38px; }
+/* One rule per tier boundary, drawn in the track itself - same column as the
+   labels above, so the two cannot drift apart. */
+.track::before { content:""; position:absolute; inset:4px 0;
+  background:repeating-linear-gradient(to right,
+    var(--line) 0 1px, transparent 1px calc(100% / 6)); opacity:.45; }
+/* The finish line itself, at level 60. */
+.track { border-right:2px solid var(--line); }
+.track::after { content:""; position:absolute; left:0; right:0; top:18px;
+  height:2px; background:var(--line); opacity:.5; border-radius:2px; }
+.run { position:absolute; left:0; top:16px; height:6px; border-radius:4px;
+  background:linear-gradient(90deg, rgba(255,255,255,.04), var(--muted) 45%,
+    var(--fg)); animation:runout 1100ms var(--ease) both; }
+.mine .run, .run.mine { background:linear-gradient(90deg,
+  rgba(251,146,60,.15), var(--accent) 45%, var(--accent)); }
+@keyframes runout { from { width:0 !important; } }
+.pip { position:absolute; top:5px; transform:translateX(-50%);
+  animation:runpip 1100ms var(--ease) both; }
+@keyframes runpip { from { left:0 !important; opacity:0; } }
+.pip .avatar { width:28px; height:28px; font-size:12px;
+  border:2px solid var(--raise); box-shadow:0 0 0 1px var(--line); }
+.pip.mine .avatar { box-shadow:0 0 0 2px var(--accent); }
+/* Without a picture the avatar falls back to an initial, and the page-wide
+   version of that is dark grey on dark grey - fine at 52px in a profile
+   header, invisible as a 28px runner. */
+.pip .avatar.blank { background:var(--line); color:var(--fg);
+  font:600 12px/1 var(--sans, sans-serif); }
+
+.racetab { width:100%; border-collapse:collapse; margin-top:16px; }
+.racetab th { font-size:10.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--faint); text-align:right; padding:6px 0 6px 14px;
+  font-weight:500; border-bottom:1px solid var(--line); }
+.racetab th:first-child { text-align:left; padding-left:0; }
+.racetab td { padding:9px 0 9px 14px; text-align:right; font-size:13.5px;
+  border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums;
+  color:var(--muted); }
+.racetab td:first-child { text-align:left; padding-left:0; }
+.racetab tr:last-child td { border-bottom:none; }
+.racetab tr.mine td { color:var(--fg); }
+.quiet { margin:12px 0 0; font-size:12.5px; color:var(--faint); }
+.warn { margin:10px 0 0; font-size:12.5px; color:var(--fg);
+  background:var(--sunk); border:1px solid var(--line); border-left:3px solid
+  var(--accent); border-radius:8px; padding:9px 12px; }
+"""
+
+
+TIER_BANDS = ("Pleasant", "Painful", "Death", "Hell", "Paradise", "Reality")
+
+
+def race_track(race, quiet) -> str:
+    """Everyone's place on the climb, on one track.
+
+    Level 60 is the far end. A runner sits at their level plus the fraction of
+    it they have finished, because two people on level 12 are not in the same
+    place, and being able to see that is the whole point of a race.
+    """
+    if not race:
+        return ""
+    cells = ['<div></div>',
+             '<div class="bands">'
+             + "".join(f"<span>{b}</span>" for b in TIER_BANDS)
+             + '</div>', '<div></div>']
+    for r in race:
+        # 0 at the start of level 1, 1.0 at the end of level 60.
+        at = min(1.0, max(0.0, (r["level"] - 1 + r["frac"]) / 60))
+        pct = f"{at * 100:.2f}%"
+        m = " mine" if r["me"] else ""
+        through = (f'{r["frac"] * 100:.0f}% through' if r["needed"]
+                   else "not started")
+        cells.append(f'<div class="who{m}">{esc(r["username"])}'
+                     f'{" (you)" if r["me"] else ""}</div>')
+        cells.append(
+            f'<div class="track">'
+            f'<i class="run{m}" style="width:{pct}"></i>'
+            f'<span class="pip{m}" style="left:{pct}">'
+            f'{avatar_tag(r["id"], r["has_avatar"], r["username"])}</span>'
+            f'</div>')
+        gap = ""
+        if not r["me"] or len(race) > 1:
+            lead = race[0]["level"] + race[0]["frac"]
+            behind = lead - (r["level"] + r["frac"])
+            gap = ("<span class=\"gap\">leading</span>" if behind < 0.01 else
+                   f'<span class="gap">{behind:.1f} levels behind</span>')
+        cells.append(f'<div class="lv{m}"><b>lv {r["level"]} &middot; {through}</b>'
+                     f'{gap}</div>')
+
+    rows = []
+    for r in race:
+        acc = f'{r["accuracy"]:.1f}%' if r["accuracy"] is not None else "&mdash;"
+        pace = f'{r["pace"]:.1f} d' if r.get("pace") else "&mdash;"
+        rows.append(
+            f'<tr class="{"mine" if r["me"] else ""}">'
+            f'<td>{esc(r["username"])}</td><td>{r["level"]}</td>'
+            f'<td>{r["passed"]} / {r["needed"]}</td>'
+            f'<td>{r["answers"]:,}</td><td>{acc}</td>'
+            f'<td>{r["month"]}</td><td>{pace}</td></tr>')
+
+    note = ""
+    if quiet:
+        who = ", ".join(esc(q) for q in quiet)
+        one = len(quiet) == 1
+        note = (f'<p class="quiet">{who} {"is" if one else "are"} sharing lists '
+                f'but not WaniKani stats, so {"that lane is" if one else "those lanes are"} '
+                f'empty. It is the &ldquo;Include my WaniKani stats&rdquo; box above.</p>')
+
+    return f"""
+    <div class="race">
+      <h3>The race</h3>
+      <p class="sub">Where each of you is on the climb to 60 &mdash; the level,
+      and how far into it. Only people who share their stats appear.</p>
+      <div class="racegrid">{"".join(cells)}</div>
+      <table class="racetab">
+        <tr><th>who</th><th>level</th><th>level kanji</th>
+            <th title="WaniKani retired the endpoint that held a review count - it answers an empty list for every account now. This is the lifetime answer total from the account itself, which is what a review count was counting.">answers</th>
+            <th>accuracy</th><th>passed this month</th><th>days / level</th></tr>
+        {"".join(rows)}
+      </table>
+      {note}
+    </div>"""
+
+
 def together_page(user, visibility, token, base_url, people, by_user, overlap,
                   absent, share_stats=False, profile=None, can_add=False,
-                  note="", featured=None) -> str:
+                  note="", featured=None, race=None, quiet=None) -> str:
     featured = featured or {}
     head = share_panel(visibility, token, base_url, user["username"], share_stats)
+    head += race_track(race or [], quiet or [])
     head += profile_panel(profile or {}, user,
                           by_user.get(user["id"], {}).get("ongoing", []))
     if note:
@@ -2291,7 +2474,7 @@ def _bundle(*parts: str) -> str:
 CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     w.REPORT_CSS, AUTH_CSS, LOAD_CSS, BURN_CSS,
     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
-    w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS,
+    w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS, RACE_CSS,
     w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.

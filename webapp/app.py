@@ -552,6 +552,41 @@ def _page_body(user, creds, cache, which: str, title: str):
                            partial=True)
 
 
+
+def _runner(user_id: int, username: str, has_avatar, is_me: bool):
+    """One person's place in the race, or None if there is nothing to show.
+
+    WaniKani retired the endpoint that held a review count - it answers an
+    empty list for every account now - so the honest stand-in is the lifetime
+    answer total, which is on the account itself and is what a review count
+    was counting anyway. Everything here comes from the stored snapshot, so
+    nobody's key is used to draw somebody else's line.
+    """
+    snap = store.get_snapshot(user_id)
+    if not snap:
+        return None
+    prog = w.level_progress(snap) or {}
+    ans = snap.get("answers") or {}
+    right, wrong = int(ans.get("correct") or 0), int(ans.get("incorrect") or 0)
+    total = right + wrong
+    needed = prog.get("needed") or 0
+    passed = prog.get("passed") or 0
+    month = time.strftime("%Y-%m")
+    return {
+        "id": user_id, "username": username, "has_avatar": has_avatar,
+        "me": is_me,
+        "level": prog.get("level") or snap.get("level") or 0,
+        "passed": passed, "needed": needed,
+        # How far through the level, by WaniKani's own rule for leaving it.
+        "frac": min(1.0, passed / needed) if needed else 0.0,
+        "pace": prog.get("pace"),
+        "answers": total,
+        "accuracy": (100.0 * right / total) if total else None,
+        "month": int((snap.get("passed_by_month") or {}).get(month) or 0),
+        "as_of": (snap.get("fetched_at") or "")[:10],
+    }
+
+
 @app.get("/together")
 def together():
     user = require_login()
@@ -574,16 +609,36 @@ def together():
     absent = [u["username"] for u in store.all_usernames()
               if u["id"] not in sharing_ids]
 
+    # The race: everyone who has turned their stats on, plus you - your own
+    # numbers are yours to look at whether or not you are sharing them.
+    race, quiet = [], []
+    for p in people:
+        if p["id"] == user["id"]:
+            continue
+        if p.get("share_stats"):
+            r = _runner(p["id"], p["username"], p.get("has_avatar"), False)
+            if r:
+                race.append(r)
+        else:
+            quiet.append(p["username"])
+    mine = _runner(user["id"], user["username"],
+                   (profile := store.get_profile(user["id"])).get("has_avatar"),
+                   True)
+    if mine:
+        race.append(mine)
+    race.sort(key=lambda r: (r["level"] + r["frac"]), reverse=True)
+
     vis = store.get_visibility(user["id"])
     token = store.share_token(user["id"]) if vis in ("link", "public") else ""
     return render.together_page(user, vis, token, request.url_root.rstrip("/"),
                                 people, by_user, overlap, absent,
                                 store.shares_stats(user["id"]),
-                                store.get_profile(user["id"]),
+                                profile,
                                 bool(creds_of(user).get("jiten_key")),
                                 request.args.get("note", ""),
                                 {p["id"]: store.currently_of(p["id"])
-                                 for p in people})
+                                 for p in people},
+                                race, quiet)
 
 
 @app.post("/together/share")

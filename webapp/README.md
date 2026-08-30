@@ -16,7 +16,15 @@ replaces it, so anything the account knows from elsewhere survives. The
 automatic refresh does the same, so the figure cannot quietly fall behind.
 
 There is also a **Together** page: what everyone is watching, reading and has
-finished, with the titles more than one of you has picked out.
+finished, with the titles more than one of you has picked out — and **the
+race**, a single track from level 1 to 60 with everyone who shares their stats
+on it, placed at their level plus how far into it they have got.
+
+There is no review count on it, because WaniKani retired the endpoint that held
+one; it answers an empty list for every account now. What stands in its place is
+the lifetime answer total from the account itself, with accuracy — which is what
+a review count was counting anyway — beside the level, the level's kanji, items
+passed this month, and days per level.
 
 Sharing is one setting with four levels, each containing the one before it, and
 it starts at the first — a reading list is data about a person, not about an
@@ -34,8 +42,14 @@ take a shared link back. Dropping to **Just me** deletes the stored snapshot
 rather than hiding it.
 
 Shared either way: the title, whether it is being watched, planned or finished,
-and that person's coverage on it. Never their keys, their reviews, or anything
-from WaniKani.
+and that person's coverage on it. Never their keys.
+
+**Include my WaniKani stats** is a separate box, off until it is ticked, and it
+adds exactly what the race needs: the level and how far into it, the lifetime
+answer total and accuracy, and items passed this month. Never the items
+themselves, never review history, and never anything written on the account.
+Untick it and the numbers leave every shared page immediately — nothing about
+them is copied anywhere else.
 
 ---
 

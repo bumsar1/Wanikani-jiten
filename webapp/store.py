@@ -357,7 +357,7 @@ def all_usernames() -> list[dict]:
 def sharing_users() -> list[dict]:
     with db() as con:
         rows = con.execute(
-            "SELECT u.id, u.username, u.bio, u.currently,"
+            "SELECT u.id, u.username, u.bio, u.currently, u.share_stats,"
             " u.avatar IS NOT NULL AS has_avatar,"
             " u.banner IS NOT NULL AS has_banner,"
             " (SELECT COUNT(*) FROM shared_lists s WHERE s.user_id = u.id) AS titles,"
