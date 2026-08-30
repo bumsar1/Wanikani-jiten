@@ -51,13 +51,28 @@ rather than hiding it.
 Shared either way: the title, whether it is being watched, planned or finished,
 and that person's coverage on it. Never their keys.
 
+Under the race sit three more, from the same data: **the climb so far**, every
+level either of you has started plotted against when — the flat stretches are
+the point, since a fortnight where no level was running looks identical to a
+slow level in a number; **who showed up**, eight weeks of days with a mark for
+each one something passed, which measures turning up rather than speed; and
+**the shelf**, everything spread across the five SRS stages, where Burned is the
+only figure that cannot go back down.
+
 **Include my WaniKani stats** is a separate box, off until it is ticked, and it
-adds exactly what the race needs: the level and how far into it, reviews and
-lessons waiting, the lifetime answer total and accuracy, and items passed this
-month. Never the items
+adds exactly what those need: the level and how far into it, reviews and
+lessons waiting, the lifetime answer total and accuracy, items passed this
+month, the level history and the SRS spread. Never the items
 themselves, never review history, and never anything written on the account.
 Untick it and the numbers leave every shared page immediately — nothing about
 them is copied anywhere else.
+
+**Share which kanji I know** is a second box, also off by default, and a bigger
+step than the first: the others share numbers about an account, this one shares
+the account's actual list of characters. With it, the page shows what each of
+you can read that the other cannot, both ways round. It appears only between two
+people who have both ticked it, and it covers kanji at Guru or better — never
+vocabulary, never reviews, never anything written.
 
 ---
 

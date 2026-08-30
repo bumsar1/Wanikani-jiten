@@ -168,6 +168,12 @@ def init() -> None:
         if "share_stats" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN share_stats"
                         " INTEGER NOT NULL DEFAULT 0")
+        # Its own switch, and off by default like the others. The stats box
+        # shares numbers about an account; this one shares the account's actual
+        # list of characters, which is a different size of thing to hand over.
+        if "share_kanji" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN share_kanji"
+                        " INTEGER NOT NULL DEFAULT 0")
         scols = {r["name"] for r in con.execute("PRAGMA table_info(shared_lists)")}
         if "kanji_cov" not in scols:
             con.execute("ALTER TABLE shared_lists ADD COLUMN kanji_cov REAL")
@@ -274,6 +280,19 @@ def set_share_stats(user_id: int, on: bool) -> None:
                     (1 if on else 0, user_id))
 
 
+def set_share_kanji(user_id: int, on: bool) -> None:
+    with db() as con:
+        con.execute("UPDATE users SET share_kanji = ? WHERE id = ?",
+                    (1 if on else 0, user_id))
+
+
+def shares_kanji(user_id: int) -> bool:
+    with db() as con:
+        row = con.execute("SELECT share_kanji FROM users WHERE id = ?",
+                          (user_id,)).fetchone()
+    return bool(row and row["share_kanji"])
+
+
 def shares_stats(user_id: int) -> bool:
     with db() as con:
         row = con.execute("SELECT share_stats FROM users WHERE id = ?",
@@ -358,6 +377,7 @@ def sharing_users() -> list[dict]:
     with db() as con:
         rows = con.execute(
             "SELECT u.id, u.username, u.bio, u.currently, u.share_stats,"
+            " u.share_kanji,"
             " u.avatar IS NOT NULL AS has_avatar,"
             " u.banner IS NOT NULL AS has_banner,"
             " (SELECT COUNT(*) FROM shared_lists s WHERE s.user_id = u.id) AS titles,"

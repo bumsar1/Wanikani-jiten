@@ -570,7 +570,8 @@ def _page_body(user, creds, cache, which: str, title: str):
 
 
 
-def _runner(user_id: int, username: str, has_avatar, is_me: bool):
+def _runner(user_id: int, username: str, has_avatar, is_me: bool,
+            with_kanji: bool = False):
     """One person's place in the race, or None if there is nothing to show.
 
     WaniKani retired the endpoint that held a review count - it answers an
@@ -608,6 +609,16 @@ def _runner(user_id: int, username: str, has_avatar, is_me: bool):
         "lessons": due["lessons"] if due else None,
         "next_at": due["next_at"] if due else None,
         "age": store.snapshot_age_hours(user_id),
+        # The three the Together page draws under the race. All of it is
+        # already in the snapshot; none of it was being looked at.
+        "history": w.level_history(snap),
+        "shelf": w.srs_shelf(snap),
+        "days": {d: n for d, n in (snap.get("passed_by_day") or {}).items()
+                 if d >= time.strftime("%Y-%m-%d",
+                                       time.gmtime(time.time() - 55 * 86400))},
+        # The list of characters, not a count of them - so it only travels for
+        # someone who has said yes to that separately.
+        "kanji": w.known_kanji(snap) if with_kanji else None,
     }
 
 
@@ -640,14 +651,15 @@ def together():
         if p["id"] == user["id"]:
             continue
         if p.get("share_stats"):
-            r = _runner(p["id"], p["username"], p.get("has_avatar"), False)
+            r = _runner(p["id"], p["username"], p.get("has_avatar"), False,
+                        with_kanji=bool(p.get("share_kanji")))
             if r:
                 race.append(r)
         else:
             quiet.append(p["username"])
     mine = _runner(user["id"], user["username"],
                    (profile := store.get_profile(user["id"])).get("has_avatar"),
-                   True)
+                   True, with_kanji=True)
     if mine:
         race.append(mine)
         # This is the page where a missing count shows as a dash, so it is the
@@ -671,7 +683,8 @@ def together():
                                 request.args.get("note", ""),
                                 {p["id"]: store.currently_of(p["id"])
                                  for p in people},
-                                race, quiet)
+                                race, quiet,
+                                store.shares_kanji(user["id"]))
 
 
 @app.post("/together/share")
@@ -680,6 +693,7 @@ def set_sharing():
     level = request.form.get("visibility", "private")
     store.set_visibility(user["id"], level)
     store.set_share_stats(user["id"], request.form.get("stats") == "1")
+    store.set_share_kanji(user["id"], request.form.get("kanji") == "1")
     # Publish straight away rather than making them reload the dashboard first.
     if level != "private":
         key = creds_of(user).get("jiten_key")

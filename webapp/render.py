@@ -316,6 +316,18 @@ MOBILE_CSS = """
   /* The table has seven columns, so the row-card treatment takes it over on a
      phone and every figure keeps its name. Nothing to hide here. */
 
+  /* The three cards under the race: a 104px column of names is a third of the
+     screen before any data starts, so the name goes above its own row. */
+  .strip { grid-template-columns:1fr max-content; row-gap:3px; padding:8px 0; }
+  .strip .nm { grid-column:1; }
+  .strip .cnt { grid-column:2; }
+  .strip .dots { grid-column:1 / -1; gap:1.5px; }
+  .shelfrow { grid-template-columns:1fr; gap:6px; }
+  .shelfrow .nm { padding-bottom:0; }
+  .shelf { gap:8px; height:96px; }
+  .sh span { font-size:8.5px; letter-spacing:.02em; }
+  .chartkey { font-size:12px; }
+
   /* Gathered here from the sheets they used to be scattered across. */
   .tier .next { display:none; }
   .levelup .tierart { display:none; }
@@ -1228,9 +1240,10 @@ document.querySelectorAll('[data-copy]').forEach(function (btn) {
 
 
 def share_panel(visibility: str, token: str, base_url: str, username: str,
-                share_stats: bool = False) -> str:
+                share_stats: bool = False, share_kanji: bool = False) -> str:
     """One control, four levels, each containing the one before it."""
     checked = "checked" if share_stats else ""
+    kchecked = "checked" if share_kanji else ""
     # Private wins over the box, which is the safe way round but not the
     # obvious one: tick it while set to "Just me" and nothing happens at all.
     warn = ("" if visibility != "private" or not share_stats else
@@ -1276,6 +1289,9 @@ def share_panel(visibility: str, token: str, base_url: str, username: str,
           <label class="statsbox"><input type="checkbox" name="stats" value="1"
             {checked} onchange="this.form.submit()">
             Include my WaniKani stats</label>
+          <label class="statsbox"><input type="checkbox" name="kanji" value="1"
+            {kchecked} onchange="this.form.submit()">
+            Share which kanji I know</label>
           <noscript><button>Save</button></noscript>
         </form>
         {warn}
@@ -1284,8 +1300,11 @@ def share_panel(visibility: str, token: str, base_url: str, username: str,
         <b>With the box ticked</b>, also
         your WaniKani level and how far into it you are, how many reviews are
         waiting, your lifetime answer total and accuracy, and how many items you
-        have passed this month &mdash; enough for the race on this page. Never
-        the items themselves, and never anything you have written.</p>
+                have passed this month &mdash; enough for the race on this page.
+        <b>The second box</b> is a bigger step: it shares the list of characters
+        you can read, so the page can show what each of you knows that the other
+        does not. Nothing else &mdash; not your vocabulary, not your reviews,
+        and never anything you have written.</p>
         {links}
       </div>"""
 
@@ -1423,6 +1442,86 @@ RACE_CSS = """
 .racegrid > .who .chip.old i { font-style:normal; color:var(--faint); }
 .racegrid > .who .chip.none { background:none; color:var(--faint);
   border:1px dashed var(--line); font-weight:400; }
+/* The climb chart. Steps rather than a smooth line, because a level is held
+   for a while and then left - it does not glide. */
+.climbsvg { width:100%; height:auto; display:block; margin-top:4px; }
+.climbsvg .gl { stroke:var(--line); stroke-width:1; opacity:.5; }
+.climbsvg .ax { fill:var(--faint); font-size:10px;
+  font-family:var(--sans, sans-serif); }
+.climbsvg .lv { fill:none; stroke-width:2.5; stroke-linejoin:round;
+  stroke-linecap:round; }
+.climbsvg .lv.me { stroke:var(--accent); }
+.climbsvg .lv.o0 { stroke:#7aa2f7; }
+.climbsvg .lv.o1 { stroke:#9ece6a; }
+.climbsvg .lv.o2 { stroke:#e0af68; }
+.climbsvg .dot.me { fill:var(--accent); }
+.climbsvg .dot.o0 { fill:#7aa2f7; }
+.climbsvg .dot.o1 { fill:#9ece6a; }
+.climbsvg .dot.o2 { fill:#e0af68; }
+.chartkey { display:flex; flex-wrap:wrap; gap:14px; margin:0 0 6px;
+  font-size:12.5px; }
+/* .ckey, not .k - that one is the 27x27 kanji tile in the grid, and a legend
+   that inherits it comes out as a square with the name clipped inside. */
+.chartkey .ckey { display:flex; align-items:center; gap:6px; color:var(--muted); }
+.chartkey .ckey::before { content:""; width:14px; height:3px; border-radius:2px;
+  background:var(--muted); }
+.chartkey .ckey.me { color:var(--fg); }
+.chartkey .ckey.me::before { background:var(--accent); }
+.chartkey .ckey.o0::before { background:#7aa2f7; }
+.chartkey .ckey.o1::before { background:#9ece6a; }
+.chartkey .ckey.o2::before { background:#e0af68; }
+/* Eight weeks of days. Squares rather than a chart: the question is whether a
+   day happened, and a square answers it faster than a height does. */
+.strip { display:grid; grid-template-columns:104px 1fr max-content;
+  align-items:center; gap:12px; padding:6px 0; }
+.strip .nm { font-size:13px; color:var(--muted); white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.strip.mine .nm { color:var(--fg); font-weight:600; }
+.strip .dots { display:grid; grid-template-columns:repeat(56, 1fr); gap:2px; }
+.strip .dots i { aspect-ratio:1; border-radius:2px; background:var(--sunk);
+  border:1px solid var(--line); }
+.strip .dots i.d1 { background:rgba(251,146,60,.30); border-color:transparent; }
+.strip .dots i.d2 { background:rgba(251,146,60,.55); border-color:transparent; }
+.strip .dots i.d3 { background:rgba(251,146,60,.78); border-color:transparent; }
+.strip .dots i.d4 { background:var(--accent); border-color:transparent; }
+.strip .cnt { font-size:12px; color:var(--faint); white-space:nowrap;
+  font-variant-numeric:tabular-nums; }
+
+.shelfrow { display:grid; grid-template-columns:104px 1fr; gap:12px;
+  align-items:end; padding:8px 0; }
+.shelfrow .nm { font-size:13px; color:var(--muted); padding-bottom:22px; }
+.shelfrow.mine .nm { color:var(--fg); font-weight:600; }
+.shelf { display:grid; grid-template-columns:repeat(5,1fr); gap:12px;
+  align-items:end; height:110px; }
+.sh { display:flex; flex-direction:column; justify-content:flex-end;
+  align-items:center; height:100%; gap:4px; }
+.sh b { font-size:12.5px; font-weight:600; color:var(--fg);
+  font-variant-numeric:tabular-nums; }
+.sh i { width:100%; border-radius:4px 4px 0 0; min-height:3px; }
+.sh span { font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--faint); }
+/* WaniKani's own colours for the shelves, so they read the same as over there. */
+.sh i.apprentice  { background:#dd0093; }
+.sh i.guru        { background:#882d9e; }
+.sh i.master      { background:#294ddb; }
+.sh i.enlightened { background:#0093dd; }
+.sh i.burned      { background:#434343; border:1px solid var(--line); }
+.quietcard { opacity:.75; }
+.gap2 { padding:12px 0; border-top:1px solid var(--line); }
+.gap2:first-of-type { border-top:none; }
+.gaphead { display:flex; align-items:baseline; gap:12px; margin-bottom:8px; }
+.gaphead b { font-size:14px; }
+.gaphead span { font-size:12.5px; color:var(--faint);
+  font-variant-numeric:tabular-nums; }
+.gap2 .side { margin:8px 0 0; }
+.gap2 .lbl { font-size:12px; color:var(--muted); margin-bottom:5px; }
+.gap2 .chars { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.gap2 .chars a { display:grid; place-items:center; width:30px; height:30px;
+  border-radius:6px; background:var(--sunk); border:1px solid var(--line);
+  font-size:17px; color:var(--fg); text-decoration:none; }
+.gap2 .chars a:hover { border-color:var(--accent); color:var(--accent); }
+.gap2 .chars em { font-style:normal; font-size:12px; color:var(--faint);
+  margin-left:4px; }
 .quiet { margin:12px 0 0; font-size:12.5px; color:var(--faint); }
 .warn { margin:10px 0 0; font-size:12.5px; color:var(--fg);
   background:var(--sunk); border:1px solid var(--line); border-left:3px solid
@@ -1458,6 +1557,217 @@ def pile(r) -> str:
             f'refresh {when}, and anything answered since is still in it. '
             f'It updates when they open the site.">&le;{n:,}&thinsp;'
             f'<i>&middot; {short}</i></span>')
+
+
+def climb_chart(race) -> str:
+    """Level against time, one line each.
+
+    A level number says who is ahead. A line says who is pulling ahead, and it
+    shows the flat stretches - a fortnight where no level was running at all
+    looks exactly like a slow level in a number, and nothing like one here.
+    """
+    runners = [r for r in race if r.get("history")]
+    if not runners or not any(len(r["history"]) > 1 for r in runners):
+        return ""
+    W, H, PAD_L, PAD_B, PAD_T = 720, 240, 34, 26, 12
+    starts = [p["start"] for r in runners for p in r["history"]]
+    t1 = max(time.time(), max(starts))
+    # An account made years ago and picked up last spring has a level 1 that
+    # ran for half a decade, and drawn honestly that is five years of empty
+    # chart with the actual climbing crushed into the right-hand corner. So the
+    # axis covers the last fourteen months and the older part is clipped off
+    # rather than allowed to squash everything worth looking at.
+    t0 = max(min(starts), t1 - 425 * 86400)
+    span = max(t1 - t0, 86400)
+    top = max(2, max(p["level"] for r in runners for p in r["history"]))
+    visible = [p["level"] for r in runners for p in r["history"]
+               if (p["passed"] or time.time()) >= t1 - 425 * 86400]
+    floor = max(1, min(visible) if visible else 1)
+    x = lambda t: PAD_L + (t - t0) / span * (W - PAD_L - 8)
+    y = lambda lv: PAD_T + (1 - (lv - floor) / max(top - floor, 1)) * (H - PAD_T - PAD_B)
+
+    grid = []
+    for lv in range(floor, top + 1):
+        if top - floor > 12 and lv % 5 and lv != top:
+            continue
+        grid.append(f'<line x1="{PAD_L}" y1="{y(lv):.1f}" x2="{W - 8}" '
+                    f'y2="{y(lv):.1f}" class="gl"/>'
+                    f'<text x="{PAD_L - 8}" y="{y(lv) + 4:.1f}" '
+                    f'class="ax" text-anchor="end">{lv}</text>')
+    # A month tick, so the horizontal is time rather than just "later".
+    marks = []
+    t = t0
+    while t < t1:
+        lt = time.localtime(t)
+        nxt = time.mktime((lt.tm_year + (lt.tm_mon == 12), lt.tm_mon % 12 + 1,
+                           1, 0, 0, 0, 0, 0, -1))
+        if nxt > t0:
+            marks.append(f'<text x="{x(nxt):.1f}" y="{H - 8}" class="ax" '
+                         f'text-anchor="middle">'
+                         f'{time.strftime("%b", time.localtime(nxt))}</text>')
+        t = nxt
+
+    lines = []
+    for i, r in enumerate(runners):
+        pts = []
+        for p in r["history"]:
+            end = p["passed"] or time.time()
+            if end < t0:                      # entirely before the window
+                continue
+            pts.append(f'{x(max(p["start"], t0)):.1f},{y(p["level"]):.1f}')
+            pts.append(f'{x(min(end, t1)):.1f},{y(p["level"]):.1f}')
+        if not pts:
+            continue
+        cls = "me" if r["me"] else f"o{i % 3}"
+        lines.append(f'<polyline class="lv {cls}" points="{" ".join(pts)}"/>')
+        last = r["history"][-1]
+        lines.append(f'<circle class="dot {cls}" cx="{x(last["passed"] or time.time()):.1f}" '
+                     f'cy="{y(last["level"]):.1f}" r="4"/>')
+
+    key = " ".join(
+        f'<span class="ckey{" me" if r["me"] else f" o{i % 3}"}">'
+        f'{esc(r["username"])}</span>'
+        for i, r in enumerate(runners))
+    return f"""
+    <div class="race climb">
+      <h3>The climb, so far</h3>
+      <p class="sub">Every level either of you has started, against when. The
+      flat stretches are the interesting part.</p>
+      <div class="chartkey">{key}</div>
+      <svg viewBox="0 0 {W} {H}" class="climbsvg" role="img"
+           aria-label="Level over time for each person">
+        {"".join(grid)}{"".join(marks)}{"".join(lines)}
+      </svg>
+    </div>"""
+
+
+def showed_up(race) -> str:
+    """Eight weeks of days, one strip each.
+
+    This is the number the race cannot show: not how far along someone is, but
+    whether they turned up. You can be a level behind and still be the one who
+    has not missed a day.
+    """
+    runners = [r for r in race if r.get("days") is not None]
+    if not runners:
+        return ""
+    today = time.time()
+    days = [time.strftime("%Y-%m-%d", time.gmtime(today - i * 86400))
+            for i in range(55, -1, -1)]
+    rows = []
+    for r in runners:
+        got = r["days"] or {}
+        peak = max(got.values()) if got else 1
+        cells = "".join(
+            f'<i class="d{min(4, 1 + int(3 * got[d] / peak)) if got.get(d) else 0}" '
+            f'title="{d}: {got.get(d, 0)} passed"></i>' for d in days)
+        active = sum(1 for d in days if got.get(d))
+        rows.append(f'<div class="strip{" mine" if r["me"] else ""}">'
+                    f'<span class="nm">{esc(r["username"])}</span>'
+                    f'<span class="dots">{cells}</span>'
+                    f'<span class="cnt">{active} / 56 days</span></div>')
+    return f"""
+    <div class="race">
+      <h3>Who showed up</h3>
+      <p class="sub">The last eight weeks. A mark for every day something
+      passed, darker for more of them &mdash; turning up, rather than speed.</p>
+      {"".join(rows)}
+    </div>"""
+
+
+def shelf_card(race) -> str:
+    """The five SRS shelves side by side.
+
+    Burned is the one worth staring at: it is the only figure here that cannot
+    go down, and the only one nobody can hurry.
+    """
+    runners = [r for r in race if r.get("shelf")]
+    if not runners:
+        return ""
+    names = [n for n, _lo, _hi in w.SRS_SHELVES]
+    top = max((v for r in runners for v in r["shelf"].values()), default=1) or 1
+    rows = []
+    for r in runners:
+        bars = "".join(
+            f'<div class="sh"><b>{r["shelf"].get(n, 0):,}</b>'
+            f'<i class="{n.lower()}" style="height:'
+            f'{max(3, 100 * r["shelf"].get(n, 0) / top):.1f}%"></i>'
+            f'<span>{n}</span></div>' for n in names)
+        rows.append(f'<div class="shelfrow{" mine" if r["me"] else ""}">'
+                    f'<div class="nm">{esc(r["username"])}</div>'
+                    f'<div class="shelf">{bars}</div></div>')
+    return f"""
+    <div class="race">
+      <h3>The shelf</h3>
+      <p class="sub">Where everything sits in the SRS. Burned is the only one
+      that cannot go back down.</p>
+      {"".join(rows)}
+    </div>"""
+
+
+def side(chars, label, empty) -> str:
+    """One half of the comparison. An empty half gets a sentence rather than a
+    blank row, because a blank row reads as something failing to load."""
+    if not chars:
+        return f'<div class="side"><div class="lbl">{empty}.</div></div>'
+    tiles = "".join(
+        f'<a href="https://www.wanikani.com/kanji/{esc(c)}" target="_blank"'
+        f' rel="noopener" title="Look up {esc(c)} on WaniKani">{esc(c)}</a>'
+        for c in chars[:60])
+    more = f'<em>+{len(chars) - 60:,} more</em>' if len(chars) > 60 else ""
+    return (f'<div class="side"><div class="lbl">{len(chars):,} {label}</div>'
+            f'<div class="chars">{tiles}{more}</div></div>')
+
+
+def kanji_gap(race, share_kanji: bool) -> str:
+    """What each of them can read that you cannot, and the other way round.
+
+    This is the one that needed its own permission: the others share numbers
+    about an account, and this shares the account's actual list. So it appears
+    only between two people who have both said yes, and it says so plainly
+    when only one of them has.
+    """
+    me = next((r for r in race if r["me"]), None)
+    others = [r for r in race if not r["me"]]
+    if not me or not others:
+        return ""
+    if not share_kanji:
+        return """
+    <div class="race quietcard">
+      <h3>What they know that you do not</h3>
+      <p class="sub">This one compares the actual lists of characters, not
+      numbers about them, so it needs its own yes &mdash; the
+      <b>Share which kanji I know</b> box above. It only ever shows up between
+      two people who have both ticked it.</p>
+    </div>"""
+    mine = set(me.get("kanji") or [])
+    blocks = []
+    for r in others:
+        theirs = r.get("kanji")
+        if theirs is None:
+            blocks.append(f'<p class="quiet">{esc(r["username"])} has not '
+                          f'shared their kanji list.</p>')
+            continue
+        theirs = set(theirs)
+        ahead = sorted(theirs - mine)
+        behind = sorted(mine - theirs)
+        both = len(theirs & mine)
+        blocks.append(f"""
+        <div class="gap2">
+          <div class="gaphead"><b>{esc(r["username"])}</b>
+            <span>{both:,} in common</span></div>
+          {side(ahead, "they can read and you cannot",
+                "Nothing - you have every kanji they do")}
+          {side(behind, "you can read and they cannot",
+                "Nothing yet - they have every kanji you do")}
+        </div>""")
+    return f"""
+    <div class="race">
+      <h3>What they know that you do not</h3>
+      <p class="sub">Guru or better on either side. Every character opens its
+      page on WaniKani.</p>
+      {"".join(blocks)}
+    </div>"""
 
 
 def race_track(race, quiet) -> str:
@@ -1538,10 +1848,17 @@ def race_track(race, quiet) -> str:
 
 def together_page(user, visibility, token, base_url, people, by_user, overlap,
                   absent, share_stats=False, profile=None, can_add=False,
-                  note="", featured=None, race=None, quiet=None) -> str:
+                  note="", featured=None, race=None, quiet=None,
+                  share_kanji=False) -> str:
     featured = featured or {}
-    head = share_panel(visibility, token, base_url, user["username"], share_stats)
-    head += race_track(race or [], quiet or [])
+    head = share_panel(visibility, token, base_url, user["username"],
+                       share_stats, share_kanji)
+    race = race or []
+    head += race_track(race, quiet or [])
+    head += climb_chart(race)
+    head += showed_up(race)
+    head += shelf_card(race)
+    head += kanji_gap(race, share_kanji)
     head += profile_panel(profile or {}, user,
                           by_user.get(user["id"], {}).get("ongoing", []))
     if note:

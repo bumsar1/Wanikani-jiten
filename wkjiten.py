@@ -393,6 +393,55 @@ def reviews_due(cache: dict, now: float | None = None) -> dict | None:
             "lessons": int(r.get("lessons") or 0), "as_of": r.get("as_of")}
 
 
+# WaniKani's own five shelves. Apprentice and Guru each cover two stages, the
+# rest one, and 9 is Burned - the only number on the page that cannot go down.
+SRS_SHELVES = (("Apprentice", 1, 4), ("Guru", 5, 6), ("Master", 7, 7),
+               ("Enlightened", 8, 8), ("Burned", 9, 9))
+
+
+def srs_shelf(cache: dict) -> dict:
+    """How an account's items are spread across the SRS stages."""
+    counts: Counter[str] = Counter()
+    for stage in (cache.get("assignments") or {}).values():
+        for name, lo, hi in SRS_SHELVES:
+            if lo <= stage <= hi:
+                counts[name] += 1
+                break
+    return {name: counts.get(name, 0) for name, _lo, _hi in SRS_SHELVES}
+
+
+def level_history(cache: dict) -> list[dict]:
+    """Every level with when it was started and when it was passed.
+
+    The gaps matter as much as the levels: a month on one level and a fortnight
+    where no level was running at all look identical in a level number and
+    quite different in a line.
+    """
+    out = []
+    for p in cache.get("progressions") or []:
+        if not p.get("started_at"):
+            continue
+        out.append({"level": p.get("level") or 0,
+                    "start": iso_seconds(p["started_at"]),
+                    "passed": (iso_seconds(p["passed_at"])
+                               if p.get("passed_at") else None)})
+    out.sort(key=lambda p: p["level"])
+    return out
+
+
+def known_kanji(cache: dict, min_stage: int = 5) -> list[str]:
+    """The characters this account can read, at Guru or better by default."""
+    subs = cache.get("subjects") or {}
+    out = []
+    for sid, stage in (cache.get("assignments") or {}).items():
+        if stage < min_stage:
+            continue
+        s = subs.get(str(sid))
+        if s and s.get("type") == "kanji" and s.get("characters"):
+            out.append(s["characters"])
+    return out
+
+
 def level_progress(cache: dict) -> dict | None:
     """How far into the current level you are, and the earliest you could leave.
 
