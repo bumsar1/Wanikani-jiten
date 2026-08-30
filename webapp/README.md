@@ -20,11 +20,18 @@ finished, with the titles more than one of you has picked out — and **the
 race**, a single track from level 1 to 60 with everyone who shares their stats
 on it, placed at their level plus how far into it they have got.
 
-There is no review count on it, because WaniKani retired the endpoint that held
-one; it answers an empty list for every account now. What stands in its place is
-the lifetime answer total from the account itself, with accuracy — which is what
-a review count was counting anyway — beside the level, the level's kanji, items
-passed this month, and days per level.
+Beside each name is **the pile**: how many reviews are waiting right now. That
+one is worked out rather than remembered — what gets stored is the hour each
+review comes due, and WaniKani schedules every one of them on the hour, so the
+count climbs by itself between refreshes instead of going stale. What it cannot
+see is what somebody has answered since their last refresh, so an older figure
+shows as an upper bound with its age beside it.
+
+There is no count of reviews *done*, because WaniKani retired the endpoint that
+held one; it answers an empty list for every account now. What stands in its
+place is the lifetime answer total from the account itself, with accuracy —
+which is what a review count was counting anyway — beside the level, the
+level's kanji, lessons waiting, items passed this month, and days per level.
 
 Sharing is one setting with four levels, each containing the one before it, and
 it starts at the first — a reading list is data about a person, not about an
@@ -45,8 +52,9 @@ Shared either way: the title, whether it is being watched, planned or finished,
 and that person's coverage on it. Never their keys.
 
 **Include my WaniKani stats** is a separate box, off until it is ticked, and it
-adds exactly what the race needs: the level and how far into it, the lifetime
-answer total and accuracy, and items passed this month. Never the items
+adds exactly what the race needs: the level and how far into it, reviews and
+lessons waiting, the lifetime answer total and accuracy, and items passed this
+month. Never the items
 themselves, never review history, and never anything written on the account.
 Untick it and the numbers leave every shared page immediately — nothing about
 them is copied anywhere else.

@@ -223,6 +223,9 @@ def wk_fetch(token: str) -> dict:
     passed_by_month: Counter[str] = Counter()
     passed_by_day: Counter[str] = Counter()
     state: dict[int, dict] = {}
+    review_hours: Counter[str] = Counter()
+    lessons_waiting = due_at_fetch = 0
+    fetched = time.time()
     for a in wk_paged("assignments", token):
         d = a["data"]
         sid = d["subject_id"]
@@ -237,6 +240,20 @@ def wk_fetch(token: str) -> dict:
             passed_by_day[d["passed_at"][:10]] += 1
         state[sid] = {"s": d["srs_stage"], "at": d.get("available_at"),
                       "locked": not d.get("unlocked_at")}
+
+        # The pile waiting on the dashboard. WaniKani schedules every review on
+        # the hour, so an hour and a count is the whole truth rather than a
+        # rounding of it - and keeping the hours, instead of one number that was
+        # true when this was fetched, means the count can be worked out against
+        # the clock later. It grows on its own as items come due.
+        at = d.get("available_at")
+        if d.get("unlocked_at") and not d.get("started_at"):
+            lessons_waiting += 1
+        elif at and 1 <= d["srs_stage"] <= 8:
+            if iso_seconds(at) <= fetched:
+                due_at_fetch += 1
+            else:
+                review_hours[at[:13]] += 1
 
     # One correct answer from Burned: the stage just below the burning one,
     # whose next review is the review that would do it. The date is already in
@@ -333,7 +350,47 @@ def wk_fetch(token: str) -> dict:
         "burning_total": len(ready),
         "burning_days": dict(sorted(burning_days.items())),
         "answers": answers,
+        # The pile, kept as hours rather than as one number. See reviews_due.
+        "reviews": {
+            "as_of": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(fetched)),
+            "due": due_at_fetch,
+            "lessons": lessons_waiting,
+            # Far-future hours are the SRS working as intended and nobody is
+            # racing over them; a fortnight is all the forecast anyone reads.
+            "hours": {h: n for h, n in sorted(review_hours.items())
+                      if h <= time.strftime("%Y-%m-%dT%H",
+                                            time.gmtime(fetched + 15 * 86400))},
+        },
     }
+
+
+def reviews_due(cache: dict, now: float | None = None) -> dict | None:
+    """The reviews waiting right now, worked out against the clock.
+
+    A count fetched an hour ago is wrong an hour later, so what is stored is
+    when each review becomes available - on the hour, which is how WaniKani
+    schedules them - and the total is added up when someone asks. It climbs by
+    itself as items come due.
+
+    What it cannot know is what has been answered since the fetch, so it is an
+    upper bound, and the honest way to show it is beside the time it was taken.
+    """
+    r = cache.get("reviews")
+    if not r:
+        return None
+    now = time.time() if now is None else now
+    waiting, soon, nxt = int(r.get("due") or 0), 0, None
+    day = now + 86400
+    for hour, n in (r.get("hours") or {}).items():
+        when = iso_seconds(hour + ":00:00")
+        if when <= now:
+            waiting += n
+        else:
+            nxt = when if nxt is None or when < nxt else nxt
+            if when <= day:
+                soon += n
+    return {"waiting": waiting, "next_at": nxt, "next_24h": soon,
+            "lessons": int(r.get("lessons") or 0), "as_of": r.get("as_of")}
 
 
 def level_progress(cache: dict) -> dict | None:

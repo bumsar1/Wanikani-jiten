@@ -1281,8 +1281,9 @@ def share_panel(visibility: str, token: str, base_url: str, username: str,
         {warn}
         <p class="sub" style="margin:10px 0 0">Shared: the title, whether you are
         watching, planning or finished, and your coverage on it. Never your keys.
-        <b>With the box ticked</b>, also your WaniKani level and how far into it
-        you are, your lifetime answer total and accuracy, and how many items you
+        <b>With the box ticked</b>, also
+        your WaniKani level and how far into it you are, how many reviews are
+        waiting, your lifetime answer total and accuracy, and how many items you
         have passed this month &mdash; enough for the race on this page. Never
         the items themselves, and never anything you have written.</p>
         {links}
@@ -1348,7 +1349,7 @@ RACE_CSS = """
 /* Bands and lanes share one grid, so a tier label sits exactly above the
    stretch of track it names. They were two grids once and the backdrop lied
    about where everybody was standing. */
-.racegrid { display:grid; grid-template-columns:104px 1fr max-content;
+.racegrid { display:grid; grid-template-columns:186px 1fr max-content;
   column-gap:14px; align-items:center; }
 /* The finish. Without it the track just stops, and where it stops is the
    whole distance the two of you are arguing about. */
@@ -1359,8 +1360,12 @@ RACE_CSS = """
   font-size:10px; letter-spacing:.1em; text-transform:uppercase;
   color:var(--faint); margin-bottom:6px; }
 .racegrid > .bands span { padding-left:6px; }
-.racegrid > .who { font-size:13px; color:var(--muted); white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; padding:7px 0; }
+/* The name may be cut short; the number beside it may not, so they are laid
+   out rather than left to share one overflow. */
+.racegrid > .who { display:flex; align-items:center; gap:8px; min-width:0;
+  font-size:13px; color:var(--muted); padding:7px 0; }
+.racegrid > .who .nm { overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; min-width:0; }
 .racegrid > .who.mine { color:var(--fg); font-weight:600; }
 .racegrid > .lv { font-size:12.5px; color:var(--muted); white-space:nowrap;
   font-variant-numeric:tabular-nums; text-align:right; line-height:1.45; }
@@ -1407,6 +1412,17 @@ RACE_CSS = """
 .racetab td:first-child { text-align:left; padding-left:0; }
 .racetab tr:last-child td { border-bottom:none; }
 .racetab tr.mine td { color:var(--fg); }
+.racegrid > .who .chip { flex:none; white-space:nowrap; padding:1px 8px;
+  border-radius:var(--r-pill); background:var(--accent); color:#fff;
+  font-size:11.5px; font-weight:600; font-variant-numeric:tabular-nums;
+  vertical-align:1px; }
+/* An old count is still worth showing - it is just not worth showing as if it
+   were current, so it goes quiet and carries its age. */
+.racegrid > .who .chip.old { background:var(--sunk); color:var(--muted);
+  border:1px solid var(--line); font-weight:500; }
+.racegrid > .who .chip.old i { font-style:normal; color:var(--faint); }
+.racegrid > .who .chip.none { background:none; color:var(--faint);
+  border:1px dashed var(--line); font-weight:400; }
 .quiet { margin:12px 0 0; font-size:12.5px; color:var(--faint); }
 .warn { margin:10px 0 0; font-size:12.5px; color:var(--fg);
   background:var(--sunk); border:1px solid var(--line); border-left:3px solid
@@ -1415,6 +1431,31 @@ RACE_CSS = """
 
 
 TIER_BANDS = ("Pleasant", "Painful", "Death", "Hell", "Paradise", "Reality")
+
+
+def pile(r) -> str:
+    """The reviews waiting, as a chip beside the name.
+
+    It is worked out from when each review comes due rather than from a count
+    that was true once, so it climbs on its own between refreshes. What it
+    cannot see is what has been answered since - so a figure from hours ago is
+    an upper bound and says so, and says how old it is.
+    """
+    n = r.get("waiting")
+    if n is None:
+        return ('<span class="chip none" title="This account has not been '
+                'refreshed since the waiting count was added. It appears after '
+                'their next refresh.">&mdash;</span>')
+    age = r.get("age") or 0
+    if age < 1:
+        return (f'<span class="chip" title="Reviews waiting, from a refresh '
+                f'less than an hour ago.">{n:,}</span>')
+    when = f"{age:.0f} h ago" if age < 48 else f"{age / 24:.0f} days ago"
+    short = f"{age:.0f}h" if age < 48 else f"{age / 24:.0f}d"
+    return (f'<span class="chip old" title="At most {n:,}: counted from a '
+            f'refresh {when}, and anything answered since is still in it. '
+            f'It updates when they open the site.">&le;{n:,}&thinsp;'
+            f'<i>&middot; {short}</i></span>')
 
 
 def race_track(race, quiet) -> str:
@@ -1437,8 +1478,8 @@ def race_track(race, quiet) -> str:
         m = " mine" if r["me"] else ""
         through = (f'{r["frac"] * 100:.0f}% through' if r["needed"]
                    else "not started")
-        cells.append(f'<div class="who{m}">{esc(r["username"])}'
-                     f'{" (you)" if r["me"] else ""}</div>')
+        cells.append(f'<div class="who{m}"><span class="nm">{esc(r["username"])}'
+                     f'{" (you)" if r["me"] else ""}</span>{pile(r)}</div>')
         cells.append(
             f'<div class="track">'
             f'<i class="run{m}" style="width:{pct}"></i>'
@@ -1462,6 +1503,8 @@ def race_track(race, quiet) -> str:
             f'<tr class="{"mine" if r["me"] else ""}">'
             f'<td>{esc(r["username"])}</td><td>{r["level"]}</td>'
             f'<td>{r["passed"]} / {r["needed"]}</td>'
+            f'<td>{"&mdash;" if r.get("waiting") is None else format(r["waiting"], ",")}</td>'
+            f'<td>{"&mdash;" if r.get("lessons") is None else r["lessons"]}</td>'
             f'<td>{r["answers"]:,}</td><td>{acc}</td>'
             f'<td>{r["month"]}</td><td>{pace}</td></tr>')
 
@@ -1481,6 +1524,8 @@ def race_track(race, quiet) -> str:
       <div class="racegrid">{"".join(cells)}</div>
       <table class="racetab">
         <tr><th>who</th><th>level</th><th>level kanji</th>
+            <th title="Reviews waiting at this moment, worked out from when each one comes due. It cannot know what has been answered since that account was last refreshed, so it is an upper bound.">waiting</th>
+            <th>lessons</th>
             <th title="WaniKani retired the endpoint that held a review count - it answers an empty list for every account now. This is the lifetime answer total from the account itself, which is what a review count was counting.">answers</th>
             <th>accuracy</th><th>passed this month</th><th>days / level</th></tr>
         {"".join(rows)}

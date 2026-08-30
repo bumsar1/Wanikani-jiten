@@ -566,6 +566,7 @@ def _runner(user_id: int, username: str, has_avatar, is_me: bool):
     if not snap:
         return None
     prog = w.level_progress(snap) or {}
+    due = w.reviews_due(snap)
     ans = snap.get("answers") or {}
     right, wrong = int(ans.get("correct") or 0), int(ans.get("incorrect") or 0)
     total = right + wrong
@@ -584,6 +585,12 @@ def _runner(user_id: int, username: str, has_avatar, is_me: bool):
         "accuracy": (100.0 * right / total) if total else None,
         "month": int((snap.get("passed_by_month") or {}).get(month) or 0),
         "as_of": (snap.get("fetched_at") or "")[:10],
+        # None until that account has been refreshed since this shipped - the
+        # hours it needs were not being kept before.
+        "waiting": due["waiting"] if due else None,
+        "lessons": due["lessons"] if due else None,
+        "next_at": due["next_at"] if due else None,
+        "age": store.snapshot_age_hours(user_id),
     }
 
 
