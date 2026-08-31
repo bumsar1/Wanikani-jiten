@@ -4066,7 +4066,11 @@ GRID_CSS = """
 .lg { display:inline-flex; align-items:center; gap:5px; }
 .lg i { width:11px; height:11px; border-radius:3px; display:inline-block; }
 .gridout { border:1px solid var(--line); border-radius:10px; padding:10px 12px;
-  overflow-x:auto; }
+  overflow-x:auto;
+  /* The page colour it was already showing, but painted rather than seen
+     through - the background rain falling between the tiles put kanji behind
+     kanji, which is a hard thing to read past. */
+  background:var(--bg); }
 .lvlrow { display:flex; gap:10px; align-items:flex-start; padding:2px 0; }
 .lvlnum { width:2em; text-align:right; font-size:11px; color:var(--faint);
   padding-top:7px; font-variant-numeric:tabular-nums; flex:none; }

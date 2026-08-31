@@ -1387,6 +1387,16 @@ def settings_page(user, creds, note: str = "", error: str = "",
         </div>
         <button class="go" type="submit">Save</button>
       </form>
+      <h2>This screen</h2>
+      <p class="sub">Kanji you can read, falling behind the page. It never
+      draws over a card, so nothing you are reading sits on top of it &mdash;
+      but it is a matter of taste, and it stays off if your system asks for
+      reduced motion.</p>
+      <label class="rainbox"><input type="checkbox" id="rainsw">
+        <span>Kanji rain in the background</span></label>
+      <p class="sub" style="margin-top:6px">Remembered in this browser, so you
+      can have it on the big screen and off on your phone.</p>
+
       <h2>Data</h2>
       <p class="sub">{fetched} The counters on the dashboard compare that
       against the fetch before it. {sent}</p>
@@ -1650,6 +1660,155 @@ def profile_panel(profile: dict, user, choices=None) -> str:
         </form>
       </div>"""
 
+
+
+RAIN_CSS = """
+/* Behind everything, in front of nothing. The canvas is transparent and the
+   glyphs are painted at a tenth of full strength, because this sits under
+   tables of numbers people came here to read. */
+.rain { position:fixed; inset:0; width:100%; height:100%; display:block;
+  pointer-events:none; z-index:0; }
+main, .dock { position:relative; z-index:1; }
+@media (prefers-reduced-motion: reduce) { .rain { display:none; } }
+.rainbox { display:flex; align-items:center; gap:10px; margin:10px 0 0; }
+"""
+
+
+RAIN_JS = """
+(function(){
+  const KEY = 'wk-rain';
+  const off = () => { try { return localStorage.getItem(KEY) === 'off'; }
+                      catch(e){ return false; } };
+  const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  let cv, ctx, cols, glyphs, timer, w, h, dpr, running = false;
+
+  // Kanji, not the katakana the film used, and the point of the difference is
+  // that these are the ones the account can read. Until the fetch lands, a
+  // handful of early-level ones so the first frame is never empty.
+  let CHARS = '日月火水木金土人山川田口目手足力大小上下中';
+  try {
+    const kept = localStorage.getItem('wk-rain-chars');
+    if (kept && kept.length > 20) CHARS = kept;
+  } catch(e){}
+
+  const FONT = 18, STEP = 70, TRAIL = 9;
+
+  function size(){
+    dpr = Math.min(2, devicePixelRatio || 1);
+    w = innerWidth; h = innerHeight;
+    cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr);
+    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = FONT + 'px "Hiragino Sans","Noto Sans JP",sans-serif';
+    ctx.textBaseline = 'top';
+    const n = Math.ceil(w / (FONT + 6));
+    cols = Array.from({length: n}, (_, i) => ({
+      x: i * (FONT + 6) + 3,
+      // Spread across the screen, not stacked above it: starting every column
+      // off the top meant three seconds of nothing before the first frame
+      // anyone would call rain.
+      y: Math.random() * (h / FONT) - TRAIL,
+      speed: 0.5 + Math.random() * 0.9,
+      chars: Array.from({length: TRAIL}, () => pick()),
+    }));
+  }
+  const pick = () => CHARS[(Math.random() * CHARS.length) | 0];
+
+  function paint(){
+    ctx.clearRect(0, 0, w, h);
+    const ink = getComputedStyle(document.documentElement)
+                  .getPropertyValue('--accent').trim() || '#c2410c';
+    for (const c of cols){
+      c.y += c.speed;
+      if (c.y * FONT > h + TRAIL * FONT){
+        c.y = -TRAIL - Math.random() * 20;
+        c.speed = 0.5 + Math.random() * 0.9;
+      }
+      // One character swapped per column per frame: the flicker that makes it
+      // read as falling text rather than a moving picture of text.
+      c.chars[(Math.random() * TRAIL) | 0] = pick();
+      for (let i = 0; i < TRAIL; i++){
+        const y = (c.y - i) * FONT;
+        if (y < -FONT || y > h) continue;
+        // The head is brightest and the tail fades out. It can afford this
+        // much because the cards it falls behind are opaque - the rain shows
+        // in the gutters and behind the hero, never under a table of numbers.
+        ctx.globalAlpha = (i === 0 ? 0.42 : 0.26 * (1 - i / TRAIL));
+        ctx.fillStyle = ink;
+        ctx.fillText(c.chars[i], c.x, y);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function start(){
+    if (running || off() || calm.matches) return;
+    if (!cv){
+      cv = document.createElement('canvas');
+      cv.className = 'rain';
+      cv.setAttribute('aria-hidden', 'true');
+      ctx = cv.getContext('2d');
+      document.body.insertBefore(cv, document.body.firstChild);
+      addEventListener('resize', () => { if (running) size(); });
+    }
+    size(); running = true;
+    timer = setInterval(paint, STEP);
+  }
+  function stop(){
+    running = false; clearInterval(timer);
+    if (cv) ctx.clearRect(0, 0, w, h);
+  }
+  // A hidden tab paints nothing. setInterval keeps firing in the background on
+  // some browsers, and a phone in a pocket should not be drawing rain.
+  document.addEventListener('visibilitychange',
+    () => document.hidden ? stop() : start());
+  calm.addEventListener('change', () => calm.matches ? stop() : start());
+  // The switch in settings, wired here so it agrees with the rain itself
+  // rather than keeping a second idea of whether it is on.
+  addEventListener('DOMContentLoaded', () => {
+    const sw = document.getElementById('rainsw');
+    if (!sw) return;
+    if (calm.matches){
+      sw.checked = false; sw.disabled = true;
+      sw.closest('.rainbox').title =
+        'Your system is set to reduced motion, so this stays off.';
+      return;
+    }
+    sw.checked = !off();
+    sw.addEventListener('change',
+      () => sw.checked ? window.wkRain.on() : window.wkRain.off());
+  });
+
+  window.wkRain = {
+    on: () => { try { localStorage.setItem(KEY, 'on'); } catch(e){} start(); },
+    off: () => { try { localStorage.setItem(KEY, 'off'); } catch(e){}
+                 stop(); if (cv) cv.remove(), cv = null; },
+    isOn: () => !off(),
+  };
+  start();
+
+  // Swap in the account's own kanji, then remember them for a day. The set
+  // grows by a handful a level, so asking on every page load would be one
+  // request per view for an answer that has not changed.
+  const fresh = () => {
+    try {
+      const at = +localStorage.getItem('wk-rain-at') || 0;
+      return Date.now() - at < 86400000;
+    } catch(e){ return false; }
+  };
+  if (!off() && !fresh()) fetch('/api/rain')
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (d && d.chars && d.chars.length > 20){
+        CHARS = d.chars;
+        try {
+          localStorage.setItem('wk-rain-chars', d.chars);
+          localStorage.setItem('wk-rain-at', String(Date.now()));
+        } catch(e){}
+      }
+    }).catch(() => {});
+})();
+"""
 
 
 RACE_CSS = """
@@ -3397,10 +3556,10 @@ CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
     w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS, RACE_CSS,
     FORUM_CSS, DOCK_CSS,
-    w.PHONE_CSS, MOBILE_CSS))
+    RAIN_CSS, w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.
-CORE_JS = _bundle(LOAD_JS, MOBILE_JS, w.SORT_JS, DOCK_JS)
+CORE_JS = _bundle(LOAD_JS, MOBILE_JS, RAIN_JS, w.SORT_JS, DOCK_JS)
 DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
                   w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS,
                   TIER_JS, CARD_JS)

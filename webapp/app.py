@@ -1098,6 +1098,22 @@ def words(deck_id):
 _kanji_words: dict[str, dict] = {}
 
 
+@app.get("/api/rain")
+def rain_glyphs():
+    """The characters for the background rain: the ones you can actually read.
+
+    A stock set of kanji would fall just as prettily, but these are yours -
+    Guru or better, which is the same bar the rest of the site uses for
+    "known". Cheap enough to be asked for once and kept in the browser.
+    """
+    user = require_login()
+    snap = store.get_snapshot(user["id"])
+    chars = w.known_kanji(snap) if snap else []
+    # Enough for the columns never to repeat visibly, not so many that the
+    # response is a page in itself.
+    return jsonify({"chars": "".join(sorted(set(chars))[:400])})
+
+
 @app.get("/api/kanji/<ch>")
 def kanji_words(ch: str):
     """Common words containing a kanji, for the panel under the grid."""
