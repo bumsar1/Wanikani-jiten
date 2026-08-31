@@ -85,12 +85,27 @@ CREATE TABLE IF NOT EXISTS shared_lists (
   PRIMARY KEY (user_id, deck_id)
 );
 -- Shared: a deck's word list is the same for everyone.
+CREATE TABLE IF NOT EXISTS dms (
+  id INTEGER PRIMARY KEY,
+  from_user INTEGER NOT NULL,
+  to_user INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  sent_at TEXT NOT NULL,
+  read_at TEXT               -- NULL until the person it was sent to opens it
+);
+CREATE TABLE IF NOT EXISTS favourites (
+  user_id INTEGER NOT NULL,
+  other_id INTEGER NOT NULL,
+  PRIMARY KEY (user_id, other_id)
+);
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL,
   kind TEXT NOT NULL DEFAULT 'say',   -- 'say', or 'levelup' when the site wrote it
   body TEXT NOT NULL,
   level INTEGER,                      -- the level reached, for a levelup
+  image BLOB,
+  image_type TEXT,
   posted_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -104,12 +119,6 @@ CREATE TABLE IF NOT EXISTS likes (
   post_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   PRIMARY KEY (post_id, user_id)
-);
-CREATE TABLE IF NOT EXISTS messages (
-  id INTEGER PRIMARY KEY,
-  user_id INTEGER NOT NULL,
-  body TEXT NOT NULL,
-  said_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS decks (
   deck_id INTEGER PRIMARY KEY,
@@ -203,12 +212,18 @@ def init() -> None:
         scols = {r["name"] for r in con.execute("PRAGMA table_info(shared_lists)")}
         if "kanji_cov" not in scols:
             con.execute("ALTER TABLE shared_lists ADD COLUMN kanji_cov REAL")
+        if "last_seen" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN last_seen TEXT")
         for col, decl in (("bio", "TEXT"), ("currently", "INTEGER"),
                           ("avatar", "BLOB"),
                           ("avatar_type", "TEXT"), ("banner", "BLOB"),
                           ("banner_type", "TEXT")):
             if col not in cols:
                 con.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
+        pcols = {r["name"] for r in con.execute("PRAGMA table_info(posts)")}
+        for col, decl in (("image", "BLOB"), ("image_type", "TEXT")):
+            if col not in pcols:
+                con.execute(f"ALTER TABLE posts ADD COLUMN {col} {decl}")
         ccols = {r["name"] for r in con.execute("PRAGMA table_info(creds)")}
         for col in ("jimaku_key", "nihongo_key"):
             if col not in ccols:
@@ -260,8 +275,12 @@ def set_password(user_id: int, password: str) -> None:
 def delete_user(user_id: int) -> None:
     with db() as con:
         for t in ("creds", "snapshots", "history", "shared_lists",
-                  "messages", "posts", "comments", "likes"):
+                  "posts", "comments", "likes"):
             con.execute(f"DELETE FROM {t} WHERE user_id = ?", (user_id,))
+        con.execute("DELETE FROM dms WHERE from_user = ? OR to_user = ?",
+                    (user_id, user_id))
+        con.execute("DELETE FROM favourites WHERE user_id = ? OR other_id = ?",
+                    (user_id, user_id))
         con.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
@@ -414,59 +433,112 @@ def sharing_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-# ---------------------------------------------------------------------- chat
+# ----------------------------------------------------------------- messages
 
-# Long enough for a thought, short enough that one person cannot push the
-# afternoon off the top of the card.
-SAY_MAX = 600
+DM_MAX = 2000
+# Long enough that stepping away to make tea does not put you offline, short
+# enough that the dot means something. A browser polls while it is open, so
+# anybody actually here keeps refreshing this by themselves.
+ONLINE_MINUTES = 6
 
 
-def say(user_id: int, body: str) -> int:
-    """Post one message. Returns its id, or 0 if there was nothing to post."""
-    body = (body or "").strip()[:SAY_MAX]
-    if not body:
-        return 0
+def seen_now(user_id: int) -> None:
+    """Touched on every request, which is what makes the green dot honest."""
     with db() as con:
-        cur = con.execute("INSERT INTO messages (user_id, body, said_at)"
-                          " VALUES (?,?,?)", (user_id, body, now()))
-        return int(cur.lastrowid or 0)
+        con.execute("UPDATE users SET last_seen = ? WHERE id = ?",
+                    (now(), user_id))
 
 
-def chatter(after_id: int = 0, limit: int = 60) -> list[dict]:
-    """Messages in the order they were said.
+def _online_cutoff() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S",
+                         time.localtime(time.time() - ONLINE_MINUTES * 60))
 
-    The newest `limit` of them, oldest first - the tail is what a chat is, and
-    the page wants to append downwards. With after_id it returns only what has
-    been said since, which is what the polling asks for and is usually empty.
+
+def dm_people(me: int) -> list[dict]:
+    """Everyone else, in the order you are likeliest to want them.
+
+    Favourites first, then anyone with something unread, then whoever you spoke
+    to most recently, and the rest by name.
     """
     with db() as con:
         rows = con.execute(
-            "SELECT m.id, m.user_id, m.body, m.said_at, u.username,"
-            " u.avatar IS NOT NULL AS has_avatar"
-            " FROM (SELECT * FROM messages WHERE id > ?"
-            "       ORDER BY id DESC LIMIT ?) m"
-            " JOIN users u ON u.id = m.user_id"
-            " ORDER BY m.id", (after_id, limit)).fetchall()
+            "SELECT u.id, u.username, u.last_seen,"
+            " u.avatar IS NOT NULL AS has_avatar,"
+            " EXISTS(SELECT 1 FROM favourites f"
+            "        WHERE f.user_id = ? AND f.other_id = u.id) AS fav,"
+            " (SELECT COUNT(*) FROM dms d WHERE d.from_user = u.id"
+            "  AND d.to_user = ? AND d.read_at IS NULL) AS unread,"
+            " (SELECT MAX(d.id) FROM dms d"
+            "  WHERE (d.from_user = u.id AND d.to_user = ?)"
+            "     OR (d.from_user = ? AND d.to_user = u.id)) AS last_id"
+            " FROM users u WHERE u.id <> ?"
+            " ORDER BY fav DESC, unread DESC, last_id DESC, u.username",
+            (me, me, me, me, me)).fetchall()
+    cutoff = _online_cutoff()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["online"] = bool(d["last_seen"] and d["last_seen"] >= cutoff)
+        out.append(d)
+    return out
+
+
+def dm_send(from_user: int, to_user: int, body: str) -> int:
+    body = (body or "").strip()[:DM_MAX]
+    if not body or from_user == to_user:
+        return 0
+    with db() as con:
+        if not con.execute("SELECT 1 FROM users WHERE id = ?",
+                           (to_user,)).fetchone():
+            return 0
+        cur = con.execute(
+            "INSERT INTO dms (from_user, to_user, body, sent_at)"
+            " VALUES (?,?,?,?)", (from_user, to_user, body, now()))
+        return int(cur.lastrowid or 0)
+
+
+def dm_thread(me: int, other: int, after_id: int = 0,
+              limit: int = 60) -> list[dict]:
+    """One conversation, oldest first. Both directions, since that is what a
+    conversation is."""
+    with db() as con:
+        rows = con.execute(
+            "SELECT d.id, d.from_user, d.body, d.sent_at FROM ("
+            "  SELECT * FROM dms"
+            "  WHERE ((from_user = ? AND to_user = ?)"
+            "      OR (from_user = ? AND to_user = ?)) AND id > ?"
+            "  ORDER BY id DESC LIMIT ?) d ORDER BY d.id",
+            (me, other, other, me, after_id, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
-def last_said() -> int:
-    """The newest message id, so a page can start polling from where it was
-    drawn rather than from nothing."""
+def dm_read(me: int, other: int) -> None:
+    """Opening a thread is reading it."""
     with db() as con:
-        r = con.execute("SELECT MAX(id) m FROM messages").fetchone()
-    return int(r["m"] or 0)
+        con.execute("UPDATE dms SET read_at = ? WHERE to_user = ?"
+                    " AND from_user = ? AND read_at IS NULL",
+                    (now(), me, other))
 
 
-def unsay(message_id: int, user_id: int, is_admin: bool = False) -> bool:
-    """Take a message back. Your own, or anyone's if you run the place."""
+def dm_unread(me: int) -> int:
     with db() as con:
-        sql = "DELETE FROM messages WHERE id = ?"
-        args: tuple = (message_id,)
-        if not is_admin:
-            sql += " AND user_id = ?"
-            args += (user_id,)
-        return con.execute(sql, args).rowcount > 0
+        r = con.execute("SELECT COUNT(*) c FROM dms WHERE to_user = ?"
+                        " AND read_at IS NULL", (me,)).fetchone()
+    return int(r["c"] or 0)
+
+
+def fav_toggle(me: int, other: int) -> bool:
+    """Returns whether they are a favourite now."""
+    with db() as con:
+        had = con.execute("SELECT 1 FROM favourites WHERE user_id = ?"
+                          " AND other_id = ?", (me, other)).fetchone()
+        if had:
+            con.execute("DELETE FROM favourites WHERE user_id = ?"
+                        " AND other_id = ?", (me, other))
+        else:
+            con.execute("INSERT OR IGNORE INTO favourites (user_id, other_id)"
+                        " VALUES (?,?)", (me, other))
+    return not had
 
 
 # --------------------------------------------------------------------- forum
@@ -476,15 +548,38 @@ COMMENT_MAX = 600
 
 
 def post(user_id: int, body: str, kind: str = "say",
-         level: int | None = None) -> int:
+         level: int | None = None, image: bytes | None = None):
+    """Put something up. Returns (id, error) - the error is about the picture.
+
+    A post may be a picture with nothing said about it, so an empty body is
+    only empty when there is no image either.
+    """
     body = (body or "").strip()[:POST_MAX]
-    if not body:
-        return 0
+    mime = None
+    if image:
+        mime = sniff_image(image)
+        if not mime:
+            return 0, ("That file is not a PNG, JPEG, GIF or WebP under 3 MB."
+                       if len(image) <= MAX_IMAGE else "That image is over 3 MB.")
+    else:
+        image = None
+    if not body and not image:
+        return 0, None
     with db() as con:
         cur = con.execute(
-            "INSERT INTO posts (user_id, kind, body, level, posted_at)"
-            " VALUES (?,?,?,?,?)", (user_id, kind, body, level, now()))
-        return int(cur.lastrowid or 0)
+            "INSERT INTO posts (user_id, kind, body, level, image, image_type,"
+            " posted_at) VALUES (?,?,?,?,?,?,?)",
+            (user_id, kind, body, level, image, mime, now()))
+        return int(cur.lastrowid or 0), None
+
+
+def post_image(post_id: int):
+    with db() as con:
+        row = con.execute("SELECT image, image_type FROM posts WHERE id = ?",
+                          (post_id,)).fetchone()
+    if not row or not row["image"]:
+        return None, None
+    return row["image"], row["image_type"]
 
 
 def announced(user_id: int, level: int) -> bool:
@@ -505,6 +600,7 @@ def feed(me: int, limit: int = 40) -> list[dict]:
     with db() as con:
         rows = con.execute(
             "SELECT p.id, p.user_id, p.kind, p.body, p.level, p.posted_at,"
+            " p.image IS NOT NULL AS has_image,"
             " u.username, u.avatar IS NOT NULL AS has_avatar,"
             " (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS likes,"
             " (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id"

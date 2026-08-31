@@ -945,6 +945,280 @@ def prelude(title: str, user=None, page: str = "") -> str:
     return _skeleton_head(title, user, page) + SPLASH
 
 
+DOCK_CSS = """
+/* The messages dock. Fixed to the corner of every page, because a message is
+   the one thing here you want to see without having gone looking for it. */
+.dock { position:fixed; right:16px; bottom:16px; z-index:60; }
+.dock .knob { position:relative; width:52px; height:52px; border-radius:50%;
+  border:1px solid var(--line); background:var(--accent); color:#fff;
+  cursor:pointer; box-shadow:0 6px 20px rgba(0,0,0,.18); font-size:21px;
+  display:flex; align-items:center; justify-content:center; }
+.dock .knob:hover { filter:brightness(1.06); }
+.dock .knob .badge { position:absolute; top:-2px; right:-2px; min-width:20px;
+  height:20px; border-radius:10px; background:var(--fg); color:var(--raise);
+  font-size:11px; font-weight:700; display:none; align-items:center;
+  justify-content:center; padding:0 5px; border:2px solid var(--raise);
+  font-variant-numeric:tabular-nums; }
+.dock .knob .badge.on { display:flex; }
+.panel { position:absolute; right:0; bottom:62px; width:320px;
+  max-height:min(70vh, 460px); display:none; flex-direction:column;
+  background:var(--raise); border:1px solid var(--line);
+  border-radius:var(--r-box); box-shadow:0 14px 44px rgba(0,0,0,.22);
+  overflow:hidden; }
+.panel.open { display:flex; }
+.panel > header { display:grid; grid-template-columns:max-content 1fr max-content;
+  align-items:center; gap:8px; padding:11px 13px;
+  border-bottom:1px solid var(--line); }
+.panel header b { font-size:13.5px; }
+.panel .back, .panel .star, .panel .shut { border:none; background:none;
+  color:var(--muted); cursor:pointer; font-size:15px; line-height:1;
+  padding:3px 6px; border-radius:6px; }
+.panel .back:hover, .panel .star:hover, .panel .shut:hover { color:var(--fg);
+  background:var(--sunk); }
+.panel .star.on { color:var(--accent); }
+.panel .scroll { overflow-y:auto; overscroll-behavior:contain; padding:6px 10px;
+  flex:1; min-height:120px; }
+
+.who-row { display:grid; grid-template-columns:32px 1fr max-content; gap:9px;
+  align-items:center; width:100%; text-align:left; border:none;
+  background:none; cursor:pointer; padding:7px 4px; border-radius:8px;
+  font:inherit; color:inherit; }
+.who-row:hover { background:var(--sunk); }
+.who-row .avatar { width:32px; height:32px; font-size:13px; }
+.who-row .nm { font-size:13.5px; display:block; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+/* Two states, one dot: here now, or not. Anything finer would be a guess
+   dressed up as a fact. */
+.who-row .dot { display:inline-block; width:7px; height:7px; border-radius:50%;
+  background:var(--line); margin-right:6px; vertical-align:1px; }
+.who-row .dot.on { background:#3fb950; }
+.who-row .fav { color:var(--accent); font-size:12px; }
+.who-row .un { min-width:19px; height:19px; border-radius:10px;
+  background:var(--accent); color:#fff; font-size:11px; font-weight:700;
+  display:flex; align-items:center; justify-content:center; padding:0 5px; }
+
+.dm { display:grid; gap:2px; padding:4px 0; }
+.dm p { margin:0; font-size:13.5px; line-height:1.45; padding:7px 11px;
+  border-radius:13px; max-width:80%; overflow-wrap:anywhere;
+  background:var(--sunk); justify-self:start; }
+.dm.mine p { background:var(--accent); color:#fff; justify-self:end; }
+.dm i { font-style:normal; font-size:10.5px; color:var(--faint);
+  justify-self:start; padding:0 4px; }
+.dm.mine i { justify-self:end; }
+/* An explicit display beats the hidden attribute, and this form is hidden
+   whenever the panel is showing the list of people rather than a thread. */
+.dmform[hidden] { display:none; }
+.dmform { display:grid; grid-template-columns:1fr max-content; gap:7px;
+  padding:9px 10px; border-top:1px solid var(--line); }
+.dmform input { width:100%; font:inherit; font-size:13px; padding:8px 12px;
+  border:1px solid var(--line); border-radius:var(--r-pill);
+  background:var(--bg); color:var(--fg); }
+.dmform input:focus { outline:none; border-color:var(--accent); }
+.dmform button { font:inherit; font-size:12.5px; font-weight:600;
+  padding:8px 15px; border:none; border-radius:var(--r-pill);
+  background:var(--accent); color:#fff; cursor:pointer; }
+.panel .nothing { color:var(--faint); font-size:12.5px; padding:14px 4px; }
+
+@media (max-width:700px) {
+  /* A 320px card floating over a 375px screen is a card with a margin nobody
+     asked for, so on a phone it simply takes the screen. */
+  .dock { right:12px; bottom:12px; }
+  .panel { position:fixed; inset:auto 8px 76px 8px; width:auto;
+    max-height:min(72vh, 520px); }
+}
+"""
+
+
+def dm_people_html(people) -> str:
+    rows = []
+    for u in people:
+        un = (f'<span class="un">{u["unread"]}</span>' if u["unread"]
+              else ('<span class="fav">&#9733;</span>' if u["fav"] else ""))
+        rows.append(
+            f'<button class="who-row" type="button" data-who="{u["id"]}"'
+            f' data-fav="{1 if u["fav"] else 0}"'
+            f' data-name="{esc(u["username"])}">'
+            f'{avatar_tag(u["id"], u["has_avatar"], u["username"])}'
+            f'<span class="nm">'
+            f'<i class="dot{" on" if u["online"] else ""}"'
+            f' title="{"Here now" if u["online"] else "Not here"}"></i>'
+            f'{esc(u["username"])}</span>{un or "<span></span>"}</button>')
+    return "".join(rows) or ('<p class="nothing">Nobody else has an account '
+                             'here yet.</p>')
+
+
+def dm_lines(msgs, me: int) -> str:
+    out = []
+    for m in msgs:
+        mine = m["from_user"] == me
+        out.append(f'<div class="dm{" mine" if mine else ""}" data-id="{m["id"]}">'
+                   f'<p>{esc(m["body"])}</p>'
+                   f'<i>{said_when(m["sent_at"])}</i></div>')
+    return "".join(out)
+
+
+def dock() -> str:
+    """The bubble itself. Empty until it is opened - the list and the thread
+    both arrive from the server, so the markup lives in one place."""
+    return """
+    <div class="dock" id="dock">
+      <div class="panel" id="panel">
+        <header>
+          <button class="back" id="dmback" type="button" hidden
+                  title="Back to everyone" aria-label="Back">&larr;</button>
+          <b id="dmtitle">Messages</b>
+          <span>
+            <button class="star" id="dmstar" type="button" hidden
+                    title="Favourite" aria-label="Favourite">&#9734;</button>
+            <button class="shut" id="dmshut" type="button"
+                    title="Close" aria-label="Close">&times;</button>
+          </span>
+        </header>
+        <div class="scroll" id="dmscroll"></div>
+        <form class="dmform" id="dmform" hidden>
+          <input id="dmbox" maxlength="2000" autocomplete="off"
+                 aria-label="Write a message" placeholder="Message&hellip;">
+          <button type="submit">Send</button>
+        </form>
+      </div>
+      <button class="knob" id="dmknob" type="button" aria-label="Messages">
+        &#9993;<span class="badge" id="dmbadge">0</span>
+      </button>
+    </div>"""
+
+
+DOCK_JS = """
+(function () {
+  var knob = document.getElementById('dmknob');
+  if (!knob) return;
+  var panel = document.getElementById('panel');
+  var scroll = document.getElementById('dmscroll');
+  var form = document.getElementById('dmform');
+  var box = document.getElementById('dmbox');
+  var badge = document.getElementById('dmbadge');
+  var title = document.getElementById('dmtitle');
+  var back = document.getElementById('dmback');
+  var star = document.getElementById('dmstar');
+  var open = false, who = 0, last = 0, timer = 0;
+
+  function mark(n) {
+    badge.textContent = n > 99 ? '99+' : n;
+    badge.classList.toggle('on', n > 0);
+  }
+  async function get(url) {
+    var r = await fetch(url);
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }
+  async function send(url, data) {
+    var r = await fetch(url, {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)});
+    return r.json();
+  }
+
+  async function people() {
+    who = 0; last = 0;
+    title.textContent = 'Messages';
+    back.hidden = true; star.hidden = true; form.hidden = true;
+    try {
+      var d = await get('/dm/people');
+      scroll.innerHTML = d.html;
+      mark(d.unread);
+      scroll.querySelectorAll('[data-who]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          thread(Number(b.dataset.who), b.dataset.name,
+                 b.dataset.fav === '1');
+        });
+      });
+    } catch (e) { /* the panel keeps whatever it last had */ }
+  }
+
+  async function thread(id, name, fav) {
+    who = id; last = 0;
+    title.textContent = name;
+    back.hidden = false; form.hidden = false;
+    star.hidden = false;
+    star.classList.toggle('on', !!fav);
+    star.innerHTML = fav ? '&#9733;' : '&#9734;';
+    scroll.innerHTML = '';
+    await pull(true);
+    box.focus();
+  }
+
+  async function pull(jump) {
+    if (!who) return;
+    try {
+      var d = await get('/dm/thread/' + who + '?after=' + last);
+      if (d.html) {
+        var stick = jump ||
+          scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+        scroll.insertAdjacentHTML('beforeend', d.html);
+        if (stick) scroll.scrollTop = scroll.scrollHeight;
+      }
+      if (d.last) last = d.last;
+      mark(d.unread);
+    } catch (e) { /* try again on the next tick */ }
+  }
+
+  async function tick(force) {
+    // A hidden tab is not being read, and polling it is somebody's server
+    // answering questions nobody asked. The first one still runs: a page that
+    // opened in a background tab should carry the right number when it is
+    // finally looked at, without waiting for a visibility change.
+    if (document.hidden && !force) return;
+    if (open && who) return pull(false);
+    if (open) return people();
+    try { mark((await get('/dm/unread')).unread); } catch (e) {}
+  }
+
+  function beat() {
+    clearInterval(timer);
+    // Four seconds with a thread in front of you; a quiet minute otherwise,
+    // because a closed bubble only has to notice, not keep up.
+    timer = setInterval(tick, open ? 4000 : 60000);
+  }
+
+  knob.addEventListener('click', function () {
+    open = !open;
+    panel.classList.toggle('open', open);
+    if (open) people();
+    beat();
+  });
+  document.getElementById('dmshut').addEventListener('click', function () {
+    open = false; panel.classList.remove('open'); beat();
+  });
+  back.addEventListener('click', people);
+
+  star.addEventListener('click', async function () {
+    if (!who) return;
+    try {
+      var d = await send('/dm/favourite', {who: who});
+      if (d.ok) {
+        star.classList.toggle('on', d.fav);
+        star.innerHTML = d.fav ? '&#9733;' : '&#9734;';
+      }
+    } catch (e) {}
+  });
+
+  form.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    var said = box.value.trim();
+    if (!said || !who) return;
+    box.value = '';
+    try { await send('/dm/send', {to: who, body: said}); } catch (e) {}
+    pull(true);
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) tick(true);
+  });
+  tick(true);
+  beat();
+})();
+"""
+
+
 def shell(title: str, body: str, *, user=None, extra_css: str = "",
           scripts: str = "", page: str = "", partial: bool = False) -> str:
     """Common HTML skeleton. Same tokens as the local dashboard.
@@ -952,10 +1226,11 @@ def shell(title: str, body: str, *, user=None, extra_css: str = "",
     With partial=True this returns only what follows the top bar, for the
     streamed pages whose head went out before the work started.
     """
+    tail = (dock() if user else "")
     if partial:
-        return (f'{body}</main>'
+        return (f'{body}</main>{tail}'
                 f'<script src="{CORE_URL}" defer></script>{scripts}</body></html>')
-    return (_skeleton_head(title, user, page) + body + '</main>'
+    return (_skeleton_head(title, user, page) + body + '</main>' + tail
             + f'<script src="{CORE_URL}" defer></script>{scripts}</body></html>')
 
 
@@ -1587,47 +1862,6 @@ def pile(r) -> str:
             f'<i>&middot; {short}</i></span>')
 
 
-CHAT_CSS = """
-/* The one card on this page that is not a picture of somebody's numbers. It
-   keeps the same box as the rest so it does not read as a different site. */
-.chat .saidlist { max-height:340px; overflow-y:auto; overscroll-behavior:contain;
-  margin:0 -4px 12px; padding:0 4px; }
-.said { display:grid; grid-template-columns:28px 1fr max-content; gap:9px;
-  align-items:start; padding:7px 0; }
-.said .avatar { width:28px; height:28px; font-size:12px; }
-.said .bit { min-width:0; }
-.said .wh { font-size:12px; color:var(--muted); display:block;
-  margin-bottom:1px; }
-.said.mine .wh { color:var(--fg); font-weight:600; }
-.said .wh i { font-style:normal; color:var(--faint); font-size:11px;
-  margin-left:6px; font-variant-numeric:tabular-nums; }
-/* Anything long enough to need it breaks inside the word rather than pushing
-   the card sideways - a pasted URL is the usual culprit. */
-.said p { margin:0; font-size:13.5px; line-height:1.5; overflow-wrap:anywhere; }
-.said .drop { border:none; background:none; color:var(--faint); cursor:pointer;
-  font-size:15px; line-height:1; padding:2px 4px; border-radius:6px;
-  opacity:0; transition:opacity 120ms var(--ease); }
-.said:hover .drop, .said .drop:focus { opacity:1; }
-.said .drop:hover { color:var(--fg); background:var(--sunk); }
-.chat .nothing { color:var(--faint); font-size:13px; padding:10px 0; }
-.sayform { display:grid; grid-template-columns:1fr max-content; gap:8px; }
-.sayform input { width:100%; font:inherit; font-size:13.5px; padding:9px 12px;
-  border:1px solid var(--line); border-radius:var(--r-pill);
-  background:var(--bg); color:var(--fg); }
-.sayform input:focus { outline:none; border-color:var(--accent); }
-.sayform button { font:inherit; font-size:13px; font-weight:600; padding:9px 18px;
-  border:1px solid transparent; border-radius:var(--r-pill);
-  background:var(--accent); color:#fff; cursor:pointer; }
-.sayform button:disabled { opacity:.5; cursor:default; }
-/* A touch screen has no hover to reveal the delete with, so it is simply
-   always there on a phone. */
-@media (max-width:700px) {
-  .said .drop { opacity:1; }
-  .chat .saidlist { max-height:300px; }
-}
-"""
-
-
 def said_when(stamp: str) -> str:
     """The clock for today, the date for anything older.
 
@@ -1641,132 +1875,6 @@ def said_when(stamp: str) -> str:
         return time.strftime("%d %b", time.strptime(day, "%Y-%m-%d")) + f" {clock[:5]}"
     except ValueError:
         return clock[:5]
-
-
-def chat_lines(messages, me_id: int, is_admin: bool = False) -> str:
-    """The messages as HTML.
-
-    Both the page and the poll come through here, so a message becomes markup
-    in exactly one place and the escaping cannot be forgotten on the path that
-    is harder to look at.
-    """
-    out = []
-    for m in messages:
-        mine = m["user_id"] == me_id
-        drop = ""
-        if mine or is_admin:
-            drop = (f'<button class="drop" data-say="{m["id"]}" type="button"'
-                    f' title="Delete this" aria-label="Delete this">&times;</button>')
-        out.append(
-            f'<div class="said{" mine" if mine else ""}" data-id="{m["id"]}">'
-            f'{avatar_tag(m["user_id"], m["has_avatar"], m["username"])}'
-            f'<div class="bit"><span class="wh">{esc(m["username"])}'
-            f'<i>{said_when(m["said_at"])}</i></span>'
-            f'<p>{esc(m["body"])}</p></div>{drop or "<span></span>"}</div>')
-    return "".join(out)
-
-
-def chat_card(messages, user) -> str:
-    """Somewhere to say something, on the page where everyone else is."""
-    messages = messages or []
-    lines = chat_lines(messages, user["id"], bool(user.get("is_admin")))
-    empty = '<p class="nothing">Nothing said yet. Go on.</p>'
-    return f"""
-    <div class="race chat" id="chat">
-      <h3>Chat</h3>
-      <p class="sub">Everyone with an account here. It is not private &mdash;
-      anyone who can sign in can read it.</p>
-      <div class="saidlist" id="saidlist"
-           data-last="{messages[-1]["id"] if messages else 0}">{lines or empty}</div>
-      <form class="sayform" id="sayform" method="post" action="/together/say">
-        <input name="body" id="saybox" maxlength="600" autocomplete="off"
-               aria-label="Say something" placeholder="Say something&hellip;">
-        <button type="submit">Send</button>
-      </form>
-    </div>"""
-
-
-CHAT_JS = """
-<script>
-(function () {
-  var list = document.getElementById('saidlist');
-  var form = document.getElementById('sayform');
-  if (!list || !form) return;
-  var box = document.getElementById('saybox');
-  var sending = false;
-
-  function atBottom() {
-    // Within a line of the end. Someone reading back up the card should not
-    // have it yanked away because somebody else typed.
-    return list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-  }
-  function toBottom() { list.scrollTop = list.scrollHeight; }
-  toBottom();
-
-  function wire(root) {
-    root.querySelectorAll('[data-say]').forEach(function (b) {
-      if (b.dataset.wired) return;
-      b.dataset.wired = '1';
-      b.addEventListener('click', async function () {
-        var row = b.closest('.said');
-        b.disabled = true;
-        try {
-          var r = await fetch('/together/unsay', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id: Number(b.dataset.say)})});
-          if ((await r.json()).ok && row) row.remove();
-          else b.disabled = false;
-        } catch (e) { b.disabled = false; }
-      });
-    });
-  }
-  wire(list);
-
-  async function poll() {
-    // A hidden tab is not being read, and polling it is somebody's server
-    // answering questions nobody asked.
-    if (document.hidden || sending) return;
-    try {
-      var r = await fetch('/together/messages?after=' + (list.dataset.last || 0));
-      if (!r.ok) return;
-      var d = await r.json();
-      if (d.html) {
-        var stick = atBottom();
-        var empty = list.querySelector('.nothing');
-        if (empty) empty.remove();
-        list.insertAdjacentHTML('beforeend', d.html);
-        wire(list);
-        if (stick) toBottom();
-      }
-      if (d.last) list.dataset.last = d.last;
-    } catch (e) { /* the next tick tries again */ }
-  }
-  setInterval(poll, 4000);
-  document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) poll();
-  });
-
-  form.addEventListener('submit', async function (ev) {
-    ev.preventDefault();
-    var said = box.value.trim();
-    if (!said || sending) return;
-    sending = true;
-    var btn = form.querySelector('button');
-    btn.disabled = true;
-    try {
-      var r = await fetch('/together/say', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({body: said})});
-      if (r.ok) { box.value = ''; }
-    } catch (e) { /* leave what they typed in the box */ }
-    sending = false;
-    btn.disabled = false;
-    box.focus();
-    poll();
-  });
-})();
-</script>
-"""
 
 
 FORUM_CSS = """
@@ -1792,6 +1900,16 @@ FORUM_CSS = """
   font-variant-numeric:tabular-nums; }
 .post .body { margin:0; font-size:14px; line-height:1.6;
   overflow-wrap:anywhere; white-space:pre-wrap; }
+/* Bounded by height rather than width: a tall photograph would otherwise be a
+   whole screen of scrolling before the next post, and the feed stops being a
+   feed. contain, so nothing is cropped on the way. */
+.post .shot { display:block; margin:11px 0 0; width:100%; max-height:460px;
+  object-fit:contain; object-position:left; border-radius:var(--r-box);
+  background:var(--sunk); border:1px solid var(--line); }
+.composer .pick { display:flex; align-items:center; gap:10px; flex:1;
+  min-width:0; font-size:12.5px; color:var(--faint); }
+.composer .pick input[type=file] { font:inherit; font-size:12px; min-width:0; }
+.composer .row { gap:10px; justify-content:space-between; align-items:center; }
 .post .drop, .cmt .drop { border:none; background:none; color:var(--faint);
   cursor:pointer; font-size:16px; line-height:1; padding:2px 5px;
   border-radius:6px; }
@@ -1851,7 +1969,7 @@ FORUM_CSS = """
 """
 
 
-def forum_page(user, posts, comments) -> str:
+def forum_page(user, posts, comments, note: str = "") -> str:
     """Everything anyone has put up, newest first."""
     me = user["id"]
     admin = bool(user.get("is_admin"))
@@ -1875,7 +1993,12 @@ def forum_page(user, posts, comments) -> str:
                 f'<img class="thumbs" src="/cheer/thumbs-up.jpg" alt=""'
                 f' width="56" height="56" loading="lazy"></div>')
         else:
-            middle = f'<p class="body">{esc(p["body"])}</p>'
+            shot = ""
+            if p.get("has_image"):
+                shot = (f'<img class="shot" src="/forum/image/{p["id"]}"'
+                        f' alt="" loading="lazy">')
+            said = f'<p class="body">{esc(p["body"])}</p>' if p["body"] else ""
+            middle = said + shot
         mine_c = comments.get(p["id"], [])
         talk = []
         for c in mine_c:
@@ -1917,15 +2040,19 @@ def forum_page(user, posts, comments) -> str:
 
     empty = ('<p class="feedempty">Nothing here yet. Put something up, or go '
              'and pass a level &mdash; that posts itself.</p>')
-    body = (f'<h1>Forum</h1>'
+    body = ((f'<div class="err">{esc(note)}</div>' if note else "")
+            + f'<h1>Forum</h1>'
             f'<p class="sub">Anything you like, and every level anybody '
             f'here climbs. Everyone with an account can read it.</p>'
             f'<div class="race composer">'
-            f'<form method="post" action="/forum/post">'
+            f'<form method="post" action="/forum/post"'
+            f' enctype="multipart/form-data">'
             f'<textarea name="body" maxlength="2000"'
             f' aria-label="Write a post"'
             f' placeholder="What are you working on?"></textarea>'
-            f'<div class="row"><button type="submit">Post</button></div>'
+            f'<div class="row"><label class="pick">'
+            f'<input type="file" name="image" accept="image/*">'
+            f'</label><button type="submit">Post</button></div>'
             f'</form></div>'
             f'<div class="feed">{"".join(cards) or empty}</div>')
     return shell("Forum", body, user=user, page="forum", scripts=FORUM_JS)
@@ -2270,15 +2397,10 @@ def race_track(race, quiet) -> str:
 def together_page(user, visibility, token, base_url, people, by_user, overlap,
                   absent, share_stats=False, profile=None, can_add=False,
                   note="", featured=None, race=None, quiet=None,
-                  share_kanji=False, chat=None) -> str:
+                  share_kanji=False) -> str:
     featured = featured or {}
     head = share_panel(visibility, token, base_url, user["username"],
                        share_stats, share_kanji)
-    # High on the page on purpose. The cards below it are the same today as
-    # they were an hour ago; this is the only one where something may have
-    # happened since you last looked, and a chat you have to go and find is a
-    # chat nobody uses.
-    head += chat_card(chat, user)
     race = race or []
     head += race_track(race, quiet or [])
     head += climb_chart(race)
@@ -2365,8 +2487,7 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
     if not people:
         body = (f'<h1>Together</h1><p class="sub">Nobody is sharing their lists yet.'
                 f'</p>{head}{missing}')
-    return shell("Together", body, user=user,
-                 scripts=SHARE_JS + ADD_JS + CHAT_JS)
+    return shell("Together", body, user=user, scripts=SHARE_JS + ADD_JS)
 
 
 ADD_JS = """
@@ -3270,11 +3391,11 @@ CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     w.REPORT_CSS, AUTH_CSS, LOAD_CSS, BURN_CSS,
     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
     w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS, RACE_CSS,
-    CHAT_CSS, FORUM_CSS,
+    FORUM_CSS, DOCK_CSS,
     w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.
-CORE_JS = _bundle(LOAD_JS, MOBILE_JS, w.SORT_JS)
+CORE_JS = _bundle(LOAD_JS, MOBILE_JS, w.SORT_JS, DOCK_JS)
 DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
                   w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS,
                   TIER_JS, CARD_JS)

@@ -143,7 +143,7 @@ def note_levelup(user_id: int, was, payload: dict) -> None:
     if store.announced(user_id, reached):
         return
     store.post(user_id, f"reached level {reached}", kind="levelup",
-               level=reached)
+               level=reached)[0]
 
 
 def push_known_words(user_id: int, snapshot: dict, key: str) -> None:
@@ -712,8 +712,7 @@ def together():
                                 {p["id"]: store.currently_of(p["id"])
                                  for p in people},
                                 race, quiet,
-                                store.shares_kanji(user["id"]),
-                                store.chatter())
+                                store.shares_kanji(user["id"]))
 
 
 @app.post("/together/share")
@@ -733,50 +732,6 @@ def set_sharing():
     return redirect(url_for("together"))
 
 
-# ---------------------------------------------------------------------- chat
-
-# The markup is built in render.py for both paths - the page and the poll -
-# so there is one place where a message becomes HTML, and the escaping lives
-# there rather than being redone in JavaScript.
-
-@app.post("/together/say")
-def chat_say():
-    user = require_login()
-    src = request.get_json(silent=True) or request.form
-    said = store.say(user["id"], src.get("body", ""))
-    if request.is_json:
-        return jsonify({"ok": bool(said), "id": said})
-    return redirect(url_for("together") + "#chat")
-
-
-@app.post("/together/unsay")
-def chat_unsay():
-    user = require_login()
-    src = request.get_json(silent=True) or request.form
-    try:
-        mid = int(src.get("id") or 0)
-    except (TypeError, ValueError):
-        mid = 0
-    gone = store.unsay(mid, user["id"], bool(user.get("is_admin")))
-    if request.is_json:
-        return jsonify({"ok": gone})
-    return redirect(url_for("together") + "#chat")
-
-
-@app.get("/together/messages")
-def chat_since():
-    """What has been said since the page was drawn. Usually nothing."""
-    user = require_login()
-    try:
-        after = int(request.args.get("after") or 0)
-    except (TypeError, ValueError):
-        after = 0
-    fresh = store.chatter(after_id=after)
-    return jsonify({"html": render.chat_lines(fresh, user["id"],
-                                              bool(user.get("is_admin"))),
-                    "last": fresh[-1]["id"] if fresh else after})
-
-
 # --------------------------------------------------------------------- forum
 
 @app.get("/forum")
@@ -784,15 +739,33 @@ def forum():
     user = require_login()
     posts = store.feed(user["id"])
     return render.forum_page(
-        user, posts, store.comments_on([p["id"] for p in posts]))
+        user, posts, store.comments_on([p["id"] for p in posts]),
+        note=request.args.get("note", ""))
 
 
 @app.post("/forum/post")
 def forum_post():
     user = require_login()
     src = request.get_json(silent=True) or request.form
-    store.post(user["id"], src.get("body", ""))
-    return redirect(url_for("forum"))
+    upload = request.files.get("image")
+    blob = upload.read() if upload and upload.filename else None
+    _id, err = store.post(user["id"], src.get("body", ""), image=blob)
+    return redirect(url_for("forum", note=err) if err else url_for("forum"))
+
+
+@app.get("/forum/image/<int:post_id>")
+def forum_image(post_id):
+    """A picture somebody put up. Same treatment as the profile ones: the type
+    is read from the bytes, sniffing is off, and it is served into a sandbox
+    that may not run anything."""
+    require_login()
+    data, mime = store.post_image(post_id)
+    if not data:
+        abort(404)
+    return Response(data, mimetype=mime, headers={
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Cache-Control": "private, max-age=300"})
 
 
 @app.post("/forum/comment")
@@ -827,6 +800,84 @@ def forum_uncomment():
     store.uncomment(_int(src.get("comment")), user["id"],
                     bool(user.get("is_admin")))
     return redirect(url_for("forum"))
+
+
+# ----------------------------------------------------------------- messages
+
+# last_seen is what the green dot is made of, and an open browser polls every
+# few seconds - so the write is throttled here rather than run per request.
+# One row per person per minute is plenty for a six-minute window.
+_seen: dict = {}
+SEEN_EVERY = 60.0
+
+
+@app.before_request
+def mark_seen():
+    uid = session.get("uid")
+    if not uid:
+        return
+    last = _seen.get(uid, 0.0)
+    if time.time() - last < SEEN_EVERY:
+        return
+    _seen[uid] = time.time()
+    try:
+        store.seen_now(uid)
+    except Exception:            # presence is never worth failing a page over
+        app.logger.debug("could not record presence for %s", uid)
+
+
+@app.get("/dm/people")
+def dm_people():
+    user = require_login()
+    people = store.dm_people(user["id"])
+    return jsonify({"html": render.dm_people_html(people),
+                    "unread": sum(p["unread"] for p in people)})
+
+
+@app.get("/dm/unread")
+def dm_unread():
+    user = require_login()
+    return jsonify({"unread": store.dm_unread(user["id"])})
+
+
+@app.get("/dm/thread/<int:other>")
+def dm_thread(other):
+    """A conversation, or only what has arrived in it since `after`.
+
+    Opening it is reading it, so the unread count clears here rather than
+    needing a button of its own.
+    """
+    user = require_login()
+    after = _int(request.args.get("after"))
+    msgs = store.dm_thread(user["id"], other, after_id=after)
+    if not after:
+        store.dm_read(user["id"], other)
+    elif msgs:
+        store.dm_read(user["id"], other)
+    who = store.get_user(other)
+    return jsonify({
+        "html": render.dm_lines(msgs, user["id"]),
+        "last": msgs[-1]["id"] if msgs else after,
+        "name": who["username"] if who else "",
+        "unread": store.dm_unread(user["id"])})
+
+
+@app.post("/dm/send")
+def dm_send():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    said = store.dm_send(user["id"], _int(src.get("to")), src.get("body", ""))
+    return jsonify({"ok": bool(said), "id": said})
+
+
+@app.post("/dm/favourite")
+def dm_favourite():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    who = _int(src.get("who"))
+    if who == user["id"]:
+        return jsonify({"ok": False})
+    return jsonify({"ok": True, "fav": store.fav_toggle(user["id"], who)})
 
 
 @app.post("/profile")
