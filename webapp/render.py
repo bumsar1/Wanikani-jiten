@@ -308,20 +308,33 @@ MOBILE_CSS = """
   .racegrid { grid-template-columns:1fr max-content; column-gap:10px; }
   /* Six tier names do not fit 345px, and half a name is worse than none.
      The bands stay as the rules behind the track; only the words go. */
-  .racegrid > .bands { grid-column:1 / -1; }
+  /* With the words gone the strip has no content left, and the "60" it
+     carries is absolute - so it collapses to nothing and the marker lands on
+     the first runner's level. The height is the row it no longer earns. */
+  .racegrid > .bands { grid-column:1 / -1; min-height:13px; }
   .racegrid > .bands span { display:none; }
-  .racegrid > .who { grid-column:1 / -1; padding:10px 0 0; font-size:12.5px; }
-  .racegrid > .lv { font-size:11.5px; }
+  /* Name and standing share the row above the lane. Sending only the name up
+     there left the level beside the track still holding a third of the width,
+     which is the column the move was meant to give back. */
+  .racegrid > .who { grid-column:1; padding:10px 0 0; font-size:12.5px; }
+  .racegrid > .lv { grid-column:2; align-self:end; font-size:11.5px; }
+  .racegrid > .track { grid-column:1 / -1; }
   .track { height:34px; }
-  /* The table has seven columns, so the row-card treatment takes it over on a
-     phone and every figure keeps its name. Nothing to hide here. */
+  /* The table has nine columns, so the row-card treatment takes it over on a
+     phone. Every figure keeps its name, which is what the num class on each
+     cell buys: the labels are carried by td.num::before. Nothing to hide. */
 
   /* The three cards under the race: a 104px column of names is a third of the
      screen before any data starts, so the name goes above its own row. */
-  .strip { grid-template-columns:1fr max-content; row-gap:3px; padding:8px 0; }
+  /* Dense, or the count never reaches the column this rule gives it: it comes
+     after the dots in the markup, and a sparse flow will not go back a row for
+     it. It sat under the strip instead of beside the name. */
+  .strip { grid-template-columns:1fr max-content; row-gap:3px; padding:8px 0;
+    grid-auto-flow:dense; }
   .strip .nm { grid-column:1; }
   .strip .cnt { grid-column:2; }
   .strip .dots { grid-column:1 / -1; gap:1.5px; }
+  .strip .weeks { grid-column:1 / -1; gap:2px; height:22px; }
   .shelfrow { grid-template-columns:1fr; gap:6px; }
   .shelfrow .nm { padding-bottom:0; }
   .shelf { gap:8px; height:96px; }
@@ -1369,7 +1382,7 @@ RACE_CSS = """
    stretch of track it names. They were two grids once and the backdrop lied
    about where everybody was standing. */
 .racegrid { display:grid; grid-template-columns:186px 1fr max-content;
-  column-gap:14px; align-items:center; }
+  column-gap:14px; align-items:center; grid-auto-flow:dense; }
 /* The finish. Without it the track just stops, and where it stops is the
    whole distance the two of you are arguing about. */
 .racegrid > .bands { position:relative; }
@@ -1381,17 +1394,19 @@ RACE_CSS = """
 .racegrid > .bands span { padding-left:6px; }
 /* The name may be cut short; the number beside it may not, so they are laid
    out rather than left to share one overflow. */
-.racegrid > .who { display:flex; align-items:center; gap:8px; min-width:0;
-  font-size:13px; color:var(--muted); padding:7px 0; }
+.racegrid > .who { grid-column:1; display:flex; align-items:center; gap:8px;
+  min-width:0; font-size:13px; color:var(--muted); padding:7px 0; }
 .racegrid > .who .nm { overflow:hidden; text-overflow:ellipsis;
   white-space:nowrap; min-width:0; }
 .racegrid > .who.mine { color:var(--fg); font-weight:600; }
-.racegrid > .lv { font-size:12.5px; color:var(--muted); white-space:nowrap;
-  font-variant-numeric:tabular-nums; text-align:right; line-height:1.45; }
+.racegrid > .lv { grid-column:3; font-size:12.5px; color:var(--muted);
+  white-space:nowrap; font-variant-numeric:tabular-nums; text-align:right;
+  line-height:1.45; }
 .racegrid > .lv b { display:block; font-weight:400; color:var(--fg); }
 .racegrid > .lv .gap { font-size:11.5px; color:var(--faint); }
 .racegrid > .lv.mine { color:var(--accent); }
 
+.racegrid > .track { grid-column:2; }
 .track { position:relative; height:38px; }
 /* One rule per tier boundary, drawn in the track itself - same column as the
    labels above, so the two cannot drift apart. */
@@ -1470,10 +1485,13 @@ RACE_CSS = """
 .chartkey .ckey.o0::before { background:#7aa2f7; }
 .chartkey .ckey.o1::before { background:#9ece6a; }
 .chartkey .ckey.o2::before { background:#e0af68; }
-/* Eight weeks of days. Squares rather than a chart: the question is whether a
-   day happened, and a square answers it faster than a height does. */
+/* Eight weeks of days as squares, and the same eight weeks as bars beneath
+   them. A square answers whether a day happened faster than a height does; a
+   height answers how much, which no arrangement of squares will.
+   The rows are tighter than the space between two strips, or the bars read as
+   belonging to the name underneath them rather than the one they count. */
 .strip { display:grid; grid-template-columns:104px 1fr max-content;
-  align-items:center; gap:12px; padding:6px 0; }
+  align-items:center; gap:5px 12px; padding:10px 0; }
 .strip .nm { font-size:13px; color:var(--muted); white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
 .strip.mine .nm { color:var(--fg); font-weight:600; }
@@ -1486,6 +1504,15 @@ RACE_CSS = """
 .strip .dots i.d4 { background:var(--accent); border-color:transparent; }
 .strip .cnt { font-size:12px; color:var(--faint); white-space:nowrap;
   font-variant-numeric:tabular-nums; }
+/* Column 2 puts the bars under the days they total, and the sparse flow drops
+   them to their own row rather than reaching back for the gap. Eight bars to
+   fifty-six dots, so a bar stands over exactly the week it counts. */
+.strip .weeks { grid-column:2; display:grid; grid-template-columns:repeat(8,1fr);
+  gap:3px; align-items:end; height:26px; }
+.strip .weeks i { min-height:2px; border-radius:2px 2px 0 0;
+  background:rgba(251,146,60,.55); }
+.strip .weeks i.off { background:var(--sunk); }
+.strip.mine .weeks i.on { background:var(--accent); }
 
 .shelfrow { display:grid; grid-template-columns:104px 1fr; gap:12px;
   align-items:end; padding:8px 0; }
@@ -1647,6 +1674,11 @@ def showed_up(race) -> str:
     This is the number the race cannot show: not how far along someone is, but
     whether they turned up. You can be a level behind and still be the one who
     has not missed a day.
+
+    Under the days, the same eight weeks as totals. The dots answer whether,
+    the bars answer how much, and a fortnight of ones looks nothing like a
+    fortnight of forties in the second even though it is identical in the
+    first.
     """
     runners = [r for r in race if r.get("days") is not None]
     if not runners:
@@ -1654,6 +1686,12 @@ def showed_up(race) -> str:
     today = time.time()
     days = [time.strftime("%Y-%m-%d", time.gmtime(today - i * 86400))
             for i in range(55, -1, -1)]
+    weeks = [days[i:i + 7] for i in range(0, 56, 7)]
+    # One scale for everybody. Per-person scaling would draw a busy account's
+    # quiet week at the same height as somebody else's best one, and comparing
+    # them is the whole reason the bars are on a shared card.
+    tallest = max((sum((r["days"] or {}).get(d, 0) for d in wk)
+                   for r in runners for wk in weeks), default=0)
     rows = []
     for r in runners:
         got = r["days"] or {}
@@ -1662,15 +1700,26 @@ def showed_up(race) -> str:
             f'<i class="d{min(4, 1 + int(3 * got[d] / peak)) if got.get(d) else 0}" '
             f'title="{d}: {got.get(d, 0)} passed"></i>' for d in days)
         active = sum(1 for d in days if got.get(d))
+        bars = []
+        for wk in weeks:
+            n = sum(got.get(d, 0) for d in wk)
+            # A week with anything in it keeps a stub you can see, so "a few"
+            # and "none at all" are never drawn the same height.
+            pct = max(9, round(n / tallest * 100)) if n and tallest else 0
+            bars.append(f'<i class="{"on" if n else "off"}" style="height:{pct}%"'
+                        f' title="week of {wk[0]}: {n:,} passed"></i>')
         rows.append(f'<div class="strip{" mine" if r["me"] else ""}">'
                     f'<span class="nm">{esc(r["username"])}</span>'
                     f'<span class="dots">{cells}</span>'
-                    f'<span class="cnt">{active} / 56 days</span></div>')
+                    f'<span class="cnt">{active} / 56 days</span>'
+                    f'<span class="weeks">{"".join(bars)}</span></div>')
     return f"""
     <div class="race">
       <h3>Who showed up</h3>
       <p class="sub">The last eight weeks. A mark for every day something
-      passed, darker for more of them &mdash; turning up, rather than speed.</p>
+      passed, darker for more of them &mdash; turning up, rather than speed.
+      The bars underneath are the same weeks as totals, on one scale for
+      everybody, so they can be read against each other.</p>
       {"".join(rows)}
     </div>"""
 
@@ -1792,20 +1841,23 @@ def race_track(race, quiet) -> str:
                    else "not started")
         cells.append(f'<div class="who{m}"><span class="nm">{esc(r["username"])}'
                      f'{" (you)" if r["me"] else ""}</span>{pile(r)}</div>')
-        cells.append(
-            f'<div class="track">'
-            f'<i class="run{m}" style="width:{pct}"></i>'
-            f'<span class="pip{m}" style="left:{pct}">'
-            f'{avatar_tag(r["id"], r["has_avatar"], r["username"])}</span>'
-            f'</div>')
         gap = ""
         if not r["me"] or len(race) > 1:
             lead = race[0]["level"] + race[0]["frac"]
             behind = lead - (r["level"] + r["frac"])
             gap = ("<span class=\"gap\">leading</span>" if behind < 0.01 else
                    f'<span class="gap">{behind:.1f} levels behind</span>')
+        # Name, then standing, then the lane. The grid places each of the three
+        # by column, so this order is what lets a phone lift the first two onto
+        # one row above a full-width lane without moving anything on desktop.
         cells.append(f'<div class="lv{m}"><b>lv {r["level"]} &middot; {through}</b>'
                      f'{gap}</div>')
+        cells.append(
+            f'<div class="track">'
+            f'<i class="run{m}" style="width:{pct}"></i>'
+            f'<span class="pip{m}" style="left:{pct}">'
+            f'{avatar_tag(r["id"], r["has_avatar"], r["username"])}</span>'
+            f'</div>')
 
     rows = []
     for r in race:
@@ -1813,12 +1865,12 @@ def race_track(race, quiet) -> str:
         pace = f'{r["pace"]:.1f} d' if r.get("pace") else "&mdash;"
         rows.append(
             f'<tr class="{"mine" if r["me"] else ""}">'
-            f'<td>{esc(r["username"])}</td><td>{r["level"]}</td>'
-            f'<td>{r["passed"]} / {r["needed"]}</td>'
-            f'<td>{"&mdash;" if r.get("waiting") is None else format(r["waiting"], ",")}</td>'
-            f'<td>{"&mdash;" if r.get("lessons") is None else r["lessons"]}</td>'
-            f'<td>{r["answers"]:,}</td><td>{acc}</td>'
-            f'<td>{r["month"]}</td><td>{pace}</td></tr>')
+            f'<td>{esc(r["username"])}</td><td class="num">{r["level"]}</td>'
+            f'<td class="num">{r["passed"]} / {r["needed"]}</td>'
+            f'<td class="num">{"&mdash;" if r.get("waiting") is None else format(r["waiting"], ",")}</td>'
+            f'<td class="num">{"&mdash;" if r.get("lessons") is None else r["lessons"]}</td>'
+            f'<td class="num">{r["answers"]:,}</td><td class="num">{acc}</td>'
+            f'<td class="num">{r["month"]}</td><td class="num">{pace}</td></tr>')
 
     note = ""
     if quiet:
@@ -1835,11 +1887,12 @@ def race_track(race, quiet) -> str:
       and how far into it. Only people who share their stats appear.</p>
       <div class="racegrid">{"".join(cells)}</div>
       <table class="racetab">
-        <tr><th>who</th><th>level</th><th>level kanji</th>
-            <th title="Reviews waiting at this moment, worked out from when each one comes due. It cannot know what has been answered since that account was last refreshed, so it is an upper bound.">waiting</th>
-            <th>lessons</th>
-            <th title="WaniKani retired the endpoint that held a review count - it answers an empty list for every account now. This is the lifetime answer total from the account itself, which is what a review count was counting.">answers</th>
-            <th>accuracy</th><th>passed this month</th><th>days / level</th></tr>
+        <tr><th>who</th><th class="num">level</th><th class="num">level kanji</th>
+            <th class="num" title="Reviews waiting at this moment, worked out from when each one comes due. It cannot know what has been answered since that account was last refreshed, so it is an upper bound.">waiting</th>
+            <th class="num">lessons</th>
+            <th class="num" title="WaniKani retired the endpoint that held a review count - it answers an empty list for every account now. This is the lifetime answer total from the account itself, which is what a review count was counting.">answers</th>
+            <th class="num">accuracy</th><th class="num">passed this month</th>
+            <th class="num">days / level</th></tr>
         {"".join(rows)}
       </table>
       {note}
