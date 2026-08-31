@@ -684,7 +684,8 @@ def together():
                                 {p["id"]: store.currently_of(p["id"])
                                  for p in people},
                                 race, quiet,
-                                store.shares_kanji(user["id"]))
+                                store.shares_kanji(user["id"]),
+                                store.chatter())
 
 
 @app.post("/together/share")
@@ -702,6 +703,50 @@ def set_sharing():
             if everything:
                 store.put_shared_lists(user["id"], everything)
     return redirect(url_for("together"))
+
+
+# ---------------------------------------------------------------------- chat
+
+# The markup is built in render.py for both paths - the page and the poll -
+# so there is one place where a message becomes HTML, and the escaping lives
+# there rather than being redone in JavaScript.
+
+@app.post("/together/say")
+def chat_say():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    said = store.say(user["id"], src.get("body", ""))
+    if request.is_json:
+        return jsonify({"ok": bool(said), "id": said})
+    return redirect(url_for("together") + "#chat")
+
+
+@app.post("/together/unsay")
+def chat_unsay():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    try:
+        mid = int(src.get("id") or 0)
+    except (TypeError, ValueError):
+        mid = 0
+    gone = store.unsay(mid, user["id"], bool(user.get("is_admin")))
+    if request.is_json:
+        return jsonify({"ok": gone})
+    return redirect(url_for("together") + "#chat")
+
+
+@app.get("/together/messages")
+def chat_since():
+    """What has been said since the page was drawn. Usually nothing."""
+    user = require_login()
+    try:
+        after = int(request.args.get("after") or 0)
+    except (TypeError, ValueError):
+        after = 0
+    fresh = store.chatter(after_id=after)
+    return jsonify({"html": render.chat_lines(fresh, user["id"],
+                                              bool(user.get("is_admin"))),
+                    "last": fresh[-1]["id"] if fresh else after})
 
 
 @app.post("/profile")

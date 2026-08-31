@@ -85,6 +85,12 @@ CREATE TABLE IF NOT EXISTS shared_lists (
   PRIMARY KEY (user_id, deck_id)
 );
 -- Shared: a deck's word list is the same for everyone.
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  said_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS decks (
   deck_id INTEGER PRIMARY KEY,
   last_update TEXT,
@@ -233,7 +239,8 @@ def set_password(user_id: int, password: str) -> None:
 
 def delete_user(user_id: int) -> None:
     with db() as con:
-        for t in ("creds", "snapshots", "history", "shared_lists"):
+        for t in ("creds", "snapshots", "history", "shared_lists",
+                  "messages"):
             con.execute(f"DELETE FROM {t} WHERE user_id = ?", (user_id,))
         con.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
@@ -385,6 +392,61 @@ def sharing_users() -> list[dict]:
             " FROM users u WHERE u.visibility <> 'private'"
             " ORDER BY u.username").fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------- chat
+
+# Long enough for a thought, short enough that one person cannot push the
+# afternoon off the top of the card.
+SAY_MAX = 600
+
+
+def say(user_id: int, body: str) -> int:
+    """Post one message. Returns its id, or 0 if there was nothing to post."""
+    body = (body or "").strip()[:SAY_MAX]
+    if not body:
+        return 0
+    with db() as con:
+        cur = con.execute("INSERT INTO messages (user_id, body, said_at)"
+                          " VALUES (?,?,?)", (user_id, body, now()))
+        return int(cur.lastrowid or 0)
+
+
+def chatter(after_id: int = 0, limit: int = 60) -> list[dict]:
+    """Messages in the order they were said.
+
+    The newest `limit` of them, oldest first - the tail is what a chat is, and
+    the page wants to append downwards. With after_id it returns only what has
+    been said since, which is what the polling asks for and is usually empty.
+    """
+    with db() as con:
+        rows = con.execute(
+            "SELECT m.id, m.user_id, m.body, m.said_at, u.username,"
+            " u.avatar IS NOT NULL AS has_avatar"
+            " FROM (SELECT * FROM messages WHERE id > ?"
+            "       ORDER BY id DESC LIMIT ?) m"
+            " JOIN users u ON u.id = m.user_id"
+            " ORDER BY m.id", (after_id, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def last_said() -> int:
+    """The newest message id, so a page can start polling from where it was
+    drawn rather than from nothing."""
+    with db() as con:
+        r = con.execute("SELECT MAX(id) m FROM messages").fetchone()
+    return int(r["m"] or 0)
+
+
+def unsay(message_id: int, user_id: int, is_admin: bool = False) -> bool:
+    """Take a message back. Your own, or anyone's if you run the place."""
+    with db() as con:
+        sql = "DELETE FROM messages WHERE id = ?"
+        args: tuple = (message_id,)
+        if not is_admin:
+            sql += " AND user_id = ?"
+            args += (user_id,)
+        return con.execute(sql, args).rowcount > 0
 
 
 # ------------------------------------------------------------------- invites

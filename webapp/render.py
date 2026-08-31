@@ -1586,6 +1586,188 @@ def pile(r) -> str:
             f'<i>&middot; {short}</i></span>')
 
 
+CHAT_CSS = """
+/* The one card on this page that is not a picture of somebody's numbers. It
+   keeps the same box as the rest so it does not read as a different site. */
+.chat .saidlist { max-height:340px; overflow-y:auto; overscroll-behavior:contain;
+  margin:0 -4px 12px; padding:0 4px; }
+.said { display:grid; grid-template-columns:28px 1fr max-content; gap:9px;
+  align-items:start; padding:7px 0; }
+.said .avatar { width:28px; height:28px; font-size:12px; }
+.said .bit { min-width:0; }
+.said .wh { font-size:12px; color:var(--muted); display:block;
+  margin-bottom:1px; }
+.said.mine .wh { color:var(--fg); font-weight:600; }
+.said .wh i { font-style:normal; color:var(--faint); font-size:11px;
+  margin-left:6px; font-variant-numeric:tabular-nums; }
+/* Anything long enough to need it breaks inside the word rather than pushing
+   the card sideways - a pasted URL is the usual culprit. */
+.said p { margin:0; font-size:13.5px; line-height:1.5; overflow-wrap:anywhere; }
+.said .drop { border:none; background:none; color:var(--faint); cursor:pointer;
+  font-size:15px; line-height:1; padding:2px 4px; border-radius:6px;
+  opacity:0; transition:opacity 120ms var(--ease); }
+.said:hover .drop, .said .drop:focus { opacity:1; }
+.said .drop:hover { color:var(--fg); background:var(--sunk); }
+.chat .nothing { color:var(--faint); font-size:13px; padding:10px 0; }
+.sayform { display:grid; grid-template-columns:1fr max-content; gap:8px; }
+.sayform input { width:100%; font:inherit; font-size:13.5px; padding:9px 12px;
+  border:1px solid var(--line); border-radius:var(--r-pill);
+  background:var(--bg); color:var(--fg); }
+.sayform input:focus { outline:none; border-color:var(--accent); }
+.sayform button { font:inherit; font-size:13px; font-weight:600; padding:9px 18px;
+  border:1px solid transparent; border-radius:var(--r-pill);
+  background:var(--accent); color:#fff; cursor:pointer; }
+.sayform button:disabled { opacity:.5; cursor:default; }
+/* A touch screen has no hover to reveal the delete with, so it is simply
+   always there on a phone. */
+@media (max-width:700px) {
+  .said .drop { opacity:1; }
+  .chat .saidlist { max-height:300px; }
+}
+"""
+
+
+def said_when(stamp: str) -> str:
+    """The clock for today, the date for anything older.
+
+    Sliced rather than formatted where it can be: the stamps are written by
+    store.now() in a fixed layout, and %-d is not portable.
+    """
+    day, _, clock = (stamp or "").partition("T")
+    if day == time.strftime("%Y-%m-%d"):
+        return clock[:5]
+    try:
+        return time.strftime("%d %b", time.strptime(day, "%Y-%m-%d")) + f" {clock[:5]}"
+    except ValueError:
+        return clock[:5]
+
+
+def chat_lines(messages, me_id: int, is_admin: bool = False) -> str:
+    """The messages as HTML.
+
+    Both the page and the poll come through here, so a message becomes markup
+    in exactly one place and the escaping cannot be forgotten on the path that
+    is harder to look at.
+    """
+    out = []
+    for m in messages:
+        mine = m["user_id"] == me_id
+        drop = ""
+        if mine or is_admin:
+            drop = (f'<button class="drop" data-say="{m["id"]}" type="button"'
+                    f' title="Delete this" aria-label="Delete this">&times;</button>')
+        out.append(
+            f'<div class="said{" mine" if mine else ""}" data-id="{m["id"]}">'
+            f'{avatar_tag(m["user_id"], m["has_avatar"], m["username"])}'
+            f'<div class="bit"><span class="wh">{esc(m["username"])}'
+            f'<i>{said_when(m["said_at"])}</i></span>'
+            f'<p>{esc(m["body"])}</p></div>{drop or "<span></span>"}</div>')
+    return "".join(out)
+
+
+def chat_card(messages, user) -> str:
+    """Somewhere to say something, on the page where everyone else is."""
+    messages = messages or []
+    lines = chat_lines(messages, user["id"], bool(user.get("is_admin")))
+    empty = '<p class="nothing">Nothing said yet. Go on.</p>'
+    return f"""
+    <div class="race chat" id="chat">
+      <h3>Chat</h3>
+      <p class="sub">Everyone with an account here. It is not private &mdash;
+      anyone who can sign in can read it.</p>
+      <div class="saidlist" id="saidlist"
+           data-last="{messages[-1]["id"] if messages else 0}">{lines or empty}</div>
+      <form class="sayform" id="sayform" method="post" action="/together/say">
+        <input name="body" id="saybox" maxlength="600" autocomplete="off"
+               aria-label="Say something" placeholder="Say something&hellip;">
+        <button type="submit">Send</button>
+      </form>
+    </div>"""
+
+
+CHAT_JS = """
+<script>
+(function () {
+  var list = document.getElementById('saidlist');
+  var form = document.getElementById('sayform');
+  if (!list || !form) return;
+  var box = document.getElementById('saybox');
+  var sending = false;
+
+  function atBottom() {
+    // Within a line of the end. Someone reading back up the card should not
+    // have it yanked away because somebody else typed.
+    return list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  }
+  function toBottom() { list.scrollTop = list.scrollHeight; }
+  toBottom();
+
+  function wire(root) {
+    root.querySelectorAll('[data-say]').forEach(function (b) {
+      if (b.dataset.wired) return;
+      b.dataset.wired = '1';
+      b.addEventListener('click', async function () {
+        var row = b.closest('.said');
+        b.disabled = true;
+        try {
+          var r = await fetch('/together/unsay', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: Number(b.dataset.say)})});
+          if ((await r.json()).ok && row) row.remove();
+          else b.disabled = false;
+        } catch (e) { b.disabled = false; }
+      });
+    });
+  }
+  wire(list);
+
+  async function poll() {
+    // A hidden tab is not being read, and polling it is somebody's server
+    // answering questions nobody asked.
+    if (document.hidden || sending) return;
+    try {
+      var r = await fetch('/together/messages?after=' + (list.dataset.last || 0));
+      if (!r.ok) return;
+      var d = await r.json();
+      if (d.html) {
+        var stick = atBottom();
+        var empty = list.querySelector('.nothing');
+        if (empty) empty.remove();
+        list.insertAdjacentHTML('beforeend', d.html);
+        wire(list);
+        if (stick) toBottom();
+      }
+      if (d.last) list.dataset.last = d.last;
+    } catch (e) { /* the next tick tries again */ }
+  }
+  setInterval(poll, 4000);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) poll();
+  });
+
+  form.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    var said = box.value.trim();
+    if (!said || sending) return;
+    sending = true;
+    var btn = form.querySelector('button');
+    btn.disabled = true;
+    try {
+      var r = await fetch('/together/say', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({body: said})});
+      if (r.ok) { box.value = ''; }
+    } catch (e) { /* leave what they typed in the box */ }
+    sending = false;
+    btn.disabled = false;
+    box.focus();
+    poll();
+  });
+})();
+</script>
+"""
+
+
 def climb_chart(race) -> str:
     """Level against time, one line each.
 
@@ -1902,10 +2084,15 @@ def race_track(race, quiet) -> str:
 def together_page(user, visibility, token, base_url, people, by_user, overlap,
                   absent, share_stats=False, profile=None, can_add=False,
                   note="", featured=None, race=None, quiet=None,
-                  share_kanji=False) -> str:
+                  share_kanji=False, chat=None) -> str:
     featured = featured or {}
     head = share_panel(visibility, token, base_url, user["username"],
                        share_stats, share_kanji)
+    # High on the page on purpose. The cards below it are the same today as
+    # they were an hour ago; this is the only one where something may have
+    # happened since you last looked, and a chat you have to go and find is a
+    # chat nobody uses.
+    head += chat_card(chat, user)
     race = race or []
     head += race_track(race, quiet or [])
     head += climb_chart(race)
@@ -1992,7 +2179,8 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
     if not people:
         body = (f'<h1>Together</h1><p class="sub">Nobody is sharing their lists yet.'
                 f'</p>{head}{missing}')
-    return shell("Together", body, user=user, scripts=SHARE_JS + ADD_JS)
+    return shell("Together", body, user=user,
+                 scripts=SHARE_JS + ADD_JS + CHAT_JS)
 
 
 ADD_JS = """
@@ -2896,6 +3084,7 @@ CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     w.REPORT_CSS, AUTH_CSS, LOAD_CSS, BURN_CSS,
     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
     w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS, RACE_CSS,
+    CHAT_CSS,
     w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.

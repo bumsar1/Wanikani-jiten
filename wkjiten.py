@@ -3763,11 +3763,15 @@ CHART_CSS = """
 .chartbar { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:flex-start;
   justify-content:space-between; margin-bottom:10px; }
 .series { display:flex; flex-wrap:wrap; gap:6px; }
-.chip { display:inline-flex; align-items:center; gap:7px; opacity:.42; }
-.chip.on { opacity:1; }
-.chip i { width:11px; height:3px; border-radius:2px; background:var(--c);
-  display:inline-block; }
-.chip.on { border-color:var(--c); color:var(--fg); }
+/* Scoped to the legend they belong to. Unscoped, ".chip i" is a rule that
+   turns any i inside anything called a chip into an 11x3 colour swatch, and
+   the webapp bundles this sheet: it was reaching into the review-count chip
+   on the race and squashing the age inside it. */
+.series .chip { display:inline-flex; align-items:center; gap:7px; opacity:.42; }
+.series .chip.on { opacity:1; }
+.series .chip i { width:11px; height:3px; border-radius:2px;
+  background:var(--c); display:inline-block; }
+.series .chip.on { border-color:var(--c); color:var(--fg); }
 .chartbox { background:var(--raise); border:1px solid var(--line);
   border-radius:14px 14px 0 0; box-shadow:var(--shadow);
   padding:6px 10px; border-bottom:0; }
