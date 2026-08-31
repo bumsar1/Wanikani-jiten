@@ -2210,8 +2210,12 @@ def year_heatmap(cache, weeks: int = 53) -> str:
             # Five steps, on a curve: one item is visible, and a two-hundred
             # day does not make every ordinary day look empty.
             step = 0 if not n else min(4, 1 + int(3 * (n / top) ** 0.45))
+            # %-d (day with no leading zero) is a glibc extension: Windows
+            # raises on it, so place the day number by hand.
+            when = (f'{time.strftime("%a", t)} {t.tm_mday}'
+                    f' {time.strftime("%b %Y", t)}')
             cells.append(f'<i class="d{step}"'
-                         f' data-d="{time.strftime("%a %-d %b %Y", t)}" data-n="{n}"'
+                         f' data-d="{when}" data-n="{n}"'
                          f' title="{time.strftime("%a %d %b %Y", t)}: {n:,}"></i>')
             if t.tm_mday <= 7 and wday == 0:
                 months.append((wcol, time.strftime("%b", t)))
