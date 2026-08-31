@@ -1174,7 +1174,14 @@ DOCK_JS = """
     if (document.hidden && !force) return;
     if (open && who) return pull(false);
     if (open) return people();
-    try { mark((await get('/dm/unread')).unread); } catch (e) {}
+    try {
+      const d = await get('/dm/unread');
+      mark(d.unread);
+      // A dot on the tab rather than a number: the point is that something is
+      // there, and the count is on the page itself once you arrive.
+      const tab = document.querySelector('.topbar nav a[href="/forum"]');
+      if (tab) tab.classList.toggle('new', d.forum > 0);
+    } catch (e) {}
   }
 
   function beat() {
@@ -1710,6 +1717,30 @@ THEME_JS = """
 """
 
 
+def news_card(items) -> str:
+    """What happened while you were away, and nothing else.
+
+    No line here is generated to fill the box: if nobody did anything, the box
+    is not there. A digest that always has something to say teaches you to
+    stop reading it.
+    """
+    if not items:
+        return ""
+    ICON = {"level": "\u2b06", "streak": "\u25b6", "day": "\u25b8",
+            "forum": "\u25cf"}
+    rows = "".join(
+        f'<li class="{i["kind"]}"><span class="ic">{ICON.get(i["kind"], "")}</span>'
+        + (f'<b>{esc(i["who"])}</b> ' if i["who"] else "")
+        + f'{esc(i["what"])}</li>' for i in items)
+    more = ('<a class="go" href="/forum">Open the forum</a>'
+            if any(i["kind"] == "forum" for i in items) else "")
+    return f"""
+    <div class="news">
+      <div class="newshead"><h3>Since yesterday</h3>{more}</div>
+      <ul>{rows}</ul>
+    </div>"""
+
+
 RAIN_CSS = """
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
@@ -1719,8 +1750,26 @@ RAIN_CSS = """
 main, .dock { position:relative; z-index:1; }
 @media (prefers-reduced-motion: reduce) { .rain { display:none; } }
 .rainbox { display:flex; align-items:center; gap:10px; margin:10px 0 0; }
+.news { border:1px solid var(--line); border-radius:var(--r-box);
+  background:var(--raise); box-shadow:var(--shadow); padding:14px 16px;
+  margin:0 0 18px; }
+.newshead { display:flex; align-items:center; justify-content:space-between;
+  gap:12px; margin-bottom:8px; }
+.newshead h3 { margin:0; font-size:14px; letter-spacing:-.01em; }
+.newshead .go { padding:5px 12px; font-size:12.5px; }
+.news ul { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.news li { display:flex; align-items:baseline; gap:9px; font-size:13.5px;
+  color:var(--muted); }
+.news li b { color:var(--fg); font-weight:600; }
+.news .ic { color:var(--faint); font-size:11px; width:12px; flex:none; }
+.news li.level .ic, .news li.streak .ic { color:var(--accent); }
 /* Sits in the top bar between the tabs and the name. Quiet until hovered:
    it is a preference, not a feature. */
+/* Something new in there. A dot, not a badge: the tab is a word, and a number
+   hanging off a word in a row of words is noise. */
+.topbar nav a.new { position:relative; }
+.topbar nav a.new::after { content:""; position:absolute; top:3px; right:2px;
+  width:6px; height:6px; border-radius:50%; background:var(--accent); }
 .themesw { margin-left:auto; width:30px; height:30px; padding:0; flex:none;
   border:1px solid transparent; border-radius:var(--r-pill); cursor:pointer;
   background:none; color:var(--faint); font-size:14px; line-height:1;
@@ -3216,7 +3265,10 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today",
          f'<h1>{esc(user["username"])}</h1>'
          f'<p class="sub">WaniKani level {lvl} &middot; '
          f'data from {esc((cache.get("fetched_at") or "")[:16].replace("T", " "))}'
-         f'</p></div></div>', w.NAV_SLOT]
+         f'</p></div></div>',
+         # Straight under the name, because it is the thing you would have
+         # asked about first if there had been anybody to ask.
+         news_card(extras.get("news") or []), w.NAV_SLOT]
 
     def card(n, label, delta=None, items=None):
         d = f'<div class="d">{delta:+d} since last refresh</div>' if delta else ""

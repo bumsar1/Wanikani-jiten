@@ -209,6 +209,11 @@ def init() -> None:
         if "share_kanji" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN share_kanji"
                         " INTEGER NOT NULL DEFAULT 0")
+        # last_seen is for the green dot and moves on every page; this one only
+        # moves when the forum is actually opened, which is a different
+        # question and the only one an unread count can be built on.
+        if "forum_seen" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN forum_seen TEXT")
         scols = {r["name"] for r in con.execute("PRAGMA table_info(shared_lists)")}
         if "kanji_cov" not in scols:
             con.execute("ALTER TABLE shared_lists ADD COLUMN kanji_cov REAL")
@@ -518,6 +523,59 @@ def dm_read(me: int, other: int) -> None:
         con.execute("UPDATE dms SET read_at = ? WHERE to_user = ?"
                     " AND from_user = ? AND read_at IS NULL",
                     (now(), me, other))
+
+
+def forum_seen(user_id: int) -> None:
+    """Mark the forum read, as of now."""
+    with db() as con:
+        con.execute("UPDATE users SET forum_seen = ? WHERE id = ?",
+                    (now(), user_id))
+
+
+def forum_unread(user_id: int) -> int:
+    """Posts and comments by other people since this person last looked.
+
+    A first visit is not two hundred unread things - somebody who has never
+    opened the forum is shown the last day of it, which is the same thing
+    everybody else sees.
+    """
+    with db() as con:
+        row = con.execute("SELECT forum_seen FROM users WHERE id = ?",
+                          (user_id,)).fetchone()
+        since = (row and row["forum_seen"]) or _hours_ago(24)
+        posts = con.execute(
+            "SELECT COUNT(*) c FROM posts WHERE user_id <> ? AND posted_at > ?",
+            (user_id, since)).fetchone()["c"]
+        said = con.execute(
+            "SELECT COUNT(*) c FROM comments WHERE user_id <> ? AND said_at > ?",
+            (user_id, since)).fetchone()["c"]
+    return int(posts or 0) + int(said or 0)
+
+
+def _hours_ago(n: int) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S",
+                         time.localtime(time.time() - n * 3600))
+
+
+def whats_new(me: int, hours: int = 24) -> dict:
+    """What everyone else has been up to since yesterday.
+
+    Only things that happened: posts written, comments left, levels reached.
+    Nothing is invented and nothing is counted twice.
+    """
+    since = _hours_ago(hours)
+    with db() as con:
+        posts = [dict(r) for r in con.execute(
+            "SELECT p.id, p.kind, p.body, p.level, p.posted_at, u.username"
+            " FROM posts p JOIN users u ON u.id = p.user_id"
+            " WHERE p.user_id <> ? AND p.posted_at > ?"
+            " ORDER BY p.posted_at DESC LIMIT 12", (me, since))]
+        said = con.execute(
+            "SELECT COUNT(*) c FROM comments WHERE user_id <> ? AND said_at > ?",
+            (me, since)).fetchone()["c"]
+    return {"posts": [p for p in posts if p["kind"] != "levelup"],
+            "levelups": [p for p in posts if p["kind"] == "levelup"],
+            "comments": int(said or 0)}
 
 
 def dm_unread(me: int) -> int:

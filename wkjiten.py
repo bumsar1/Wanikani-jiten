@@ -429,6 +429,26 @@ def level_history(cache: dict) -> list[dict]:
     return out
 
 
+def day_streak(days: dict, now: float | None = None) -> int:
+    """Consecutive days with something passed, counting back from today.
+
+    Yesterday still counts as alive: somebody who has not done this morning's
+    reviews at nine o'clock is not on a broken streak, and telling them they
+    are is how a streak becomes a stick.
+    """
+    if not days:
+        return 0
+    now = time.time() if now is None else now
+    day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now - n * 86400))
+    start = 0 if days.get(day(0)) else 1
+    if not days.get(day(start)):
+        return 0
+    n = 0
+    while days.get(day(start + n)):
+        n += 1
+    return n
+
+
 def known_kanji(cache: dict, min_stage: int = 5) -> list[str]:
     """The characters this account can read, at Guru or better by default."""
     subs = cache.get("subjects") or {}

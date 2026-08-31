@@ -472,6 +472,49 @@ def needs_refresh(age_hours: float | None, cache: dict | None) -> bool:
     return "reviews" not in (cache or {}) and age > 1 / 6
 
 
+def announcements(me: dict) -> list[dict]:
+    """What everyone else has been up to since yesterday.
+
+    Only things that happened. A person who shares their stats and passed
+    something yesterday gets a line; one who did not, does not - an empty day
+    is not news, and a page that invents news to fill itself stops being worth
+    reading.
+    """
+    out = []
+    new = store.whats_new(me["id"])
+    for p in new["levelups"]:
+        # The site wrote that sentence when it noticed the level; saying it a
+        # second way here would be two places to keep in step for no gain.
+        out.append({"who": p["username"], "kind": "level",
+                    "what": p["body"] or f"reached level {p['level']}"})
+    for p in store.sharing_users():
+        if p["id"] == me["id"] or not p.get("share_stats"):
+            continue
+        snap = store.get_snapshot(p["id"])
+        if not snap:
+            continue
+        days = snap.get("passed_by_day") or {}
+        run = w.day_streak(days)
+        y = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 86400))
+        did = int(days.get(y) or 0)
+        if run >= 3:
+            out.append({"who": p["username"], "kind": "streak",
+                        "what": f"is on a {run}-day run"
+                                + (f", {did} passed yesterday" if did else "")})
+        elif did >= 10:
+            out.append({"who": p["username"], "kind": "day",
+                        "what": f"passed {did} items yesterday"})
+    # Unread rather than "in the last day", so this line and the dot on the tab
+    # are the same fact. They disagreed once, and a page that tells you two
+    # things about one number is worse than a page that tells you neither.
+    n = store.forum_unread(me["id"])
+    if n:
+        out.append({"who": "", "kind": "forum",
+                    "what": f"{n} new thing{'' if n == 1 else 's'} in the forum,"
+                            f" waiting to be read"})
+    return out
+
+
 def _page_body(user, creds, cache, which: str, title: str):
     yield render.prelude(title, user, which)
     if needs_refresh(store.snapshot_age_hours(user["id"]), cache):
@@ -527,7 +570,8 @@ def _page_body(user, creds, cache, which: str, title: str):
     for r in everything:
         if r["status"] == "completed":
             finished.append(dict(r, link=links.get(r["deck_id"])))
-    extras = {"status": status, "tags": [], "moved_up": set(),
+    extras = {"news": announcements(user) if which == "today" else [],
+              "status": status, "tags": [], "moved_up": set(),
               "jimaku_key": creds.get("jimaku_key"), "finished": finished}
     if prev:
         old = w.wk_known(prev)
@@ -738,6 +782,7 @@ def set_sharing():
 def forum():
     user = require_login()
     posts = store.feed(user["id"])
+    store.forum_seen(user["id"])
     return render.forum_page(
         user, posts, store.comments_on([p["id"] for p in posts]),
         note=request.args.get("note", ""))
@@ -836,8 +881,11 @@ def dm_people():
 
 @app.get("/dm/unread")
 def dm_unread():
+    """Both counts on the one poll the dock already makes, rather than a
+    second timer asking a second question sixty seconds later."""
     user = require_login()
-    return jsonify({"unread": store.dm_unread(user["id"])})
+    return jsonify({"unread": store.dm_unread(user["id"]),
+                    "forum": store.forum_unread(user["id"])})
 
 
 @app.get("/dm/thread/<int:other>")
