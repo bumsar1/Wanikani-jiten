@@ -964,7 +964,8 @@ def _skeleton_head(title: str, user=None, page: str = "") -> str:
     if user:
         tabs = [("/", "today", "today"), ("/levels", "levels", "levels"),
                 ("/kanji", "kanji", "kanji"), ("/browse", "browse", "browse"),
-                ("/together", "together", ""), ("/settings", "settings", "")]
+                ("/together", "together", ""),
+                ("/forum", "forum", "forum"), ("/settings", "settings", "")]
         if user.get("is_admin"):
             tabs.append(("/invites", "invites", ""))
         bar = ('<div class="topbar"><nav>'
@@ -1764,6 +1765,191 @@ CHAT_JS = """
     poll();
   });
 })();
+</script>
+"""
+
+
+FORUM_CSS = """
+/* The feed. Same box as every other card on the site, so the forum reads as
+   part of the place rather than something bolted to the side of it. */
+.composer textarea { width:100%; font:inherit; font-size:14px; line-height:1.55;
+  padding:11px 13px; border:1px solid var(--line); border-radius:var(--r-box);
+  background:var(--bg); color:var(--fg); resize:vertical; min-height:76px;
+  box-sizing:border-box; }
+.composer textarea:focus { outline:none; border-color:var(--accent); }
+.composer .row { display:flex; justify-content:flex-end; margin-top:9px; }
+.composer button, .cform button { font:inherit; font-size:13px; font-weight:600;
+  padding:9px 20px; border:1px solid transparent; border-radius:var(--r-pill);
+  background:var(--accent); color:#fff; cursor:pointer; }
+.post { border:1px solid var(--line); border-radius:var(--r-box);
+  background:var(--raise); box-shadow:var(--shadow); padding:14px 16px;
+  margin:0 0 14px; }
+.post > header { display:grid; grid-template-columns:36px 1fr max-content;
+  gap:10px; align-items:center; margin-bottom:9px; }
+.post header .avatar { width:36px; height:36px; font-size:14px; }
+.post header .who { font-size:13.5px; font-weight:600; display:block; }
+.post header i { font-style:normal; font-size:11.5px; color:var(--faint);
+  font-variant-numeric:tabular-nums; }
+.post .body { margin:0; font-size:14px; line-height:1.6;
+  overflow-wrap:anywhere; white-space:pre-wrap; }
+.post .drop, .cmt .drop { border:none; background:none; color:var(--faint);
+  cursor:pointer; font-size:16px; line-height:1; padding:2px 5px;
+  border-radius:6px; }
+.post .drop:hover, .cmt .drop:hover { color:var(--fg); background:var(--sunk); }
+
+/* A climb the site posted for you. It is the one card here that is allowed to
+   be loud, because it is the only one that is not somebody typing. */
+.cheer { display:grid; grid-template-columns:44px 1fr 56px; gap:14px;
+  align-items:center; padding:12px 14px; border-radius:var(--r-box);
+  background:linear-gradient(120deg, rgba(251,146,60,.13), transparent 70%);
+  border:1px solid var(--line); }
+.cheer img.balloons { width:44px; height:auto; image-rendering:pixelated; }
+/* The photograph has a white background and the page may not, so it is cropped
+   to a circle rather than left as a bright rectangle on a dark card. */
+.cheer img.thumbs { width:56px; height:56px; border-radius:50%;
+  object-fit:cover; border:2px solid var(--raise);
+  box-shadow:0 0 0 1px var(--line); }
+.cheer b { display:block; font-size:15px; letter-spacing:-.01em;
+  margin-bottom:2px; }
+.cheer span { font-size:13.5px; color:var(--muted); }
+.cheer .lv { color:var(--accent); font-weight:600; }
+
+.acts { display:flex; align-items:center; gap:14px; margin-top:11px;
+  padding-top:10px; border-top:1px solid var(--line); }
+.like { display:inline-flex; align-items:center; gap:6px; font:inherit;
+  font-size:13px; border:1px solid var(--line); background:var(--bg);
+  color:var(--muted); border-radius:var(--r-pill); padding:5px 13px;
+  cursor:pointer; }
+.like:hover { color:var(--fg); }
+.like.on { background:var(--accent); border-color:transparent; color:#fff; }
+.like b { font-weight:600; font-variant-numeric:tabular-nums; }
+.acts .ccount { font-size:12.5px; color:var(--faint); }
+.comments { margin-top:11px; }
+.cmt { display:grid; grid-template-columns:24px 1fr max-content; gap:8px;
+  align-items:start; padding:6px 0; }
+.cmt .avatar { width:24px; height:24px; font-size:11px; }
+.cmt .wh { font-size:12px; color:var(--muted); display:block; }
+.cmt .wh i { font-style:normal; color:var(--faint); margin-left:5px;
+  font-size:11px; }
+.cmt p { margin:0; font-size:13.5px; line-height:1.5; overflow-wrap:anywhere; }
+.cform { display:grid; grid-template-columns:1fr max-content; gap:8px;
+  margin-top:8px; }
+.cform input[type=text] { width:100%; font:inherit; font-size:13px;
+  padding:8px 12px; border:1px solid var(--line); border-radius:var(--r-pill);
+  background:var(--bg); color:var(--fg); }
+.cform input[type=text]:focus { outline:none; border-color:var(--accent); }
+.feedempty { color:var(--faint); font-size:14px; padding:18px 0; }
+
+@media (max-width:700px) {
+  .post { padding:12px 13px; }
+  /* Three columns of picture and text do not fit beside each other; the
+     balloons keep the left, the thumbs go under the words. */
+  .cheer { grid-template-columns:36px 1fr; row-gap:10px; }
+  .cheer img.balloons { width:36px; }
+  .cheer img.thumbs { grid-column:2; width:48px; height:48px; }
+}
+"""
+
+
+def forum_page(user, posts, comments) -> str:
+    """Everything anyone has put up, newest first."""
+    me = user["id"]
+    admin = bool(user.get("is_admin"))
+    cards = []
+    for p in posts:
+        mine = p["user_id"] == me
+        drop = ""
+        if mine or admin:
+            drop = (f'<form method="post" action="/forum/unpost" class="inline">'
+                    f'<input type="hidden" name="post" value="{p["id"]}">'
+                    f'<button class="drop" type="submit" title="Delete this"'
+                    f' aria-label="Delete this">&times;</button></form>')
+        if p["kind"] == "levelup":
+            middle = (
+                f'<div class="cheer">'
+                f'<img class="balloons" src="/cheer/balloons.png" alt=""'
+                f' width="44" height="44" loading="lazy">'
+                f'<div><b>Congratulations!</b>'
+                f'<span>{esc(p["username"])} reached '
+                f'<span class="lv">level {p["level"]}</span></span></div>'
+                f'<img class="thumbs" src="/cheer/thumbs-up.jpg" alt=""'
+                f' width="56" height="56" loading="lazy"></div>')
+        else:
+            middle = f'<p class="body">{esc(p["body"])}</p>'
+        mine_c = comments.get(p["id"], [])
+        talk = []
+        for c in mine_c:
+            cdrop = ""
+            if c["user_id"] == me or admin:
+                cdrop = (f'<form method="post" action="/forum/uncomment"'
+                         f' class="inline">'
+                         f'<input type="hidden" name="comment" value="{c["id"]}">'
+                         f'<button class="drop" type="submit" title="Delete this"'
+                         f' aria-label="Delete this">&times;</button></form>')
+            talk.append(
+                f'<div class="cmt" data-id="{c["id"]}">'
+                f'{avatar_tag(c["user_id"], c["has_avatar"], c["username"])}'
+                f'<div><span class="wh">{esc(c["username"])}'
+                f'<i>{said_when(c["said_at"])}</i></span>'
+                f'<p>{esc(c["body"])}</p></div>{cdrop or "<span></span>"}</div>')
+        n = len(mine_c)
+        cards.append(
+            f'<article class="post" data-id="{p["id"]}">'
+            f'<header>'
+            f'{avatar_tag(p["user_id"], p["has_avatar"], p["username"])}'
+            f'<div><span class="who">{esc(p["username"])}</span>'
+            f'<i>{said_when(p["posted_at"])}</i></div>'
+            f'{drop or "<span></span>"}</header>'
+            f'{middle}'
+            f'<div class="acts">'
+            f'<button class="like{" on" if p["liked"] else ""}" type="button"'
+            f' data-post="{p["id"]}" aria-pressed="{"true" if p["liked"] else "false"}">'
+            f'&hearts; <b>{p["likes"]}</b></button>'
+            f'<span class="ccount">{n} comment{"" if n == 1 else "s"}</span>'
+            f'</div>'
+            f'<div class="comments">{"".join(talk)}'
+            f'<form class="cform" method="post" action="/forum/comment">'
+            f'<input type="hidden" name="post" value="{p["id"]}">'
+            f'<input type="text" name="body" maxlength="600" autocomplete="off"'
+            f' aria-label="Write a comment" placeholder="Write a comment&hellip;">'
+            f'<button type="submit">Reply</button></form></div>'
+            f'</article>')
+
+    empty = ('<p class="feedempty">Nothing here yet. Put something up, or go '
+             'and pass a level &mdash; that posts itself.</p>')
+    body = (f'<h1>Forum</h1>'
+            f'<p class="sub">Anything you like, and every level anybody '
+            f'here climbs. Everyone with an account can read it.</p>'
+            f'<div class="race composer">'
+            f'<form method="post" action="/forum/post">'
+            f'<textarea name="body" maxlength="2000"'
+            f' aria-label="Write a post"'
+            f' placeholder="What are you working on?"></textarea>'
+            f'<div class="row"><button type="submit">Post</button></div>'
+            f'</form></div>'
+            f'<div class="feed">{"".join(cards) or empty}</div>')
+    return shell("Forum", body, user=user, page="forum", scripts=FORUM_JS)
+
+
+FORUM_JS = """
+<script>
+document.querySelectorAll('.like').forEach(function (b) {
+  b.addEventListener('click', async function () {
+    b.disabled = true;
+    try {
+      var r = await fetch('/forum/like', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({post: Number(b.dataset.post)})});
+      var d = await r.json();
+      if (d.ok) {
+        b.classList.toggle('on', d.liked);
+        b.setAttribute('aria-pressed', d.liked ? 'true' : 'false');
+        b.querySelector('b').textContent = d.likes;
+      }
+    } catch (e) { /* the count is still whatever the page last said */ }
+    b.disabled = false;
+  });
+});
 </script>
 """
 
@@ -3084,7 +3270,7 @@ CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     w.REPORT_CSS, AUTH_CSS, LOAD_CSS, BURN_CSS,
     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
     w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS, RACE_CSS,
-    CHAT_CSS,
+    CHAT_CSS, FORUM_CSS,
     w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.

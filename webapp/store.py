@@ -85,6 +85,26 @@ CREATE TABLE IF NOT EXISTS shared_lists (
   PRIMARY KEY (user_id, deck_id)
 );
 -- Shared: a deck's word list is the same for everyone.
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'say',   -- 'say', or 'levelup' when the site wrote it
+  body TEXT NOT NULL,
+  level INTEGER,                      -- the level reached, for a levelup
+  posted_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY,
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  said_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS likes (
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  PRIMARY KEY (post_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL,
@@ -240,7 +260,7 @@ def set_password(user_id: int, password: str) -> None:
 def delete_user(user_id: int) -> None:
     with db() as con:
         for t in ("creds", "snapshots", "history", "shared_lists",
-                  "messages"):
+                  "messages", "posts", "comments", "likes"):
             con.execute(f"DELETE FROM {t} WHERE user_id = ?", (user_id,))
         con.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
@@ -449,6 +469,128 @@ def unsay(message_id: int, user_id: int, is_admin: bool = False) -> bool:
         return con.execute(sql, args).rowcount > 0
 
 
+# --------------------------------------------------------------------- forum
+
+POST_MAX = 2000
+COMMENT_MAX = 600
+
+
+def post(user_id: int, body: str, kind: str = "say",
+         level: int | None = None) -> int:
+    body = (body or "").strip()[:POST_MAX]
+    if not body:
+        return 0
+    with db() as con:
+        cur = con.execute(
+            "INSERT INTO posts (user_id, kind, body, level, posted_at)"
+            " VALUES (?,?,?,?,?)", (user_id, kind, body, level, now()))
+        return int(cur.lastrowid or 0)
+
+
+def announced(user_id: int, level: int) -> bool:
+    """Has this level already been posted for this person?
+
+    A refresh can run twice over the same climb - two tabs, or a background
+    fetch landing beside a manual one - and nobody wants their level 28 twice.
+    """
+    with db() as con:
+        r = con.execute(
+            "SELECT 1 FROM posts WHERE user_id = ? AND kind = 'levelup'"
+            " AND level = ? LIMIT 1", (user_id, level)).fetchone()
+    return r is not None
+
+
+def feed(me: int, limit: int = 40) -> list[dict]:
+    """The newest posts, with their counts already added up."""
+    with db() as con:
+        rows = con.execute(
+            "SELECT p.id, p.user_id, p.kind, p.body, p.level, p.posted_at,"
+            " u.username, u.avatar IS NOT NULL AS has_avatar,"
+            " (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS likes,"
+            " (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id"
+            "  AND l.user_id = ?) AS liked"
+            " FROM posts p JOIN users u ON u.id = p.user_id"
+            " ORDER BY p.id DESC LIMIT ?", (me, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def comments_on(post_ids: list) -> dict:
+    """Every comment on these posts at once, rather than one query per post."""
+    if not post_ids:
+        return {}
+    marks = ",".join("?" * len(post_ids))
+    with db() as con:
+        rows = con.execute(
+            "SELECT c.id, c.post_id, c.user_id, c.body, c.said_at,"
+            " u.username, u.avatar IS NOT NULL AS has_avatar"
+            " FROM comments c JOIN users u ON u.id = c.user_id"
+            " WHERE c.post_id IN (" + marks + ") ORDER BY c.id",
+            tuple(post_ids)).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["post_id"], []).append(dict(r))
+    return out
+
+
+def add_comment(post_id: int, user_id: int, body: str) -> int:
+    body = (body or "").strip()[:COMMENT_MAX]
+    if not body:
+        return 0
+    with db() as con:
+        if not con.execute("SELECT 1 FROM posts WHERE id = ?",
+                           (post_id,)).fetchone():
+            return 0
+        cur = con.execute(
+            "INSERT INTO comments (post_id, user_id, body, said_at)"
+            " VALUES (?,?,?,?)", (post_id, user_id, body, now()))
+        return int(cur.lastrowid or 0)
+
+
+def toggle_like(post_id: int, user_id: int) -> dict:
+    """On if it was off. Returns the state the page should now draw."""
+    with db() as con:
+        if not con.execute("SELECT 1 FROM posts WHERE id = ?",
+                           (post_id,)).fetchone():
+            return {"ok": False}
+        had = con.execute(
+            "SELECT 1 FROM likes WHERE post_id = ? AND user_id = ?",
+            (post_id, user_id)).fetchone()
+        if had:
+            con.execute("DELETE FROM likes WHERE post_id = ? AND user_id = ?",
+                        (post_id, user_id))
+        else:
+            con.execute("INSERT INTO likes (post_id, user_id) VALUES (?,?)",
+                        (post_id, user_id))
+        n = con.execute("SELECT COUNT(*) c FROM likes WHERE post_id = ?",
+                        (post_id,)).fetchone()["c"]
+    return {"ok": True, "liked": not had, "likes": n}
+
+
+def unpost(post_id: int, user_id: int, is_admin: bool = False) -> bool:
+    """Taking a post down takes its comments and likes with it."""
+    with db() as con:
+        sql = "DELETE FROM posts WHERE id = ?"
+        args = (post_id,)
+        if not is_admin:
+            sql += " AND user_id = ?"
+            args += (user_id,)
+        gone = con.execute(sql, args).rowcount > 0
+        if gone:
+            con.execute("DELETE FROM comments WHERE post_id = ?", (post_id,))
+            con.execute("DELETE FROM likes WHERE post_id = ?", (post_id,))
+    return gone
+
+
+def uncomment(comment_id: int, user_id: int, is_admin: bool = False) -> bool:
+    with db() as con:
+        sql = "DELETE FROM comments WHERE id = ?"
+        args = (comment_id,)
+        if not is_admin:
+            sql += " AND user_id = ?"
+            args += (user_id,)
+        return con.execute(sql, args).rowcount > 0
+
+
 # ------------------------------------------------------------------- invites
 
 def create_invite(created_by: int | None) -> str:
@@ -529,13 +671,23 @@ def get_creds(user_id: int) -> dict:
 
 # ----------------------------------------------------------------- snapshots
 
-def save_snapshot(user_id: int, payload: dict) -> None:
-    """Keep the outgoing snapshot as 'previous' so progress can be diffed."""
+def save_snapshot(user_id: int, payload: dict):
+    """Keep the outgoing snapshot as 'previous' so progress can be diffed.
+
+    Returns the level that was current before this one, or None when there was
+    no snapshot yet - which is how a first fetch is told apart from a climb, so
+    that signing up does not announce you have reached level 12.
+    """
+    was = None
     with db() as con:
         cur = con.execute(
             "SELECT payload, fetched_at FROM snapshots"
             " WHERE user_id = ? AND slot = 'current'", (user_id,)).fetchone()
         if cur:
+            try:
+                was = int(json.loads(cur["payload"]).get("level") or 0) or None
+            except (ValueError, TypeError, AttributeError):
+                was = None
             con.execute(
                 "INSERT INTO snapshots (user_id, slot, fetched_at, payload)"
                 " VALUES (?,'previous',?,?) ON CONFLICT(user_id, slot)"
@@ -549,6 +701,7 @@ def save_snapshot(user_id: int, payload: dict) -> None:
             " payload = excluded.payload",
             (user_id, payload.get("fetched_at") or now(),
              json.dumps(payload, ensure_ascii=False)))
+    return was
 
 
 def mark_baseline(user_id: int) -> bool:

@@ -79,6 +79,14 @@ def current_user():
     return store.get_user(uid) if uid else None
 
 
+def _int(v) -> int:
+    """Form and JSON both arrive as whatever the caller sent."""
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def require_login():
     """Raises a redirect to the login page, which Flask propagates as-is."""
     user = current_user()
@@ -107,7 +115,8 @@ def refresh_wanikani(user_id: int, token: str,
         _refreshing.add(user_id)
     try:
         payload = w.wk_fetch(token)
-        store.save_snapshot(user_id, payload)
+        was = store.save_snapshot(user_id, payload)
+        note_levelup(user_id, was, payload)
     except SystemExit as e:
         app.logger.warning("wanikani refresh failed for %s: %s", user_id, e)
         return
@@ -116,6 +125,25 @@ def refresh_wanikani(user_id: int, token: str,
             _refreshing.discard(user_id)
     if push_key:
         push_known_words(user_id, payload, push_key)
+
+
+def note_levelup(user_id: int, was, payload: dict) -> None:
+    """Put a climb on the forum, once.
+
+    `was` is None on a first fetch, which is the difference between reaching a
+    level and merely having one: a new account arriving at level 12 has not
+    just climbed twelve times.
+    """
+    try:
+        reached = int(payload.get("level") or 0)
+    except (TypeError, ValueError):
+        return
+    if not was or reached <= was:
+        return
+    if store.announced(user_id, reached):
+        return
+    store.post(user_id, f"reached level {reached}", kind="levelup",
+               level=reached)
 
 
 def push_known_words(user_id: int, snapshot: dict, key: str) -> None:
@@ -749,6 +777,58 @@ def chat_since():
                     "last": fresh[-1]["id"] if fresh else after})
 
 
+# --------------------------------------------------------------------- forum
+
+@app.get("/forum")
+def forum():
+    user = require_login()
+    posts = store.feed(user["id"])
+    return render.forum_page(
+        user, posts, store.comments_on([p["id"] for p in posts]))
+
+
+@app.post("/forum/post")
+def forum_post():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    store.post(user["id"], src.get("body", ""))
+    return redirect(url_for("forum"))
+
+
+@app.post("/forum/comment")
+def forum_comment():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    store.add_comment(_int(src.get("post")), user["id"], src.get("body", ""))
+    return redirect(url_for("forum"))
+
+
+@app.post("/forum/like")
+def forum_like():
+    """The one action that answers rather than reloads - a like should not
+    cost you your place on the page."""
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    return jsonify(store.toggle_like(_int(src.get("post")), user["id"]))
+
+
+@app.post("/forum/unpost")
+def forum_unpost():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    store.unpost(_int(src.get("post")), user["id"], bool(user.get("is_admin")))
+    return redirect(url_for("forum"))
+
+
+@app.post("/forum/uncomment")
+def forum_uncomment():
+    user = require_login()
+    src = request.get_json(silent=True) or request.form
+    store.uncomment(_int(src.get("comment")), user["id"],
+                    bool(user.get("is_admin")))
+    return redirect(url_for("forum"))
+
+
 @app.post("/profile")
 def save_profile():
     user = require_login()
@@ -766,6 +846,26 @@ def save_profile():
                 problems.append(f"{kind}: {err}")
     note = "; ".join(problems) if problems else "Profile saved."
     return redirect(url_for("together", note=note))
+
+
+# An allow-list rather than a path: the name arrives from the URL, and
+# "../../etc/passwd" is a name too.
+CHEER = {"balloons.png": "image/png", "thumbs-up.jpg": "image/jpeg"}
+
+
+@app.get("/cheer/<name>")
+def cheer(name):
+    """The two celebration pictures. Shipped with the code, cached hard."""
+    mime = CHEER.get(name)
+    if not mime:
+        abort(404)
+    try:
+        with open(os.path.join(w.ASSET_DIR, name), "rb") as f:
+            data = f.read()
+    except OSError:
+        abort(404)
+    return Response(data, mimetype=mime, headers={
+        "Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/icon.png")
