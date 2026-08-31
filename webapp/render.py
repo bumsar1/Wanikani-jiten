@@ -1252,12 +1252,16 @@ def _skeleton_head(title: str, user=None, page: str = "") -> str:
                + "".join(f'<a href="{href}"'
                          + (' class="here"' if key and key == page else "")
                          + f">{label}</a>" for href, label, key in tabs)
-               + f'</nav><span class="who">{esc(user["username"])} &middot; '
+               + '</nav><button class="themesw" type="button" id="themesw"'
+                 ' title="Light, dark, or whatever this machine asks for"'
+                 ' aria-label="Change theme"></button>'
+               + f'<span class="who">{esc(user["username"])} &middot; '
                  f'<a href="/logout">log out</a></span></div>')
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title>{w.favicon_link(ICON)}'
             f'<link rel="stylesheet" href="{CSS_URL}">'
+            f'{w.THEME_BOOT}'
             f'</head><body><main>{bar}')
 
 
@@ -1662,6 +1666,50 @@ def profile_panel(profile: dict, user, choices=None) -> str:
 
 
 
+THEME_JS = """
+(function(){
+  // Three states, in a loop: follow this machine, force light, force dark. The
+  // first is the default and the one most people should stay on, so it is
+  // where the cycle starts and what an empty setting means.
+  const KEY = 'wk-theme';
+  const root = document.documentElement;
+  const read = () => { try { return localStorage.getItem(KEY) || 'system'; }
+                       catch(e){ return 'system'; } };
+  const ICONS = {system: '\u25D1', light: '\u2600', dark: '\u263D'};
+  const NAMES = {system: 'Following this machine', light: 'Light', dark: 'Dark'};
+
+  function apply(mode){
+    if (mode === 'system') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', mode);
+    for (const b of document.querySelectorAll('#themesw')){
+      b.textContent = ICONS[mode];
+      b.title = NAMES[mode] + ' \u2014 click to change';
+    }
+    // The address bar and the notch match the page, or a dark page sits in a
+    // white frame on a phone.
+    let meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta){ meta = document.createElement('meta');
+                meta.name = 'theme-color'; document.head.appendChild(meta); }
+    meta.content = getComputedStyle(root).getPropertyValue('--bg').trim();
+  }
+  function set(mode){
+    try { mode === 'system' ? localStorage.removeItem(KEY)
+                            : localStorage.setItem(KEY, mode); } catch(e){}
+    apply(mode);
+  }
+  addEventListener('DOMContentLoaded', () => {
+    apply(read());
+    const btn = document.getElementById('themesw');
+    if (btn) btn.addEventListener('click', () => {
+      const order = ['system', 'light', 'dark'];
+      set(order[(order.indexOf(read()) + 1) % order.length]);
+    });
+  });
+  apply(read());
+})();
+"""
+
+
 RAIN_CSS = """
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
@@ -1671,6 +1719,14 @@ RAIN_CSS = """
 main, .dock { position:relative; z-index:1; }
 @media (prefers-reduced-motion: reduce) { .rain { display:none; } }
 .rainbox { display:flex; align-items:center; gap:10px; margin:10px 0 0; }
+/* Sits in the top bar between the tabs and the name. Quiet until hovered:
+   it is a preference, not a feature. */
+.themesw { margin-left:auto; width:30px; height:30px; padding:0; flex:none;
+  border:1px solid transparent; border-radius:var(--r-pill); cursor:pointer;
+  background:none; color:var(--faint); font-size:14px; line-height:1;
+  display:grid; place-items:center; }
+.themesw:hover { color:var(--fg); border-color:var(--line);
+  background:var(--raise); }
 """
 
 
@@ -3556,10 +3612,10 @@ CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     TOGETHER_CSS, w.SLIDER_CSS, w.GRID_CSS, w.CHART_CSS,
     w.REACH_CSS, w.BROWSE_CSS, w.SUBS_CSS, w.READ_CSS, w.GAP_CSS, RACE_CSS,
     FORUM_CSS, DOCK_CSS,
-    RAIN_CSS, w.PHONE_CSS, MOBILE_CSS))
+    RAIN_CSS, w.THEME_CSS, w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.
-CORE_JS = _bundle(LOAD_JS, MOBILE_JS, RAIN_JS, w.SORT_JS, DOCK_JS)
+CORE_JS = _bundle(LOAD_JS, THEME_JS, MOBILE_JS, RAIN_JS, w.SORT_JS, DOCK_JS)
 DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
                   w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS,
                   TIER_JS, CARD_JS)

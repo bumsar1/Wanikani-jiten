@@ -2739,14 +2739,6 @@ REPORT_CSS = """
   --ease:cubic-bezier(.2,.7,.2,1);
   --t-fast:120ms; --t-base:220ms; --t-slow:400ms;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg:#141312; --raise:#1e1c1a; --fg:#ece9e4; --muted:#9c958c; --faint:#736c64;
-    --line:#302c28; --line-soft:#252220; --accent:#fb923c; --accent-soft:#2a1d13;
-    --good:#4ade80; --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);
-    --lift:0 14px 40px rgba(0,0,0,.45);
-  }
-}
 * { box-sizing:border-box; }
 html { scroll-behavior:smooth; }
 
@@ -4037,9 +4029,6 @@ GRID_JS = """
 
 GRID_CSS = """
 :root { --k0:#e8e2d9; --k-known:#15803d; --k-hot:#dc2626; }
-@media (prefers-color-scheme: dark) {
-  :root { --k0:#2a2622; --k-known:#22c55e; --k-hot:#ef4444; }
-}
 .fold { background:var(--raise); border:1px solid var(--line); border-radius:14px;
   box-shadow:var(--shadow); padding:2px 18px 4px; }
 .fold summary { cursor:pointer; padding:14px 0; list-style:none; display:flex;
@@ -4633,6 +4622,40 @@ def check_css(name, css):
     return css
 
 
+# The dark palette, written once and emitted twice: once for people whose
+# system asks for it, once for people who asked for it here. The choice has to
+# be able to beat the system either way, so the media query steps aside for an
+# explicit :root[data-theme="light"] and the explicit dark block outweighs the
+# light tokens on specificity rather than on order.
+_DARK = """
+    --bg:#141312; --raise:#1e1c1a; --fg:#ece9e4; --muted:#9c958c; --faint:#736c64;
+    --line:#302c28; --line-soft:#252220; --accent:#fb923c; --accent-soft:#2a1d13;
+    --good:#4ade80; --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);
+    --lift:0 14px 40px rgba(0,0,0,.45);
+    --k0:#2a2622; --k-known:#22c55e; --k-hot:#ef4444;
+"""
+
+THEME_CSS = (
+    "@media (prefers-color-scheme: dark) {\n"
+    "  :root:not([data-theme=\"light\"]) {" + _DARK + "  }\n"
+    "}\n"
+    ":root[data-theme=\"dark\"] {" + _DARK + "}\n"
+    # No transition on the swap. Fading every colour on the page at once looks
+    # like a fault rather than a choice, and it lands on whatever you were
+    # reading.
+    ":root[data-theme] * { transition:none !important; }\n"
+)
+
+
+# Applied before the first paint, or the page flashes the system's answer and
+# then corrects itself - which is worse than not having the setting.
+THEME_BOOT = (
+    "<script>try{var t=localStorage.getItem('wk-theme');"
+    "if(t==='dark'||t==='light')"
+    "document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>"
+)
+
+
 def build_report_html(args, key, cache, known, interactive: bool = False,
                       both: bool = False):
     """The dashboard. The interactive variant carries the live browser, which
@@ -5023,7 +5046,8 @@ def build_report_html(args, key, cache, known, interactive: bool = False,
             + "</nav>")
         # PHONE_CSS goes on last, always, so no phone rule has to fight for
         # position and no unclosed one can swallow a rule that follows it.
-        css += f"<style>{check_css('PHONE_CSS', PHONE_CSS)}</style>"
+        css += (f"<style>{check_css('THEME_CSS', THEME_CSS)}</style>"
+                f"<style>{check_css('PHONE_CSS', PHONE_CSS)}</style>")
         return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 + favicon_link() + css + "</head><body>"
