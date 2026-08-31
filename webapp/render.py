@@ -949,18 +949,22 @@ DOCK_CSS = """
 /* The messages dock. Fixed to the corner of every page, because a message is
    the one thing here you want to see without having gone looking for it. */
 .dock { position:fixed; right:16px; bottom:16px; z-index:60; }
-.dock .knob { position:relative; width:52px; height:52px; border-radius:50%;
-  border:1px solid var(--line); background:var(--accent); color:#fff;
-  cursor:pointer; box-shadow:0 6px 20px rgba(0,0,0,.18); font-size:21px;
-  display:flex; align-items:center; justify-content:center; }
-.dock .knob:hover { filter:brightness(1.06); }
+/* The site's own face rather than a glyph. The badge has to be able to sit
+   outside the circle, so the rounding is on the picture and not on the button
+   - overflow:hidden here would clip the number off. */
+.dock .knob { position:relative; width:54px; height:54px; padding:0;
+  border:none; background:none; cursor:pointer; display:block; }
+.dock .knob img { width:54px; height:54px; border-radius:50%; display:block;
+  object-fit:cover; box-sizing:border-box; border:2px solid var(--raise);
+  box-shadow:0 6px 20px rgba(0,0,0,.18); }
+.dock .knob:hover img { filter:brightness(1.06); }
 .dock .knob .badge { position:absolute; top:-2px; right:-2px; min-width:20px;
   height:20px; border-radius:10px; background:var(--fg); color:var(--raise);
   font-size:11px; font-weight:700; display:none; align-items:center;
   justify-content:center; padding:0 5px; border:2px solid var(--raise);
   font-variant-numeric:tabular-nums; }
 .dock .knob .badge.on { display:flex; }
-.panel { position:absolute; right:0; bottom:62px; width:320px;
+.panel { position:absolute; right:0; bottom:64px; width:320px;
   max-height:min(70vh, 460px); display:none; flex-direction:column;
   background:var(--raise); border:1px solid var(--line);
   border-radius:var(--r-box); box-shadow:0 14px 44px rgba(0,0,0,.22);
@@ -1060,7 +1064,7 @@ def dm_lines(msgs, me: int) -> str:
 def dock() -> str:
     """The bubble itself. Empty until it is opened - the list and the thread
     both arrive from the server, so the markup lives in one place."""
-    return """
+    return f"""
     <div class="dock" id="dock">
       <div class="panel" id="panel">
         <header>
@@ -1082,7 +1086,8 @@ def dock() -> str:
         </form>
       </div>
       <button class="knob" id="dmknob" type="button" aria-label="Messages">
-        &#9993;<span class="badge" id="dmbadge">0</span>
+        <img src="{ICON}" alt="" width="54" height="54">
+        <span class="badge" id="dmbadge">0</span>
       </button>
     </div>"""
 
