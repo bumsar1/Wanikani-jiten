@@ -1262,7 +1262,10 @@ def _skeleton_head(title: str, user=None, page: str = "") -> str:
                + "".join(f'<a href="{href}"'
                          + (' class="here"' if key and key == page else "")
                          + f">{label}</a>" for href, label, key in tabs)
-               + '</nav><button class="themesw" type="button" id="themesw"'
+               + '</nav><button class="themesw" type="button" id="rainsw2"'
+                 ' title="The falling kanji" aria-label="Turn the rain'
+                 ' on or off"></button>'
+               + '<button class="themesw" type="button" id="themesw"'
                  ' title="Light, dark, or whatever this machine asks for"'
                  ' aria-label="Change theme"></button>'
                + f'<span class="who">{esc(user["username"])} &middot; '
@@ -1510,7 +1513,12 @@ TOGETHER_CSS = """
    The avatar can do it because it carries its own border in the card's colour.
    It also means the banner is covered by 52px of circle instead of a 34px band
    across the whole of it. */
-.person .idbar.pulled { border-bottom:0; padding-top:8px; padding-bottom:6px;
+/* Above the banner, not under it. The banner became position:relative when the
+   fade was added to it, and a positioned box paints over a static one however
+   the document is ordered - so the picture that is meant to straddle the edge
+   went behind it instead. */
+.person .idbar.pulled { position:relative; z-index:1;
+  border-bottom:0; padding-top:8px; padding-bottom:6px;
   align-items:flex-start; }
 .person .idbar.pulled .avatar { margin-top:-40px; width:60px; height:60px;
   box-shadow:0 2px 10px rgba(0,0,0,.28); }
@@ -1841,6 +1849,33 @@ RAIN_CSS = """
   pointer-events:none; z-index:0; }
 main, .dock { position:relative; z-index:1; }
 @media (prefers-reduced-motion: reduce) { .rain { display:none; } }
+/* The picture, large, with the page behind it pushed back. Nothing here is a
+   dialog: there is nothing to fill in and nothing to lose, so a click anywhere
+   or Escape closes it. */
+.facebox { position:fixed; inset:0; z-index:200; display:grid; place-items:center;
+  background:rgba(0,0,0,.55); opacity:0; transition:opacity 180ms var(--ease);
+  cursor:zoom-out; padding:24px; }
+.facebox.on { opacity:1; }
+.facebox figure { margin:0; text-align:center; transform:scale(.92);
+  transition:transform 220ms var(--ease); }
+.facebox.on figure { transform:scale(1); }
+/* A cap as well as the two proportions: on a tall screen 56vh is a wall of
+   face rather than a picture of one. */
+.facebox img { display:block; width:min(52vh, 78vw, 440px);
+  height:min(52vh, 78vw, 440px);
+  object-fit:cover; border-radius:50%; border:3px solid var(--raise);
+  box-shadow:0 24px 70px rgba(0,0,0,.5); }
+.facebox figcaption { margin-top:16px; font-size:17px; font-weight:600;
+  color:#fff; text-shadow:0 2px 8px rgba(0,0,0,.6); }
+/* Everything except the enlarged picture. The blur is on the page, not on the
+   overlay, or the picture would be blurred along with what is behind it. */
+html.facedim body > main, html.facedim body > .dock,
+html.facedim body > canvas.rain { filter:blur(6px);
+  transition:filter 180ms var(--ease); }
+@media (prefers-reduced-motion: reduce) {
+  .facebox, .facebox figure { transition:none; }
+  html.facedim body > main { filter:none; }
+}
 .rainbox { display:flex; align-items:center; gap:10px; margin:10px 0 0;
   font-size:14px; }
 /* There is no site-wide select rule - every one is dressed where it is used -
@@ -1870,10 +1905,12 @@ main, .dock { position:relative; z-index:1; }
 .topbar nav a.new { position:relative; }
 .topbar nav a.new::after { content:""; position:absolute; top:3px; right:2px;
   width:6px; height:6px; border-radius:50%; background:var(--accent); }
-.themesw { margin-left:auto; width:30px; height:30px; padding:0; flex:none;
+.themesw { width:30px; height:30px; padding:0; flex:none;
   border:1px solid transparent; border-radius:var(--r-pill); cursor:pointer;
   background:none; color:var(--faint); font-size:14px; line-height:1;
   display:grid; place-items:center; }
+#rainsw2 { margin-left:auto; }
+.themesw.off { opacity:.45; }
 .themesw:hover { color:var(--fg); border-color:var(--line);
   background:var(--raise); }
 """
@@ -1888,6 +1925,9 @@ RAIN_JS = """
   const mode = () => { try { return localStorage.getItem(KEY) || 'few'; }
                        catch(e){ return 'few'; } };
   const off = () => mode() === 'off';
+  // What it was before it was turned off, so switching back does not quietly
+  // reset somebody's choice of density.
+  let last = mode() === 'off' ? 'few' : mode();
   const calm = matchMedia('(prefers-reduced-motion: reduce)');
   let cv, ctx, cols, glyphs, timer, w, h, dpr, running = false;
 
@@ -1925,12 +1965,17 @@ RAIN_JS = """
     const kept = JSON.parse(localStorage.getItem('wk-rain-faces') || '[]');
     if (Array.isArray(kept)) setTimeout(() => loadFaces(kept), 0);
   } catch(e){}
-  function loadFaces(urls){
-    for (const u of urls || []){
+  function loadFaces(list){
+    for (const f of list || []){
+      // A browser holding the previous shape - a bare list of URLs - is worth
+      // one line rather than a version bump and a day of no faces.
+      const url = typeof f === 'string' ? f : f && f.u;
+      if (!url) continue;
       const img = new Image();
       img.decoding = 'async';
+      img.who = (typeof f === 'string') ? '' : (f.n || '');
       img.onload = () => { FACES.push(img); seedDrops(); };
-      img.src = u;
+      img.src = url;
     }
   }
 
@@ -2049,6 +2094,64 @@ RAIN_JS = """
     running = false; clearInterval(timer);
     if (cv) ctx.clearRect(0, 0, w, h);
   }
+  // Clicking a face. The canvas is pointer-events:none so that the page under
+  // it stays usable, which means the click never lands on it - so the hit test
+  // happens here against where the drops actually are, and the event is only
+  // taken when it lands inside one. Everything else carries on to the page.
+  function hit(x, y){
+    for (const d of drops){
+      if (d.wait > 0 || !d.img.complete) continue;
+      const cx = d.x, cy = d.y + FACE / 2;
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= (FACE / 2) ** 2) return d;
+    }
+    return null;
+  }
+  function big(d){
+    const box = document.createElement('div');
+    box.className = 'facebox';
+    box.innerHTML = '<figure><img alt=""><figcaption></figcaption></figure>';
+    box.querySelector('img').src = d.img.src;
+    const cap = box.querySelector('figcaption');
+    if (d.img.who) cap.textContent = d.img.who; else cap.remove();
+    document.body.appendChild(box);
+    document.documentElement.classList.add('facedim');
+    requestAnimationFrame(() => box.classList.add('on'));
+    const shut = () => {
+      box.classList.remove('on');
+      document.documentElement.classList.remove('facedim');
+      setTimeout(() => box.remove(), 200);
+      removeEventListener('keydown', key);
+    };
+    const key = (e) => { if (e.key === 'Escape') shut(); };
+    box.addEventListener('click', shut);
+    addEventListener('keydown', key);
+  }
+  // Only where the face can actually be seen. The rain is behind the page, so a
+  // face passing under a card is invisible there and a click on that card
+  // belongs to the card. These are the things the rain shows through: the page
+  // itself, and text sitting straight on it.
+  // Whether the rain can be seen at a point is a question about backgrounds,
+  // not about tag names: a heading is transparent, but a heading inside a card
+  // has the card's background behind it and the rain is hidden there. So walk
+  // up and ask each one.
+  function seeThrough(el){
+    for (let n = el; n && n !== document.body; n = n.parentElement){
+      const bg = getComputedStyle(n).backgroundColor;
+      if (bg && bg !== 'transparent' && !bg.endsWith(', 0)')) return false;
+    }
+    return true;
+  }
+  addEventListener('click', (e) => {
+    if (!running || document.querySelector('.facebox')) return;
+    const top = document.elementFromPoint(e.clientX, e.clientY);
+    if (top && !seeThrough(top)) return;
+    const d = hit(e.clientX, e.clientY);
+    if (!d) return;
+    e.preventDefault();
+    e.stopPropagation();
+    big(d);
+  }, true);
+
   // A hidden tab paints nothing. setInterval keeps firing in the background on
   // some browsers, and a phone in a pocket should not be drawing rain.
   document.addEventListener('visibilitychange',
@@ -2056,7 +2159,31 @@ RAIN_JS = """
   calm.addEventListener('change', () => calm.matches ? stop() : start());
   // The switch in settings, wired here so it agrees with the rain itself
   // rather than keeping a second idea of whether it is on.
+  // The one in the top bar: off and on, nothing else. Somebody who has decided
+  // the rain is a nuisance should not have to go and find a settings page to
+  // say so, and the three-way choice can stay where the taste lives.
+  function wireTop(){
+    const b = document.getElementById('rainsw2');
+    if (!b) return;
+    const draw = () => {
+      const on = !off() && !calm.matches;
+      b.textContent = on ? '\u2604' : '\u2604';
+      b.classList.toggle('off', !on);
+      b.title = on ? 'The falling kanji \u2014 click to stop it'
+                   : 'The falling kanji \u2014 click to bring it back';
+    };
+    if (calm.matches){ b.disabled = true; draw(); return; }
+    b.addEventListener('click', () => {
+      // Back to whatever density was last chosen, not always the default.
+      window.wkRain.set(off() ? (last === 'off' ? 'few' : last) : 'off');
+      draw();
+      const sel = document.getElementById('rainsw');
+      if (sel) sel.value = mode();
+    });
+    draw();
+  }
   addEventListener('DOMContentLoaded', () => {
+    wireTop();
     const sw = document.getElementById('rainsw');
     if (!sw) return;
     if (calm.matches){
@@ -2071,6 +2198,7 @@ RAIN_JS = """
 
   window.wkRain = {
     set: (m) => {
+      if (m !== 'off') last = m;
       try { localStorage.setItem(KEY, m); } catch(e){}
       if (m === 'off'){ stop(); if (cv){ cv.remove(); cv = null; } return; }
       // Already running: re-size rather than restart, so changing density does
