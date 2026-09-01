@@ -2014,12 +2014,32 @@ RAIN_JS = """
   function seedDrops(){
     if (!FACES.length || !w) return;
     const want = Math.max(1, Math.round(w / 760));
-    while (drops.length < want) drops.push(newDrop(true));
+    while (drops.length < want) drops.push(newDrop(true, drops.length));
   }
-  function newDrop(scatter){
+  // Where a face can be seen. The page is a centred column of cards that paint
+  // their own background, so a face falling down the middle spends its whole
+  // fall behind them - invisible, and by the same token unclickable. The
+  // margins either side are what the rain shows through, so that is where they
+  // fall. A phone has no margins worth the name, and there it goes anywhere.
+  function dropX(side){
+    const m = document.querySelector('main');
+    const r = m && m.getBoundingClientRect();
+    const room = FACE + 14;
+    const left = r ? r.left : 0, right = r ? w - r.right : 0;
+    // Alternating rather than random: with two of them, a coin toss puts both
+    // down the same margin half the time, and two faces in one column looks
+    // like a fault rather than weather.
+    const want = side % 2 === 0;
+    const useLeft = left >= room && (right < room || want);
+    if (useLeft) return FACE / 2 + Math.random() * (left - FACE);
+    if (right >= room) return r.right + FACE / 2 + Math.random() * (right - FACE);
+    return FACE / 2 + Math.random() * Math.max(1, w - FACE);
+  }
+  function newDrop(scatter, side){
     return {
       img: FACES[(Math.random() * FACES.length) | 0],
-      x: FACE / 2 + Math.random() * Math.max(1, w - FACE),
+      side,
+      x: dropX(side),
       y: scatter ? Math.random() * h : -FACE,
       speed: 0.5 + Math.random() * 0.7,      // px a frame, slower than a column
       // A drop placed on the screen already is falling; only one waiting its
@@ -2033,7 +2053,7 @@ RAIN_JS = """
       const d = drops[i];
       if (d.wait > 0){ d.wait--; continue; }
       d.y += d.speed;
-      if (d.y > h + FACE){ drops[i] = newDrop(false); continue; }
+      if (d.y > h + FACE){ drops[i] = newDrop(false, d.side); continue; }
       if (!d.img.complete) continue;
       ctx.save();
       ctx.globalAlpha = 0.5;
@@ -2102,7 +2122,10 @@ RAIN_JS = """
     for (const d of drops){
       if (d.wait > 0 || !d.img.complete) continue;
       const cx = d.x, cy = d.y + FACE / 2;
-      if ((x - cx) ** 2 + (y - cy) ** 2 <= (FACE / 2) ** 2) return d;
+      // A few pixels of slack: it is a moving target, and nothing else is
+      // competing for that click anyway.
+      const r = FACE / 2 + 7;
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) return d;
     }
     return null;
   }
@@ -2115,7 +2138,10 @@ RAIN_JS = """
     if (d.img.who) cap.textContent = d.img.who; else cap.remove();
     document.body.appendChild(box);
     document.documentElement.classList.add('facedim');
-    requestAnimationFrame(() => box.classList.add('on'));
+    // A timer, not requestAnimationFrame: rAF does not run in a background
+    // tab, and a picture that opens invisibly is worse than one that does not
+    // open at all.
+    setTimeout(() => box.classList.add('on'), 16);
     const shut = () => {
       box.classList.remove('on');
       document.documentElement.classList.remove('facedim');
