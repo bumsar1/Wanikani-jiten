@@ -1403,8 +1403,12 @@ def settings_page(user, creds, note: str = "", error: str = "",
       draws over a card, so nothing you are reading sits on top of it &mdash;
       but it is a matter of taste, and it stays off if your system asks for
       reduced motion.</p>
-      <label class="rainbox"><input type="checkbox" id="rainsw">
-        <span>Kanji rain in the background</span></label>
+      <label class="rainbox"><span>Kanji rain in the background</span>
+        <select id="rainsw">
+          <option value="off">Off</option>
+          <option value="few">A few</option>
+          <option value="lots">More of them</option>
+        </select></label>
       <p class="sub" style="margin-top:6px">Remembered in this browser, so you
       can have it on the big screen and off on your phone.</p>
 
@@ -1749,7 +1753,15 @@ RAIN_CSS = """
   pointer-events:none; z-index:0; }
 main, .dock { position:relative; z-index:1; }
 @media (prefers-reduced-motion: reduce) { .rain { display:none; } }
-.rainbox { display:flex; align-items:center; gap:10px; margin:10px 0 0; }
+.rainbox { display:flex; align-items:center; gap:10px; margin:10px 0 0;
+  font-size:14px; }
+/* There is no site-wide select rule - every one is dressed where it is used -
+   so this one is dressed like the sharing control, its nearest neighbour. */
+.rainbox select { font:inherit; font-size:13.5px; padding:6px 11px;
+  border-radius:var(--r-box); border:1px solid var(--line);
+  background:var(--bg); color:var(--fg); cursor:pointer; }
+.rainbox select:hover { border-color:var(--accent); }
+.rainbox select:disabled { opacity:.5; cursor:default; }
 .news { border:1px solid var(--line); border-radius:var(--r-box);
   background:var(--raise); box-shadow:var(--shadow); padding:14px 16px;
   margin:0 0 18px; }
@@ -1782,8 +1794,12 @@ main, .dock { position:relative; z-index:1; }
 RAIN_JS = """
 (function(){
   const KEY = 'wk-rain';
-  const off = () => { try { return localStorage.getItem(KEY) === 'off'; }
-                      catch(e){ return false; } };
+  // Three settings, because how much of this is too much is a matter of taste
+  // and no default was going to be right for everybody. Empty means 'few',
+  // which is the one to be wrong in the direction of.
+  const mode = () => { try { return localStorage.getItem(KEY) || 'few'; }
+                       catch(e){ return 'few'; } };
+  const off = () => mode() === 'off';
   const calm = matchMedia('(prefers-reduced-motion: reduce)');
   let cv, ctx, cols, glyphs, timer, w, h, dpr, running = false;
 
@@ -1796,9 +1812,21 @@ RAIN_JS = """
     if (kept && kept.length > 20) CHARS = kept;
   } catch(e){}
 
-  const FONT = 18, STEP = 70, TRAIL = 9;
+  // Wide gaps, short tails, half the old speed, and a rest between runs. What
+  // distracts is not the characters, it is how much is moving at once: at one
+  // column every 24px with nine-glyph tails, five hundred things were sliding
+  // about behind a page of numbers.
+  const FONT = 18, STEP = 70;
+  const DENSITY = {few: {gap: 68, trail: 6}, lots: {gap: 30, trail: 9}};
+  let TRAIL = 6, GAP = 68;
+  // Frames of stillness after a column finishes, at ~14 a second. A column
+  // that restarts the moment it leaves is a curtain; one that waits is a
+  // thread that happens to fall past now and then.
+  const rest = () => 14 + Math.floor(Math.random() * 90);
 
   function size(){
+    const d = DENSITY[mode()] || DENSITY.few;
+    GAP = d.gap; TRAIL = d.trail;
     dpr = Math.min(2, devicePixelRatio || 1);
     w = innerWidth; h = innerHeight;
     cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr);
@@ -1806,14 +1834,19 @@ RAIN_JS = """
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.font = FONT + 'px "Hiragino Sans","Noto Sans JP",sans-serif';
     ctx.textBaseline = 'top';
-    const n = Math.ceil(w / (FONT + 6));
+    const n = Math.ceil(w / GAP);
     cols = Array.from({length: n}, (_, i) => ({
-      x: i * (FONT + 6) + 3,
+      // Not on a strict grid - a column nudged a few pixels off its slot stops
+      // the whole thing reading as a table of falling text.
+      x: i * GAP + 4 + Math.random() * (GAP - FONT - 8),
       // Spread across the screen, not stacked above it: starting every column
       // off the top meant three seconds of nothing before the first frame
       // anyone would call rain.
       y: Math.random() * (h / FONT) - TRAIL,
-      speed: 0.5 + Math.random() * 0.9,
+      speed: 0.22 + Math.random() * 0.33,
+      // Some start already resting, so the first frame is not every column
+      // setting off together.
+      wait: Math.random() < 0.4 ? rest() : 0,
       chars: Array.from({length: TRAIL}, () => pick()),
     }));
   }
@@ -1824,10 +1857,13 @@ RAIN_JS = """
     const ink = getComputedStyle(document.documentElement)
                   .getPropertyValue('--accent').trim() || '#c2410c';
     for (const c of cols){
+      if (c.wait > 0){ c.wait--; continue; }
       c.y += c.speed;
       if (c.y * FONT > h + TRAIL * FONT){
-        c.y = -TRAIL - Math.random() * 20;
-        c.speed = 0.5 + Math.random() * 0.9;
+        c.y = -TRAIL;
+        c.speed = 0.22 + Math.random() * 0.33;
+        c.wait = rest();
+        continue;
       }
       // One character swapped per column per frame: the flicker that makes it
       // read as falling text rather than a moving picture of text.
@@ -1874,21 +1910,24 @@ RAIN_JS = """
     const sw = document.getElementById('rainsw');
     if (!sw) return;
     if (calm.matches){
-      sw.checked = false; sw.disabled = true;
+      sw.disabled = true;
       sw.closest('.rainbox').title =
         'Your system is set to reduced motion, so this stays off.';
       return;
     }
-    sw.checked = !off();
-    sw.addEventListener('change',
-      () => sw.checked ? window.wkRain.on() : window.wkRain.off());
+    sw.value = mode();
+    sw.addEventListener('change', () => window.wkRain.set(sw.value));
   });
 
   window.wkRain = {
-    on: () => { try { localStorage.setItem(KEY, 'on'); } catch(e){} start(); },
-    off: () => { try { localStorage.setItem(KEY, 'off'); } catch(e){}
-                 stop(); if (cv) cv.remove(), cv = null; },
-    isOn: () => !off(),
+    set: (m) => {
+      try { localStorage.setItem(KEY, m); } catch(e){}
+      if (m === 'off'){ stop(); if (cv){ cv.remove(); cv = null; } return; }
+      // Already running: re-size rather than restart, so changing density does
+      // not blank the screen and start every column over from the top.
+      if (running) size(); else start();
+    },
+    mode,
   };
   start();
 
