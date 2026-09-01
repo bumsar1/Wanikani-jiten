@@ -1940,8 +1940,8 @@ RAIN_CSS = """
 .strands { position:fixed; inset:0; z-index:0; pointer-events:none;
   overflow:hidden; }
 .strand { position:absolute; top:0; writing-mode:vertical-rl;
-  font:17px/1.5 "Hiragino Sans","Noto Sans JP",var(--sans);
-  color:var(--accent); opacity:.34; white-space:nowrap;
+  font:19px/1.55 "Hiragino Sans","Noto Sans JP",var(--sans);
+  color:var(--accent); opacity:.5; white-space:nowrap;
   pointer-events:auto; cursor:text;
   /* Never user-select:none. Being able to take the text is the point. */
   animation-name:strandfall; animation-timing-function:linear;
@@ -2234,12 +2234,17 @@ RAIN_JS = """
     // finished falling before the next is due, which stops being true the
     // moment a tab is left open for a while - and a margin with eight
     // sentences in it is a wall of text, not weather.
-    if (layer.children.length >= (mode() === 'lots' ? 3 : 2)) return;
+    if (layer.children.length >= (mode() === 'lots' ? 4 : 3)) return;
     const el = document.createElement('span');
     el.className = 'strand';
     el.textContent = LINES[(Math.random() * LINES.length) | 0];
     el.style.left = Math.round(dropX(strandSide++)) + 'px';
-    el.style.animationDuration = (16 + Math.random() * 12) + 's';
+    const secs = 16 + Math.random() * 12;
+    el.style.animationDuration = secs + 's';
+    // Dropped in partway down rather than queued above the top edge. Starting
+    // at -100% meant three seconds of nothing before the first word appeared,
+    // and on a fresh page that reads as the feature not being there.
+    el.style.animationDelay = '-' + (Math.random() * secs * 0.55).toFixed(1) + 's';
     el.addEventListener('animationend', () => el.remove());
     layer.appendChild(el);
   }
@@ -2256,9 +2261,11 @@ RAIN_JS = """
     clearInterval(strandTimer);
     // Rarely. A sentence is a thing you read, and something to read arriving
     // every second is a different feature altogether.
-    const gap = mode() === 'lots' ? 5200 : 9000;
+    const gap = mode() === 'lots' ? 4000 : 6500;
     strandTimer = setInterval(newStrand, gap);
-    if (!layer.children.length) newStrand();
+    // Two on arrival, since they now start partway down: one line in a margin
+    // is easy to miss, and the whole thing is meant to be noticed.
+    newStrand(); newStrand();
   }
   function strandsOff(){
     clearInterval(strandTimer);
