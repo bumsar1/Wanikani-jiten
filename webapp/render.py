@@ -951,23 +951,44 @@ def prelude(title: str, user=None, page: str = "") -> str:
 DOCK_CSS = """
 /* The messages dock. Fixed to the corner of every page, because a message is
    the one thing here you want to see without having gone looking for it. */
-.dock { position:fixed; right:16px; bottom:16px; z-index:60; }
+/* Fixed to the right-hand corner, and it stays there: right and bottom are
+   both set, so nothing about the page's own layout can move it. */
+.dock { position:fixed; right:18px; bottom:18px; left:auto; top:auto;
+  z-index:60; width:auto; }
 /* The site's own face rather than a glyph. The badge has to be able to sit
    outside the circle, so the rounding is on the picture and not on the button
    - overflow:hidden here would clip the number off. */
-.dock .knob { position:relative; width:54px; height:54px; padding:0;
+.dock .knob { position:relative; width:66px; height:66px; padding:0;
   border:none; background:none; cursor:pointer; display:block; }
-.dock .knob img { width:54px; height:54px; border-radius:50%; display:block;
+.dock .knob img { width:66px; height:66px; border-radius:50%; display:block;
   object-fit:cover; box-sizing:border-box; border:2px solid var(--raise);
   box-shadow:0 6px 20px rgba(0,0,0,.18); }
 .dock .knob:hover img { filter:brightness(1.06); }
-.dock .knob .badge { position:absolute; top:-2px; right:-2px; min-width:20px;
-  height:20px; border-radius:10px; background:var(--fg); color:var(--raise);
-  font-size:11px; font-weight:700; display:none; align-items:center;
+.dock .knob .badge { position:absolute; top:-3px; right:-3px; min-width:23px;
+  height:23px; border-radius:12px; background:var(--accent); color:#fff;
+  font-size:12px; font-weight:700; display:none; align-items:center;
   justify-content:center; padding:0 5px; border:2px solid var(--raise);
   font-variant-numeric:tabular-nums; }
 .dock .knob .badge.on { display:flex; }
-.panel { position:absolute; right:0; bottom:64px; width:320px;
+/* A hop, not a jiggle: most of the cycle is still, so it catches the eye
+   without becoming something in the room with you. */
+@keyframes dockhop {
+   0%    { transform:translateY(0); }
+   6%    { transform:translateY(-10px); }
+  13%    { transform:translateY(0); }
+  18%    { transform:translateY(-4px); }
+  23%    { transform:translateY(0); }
+ 100%    { transform:translateY(0); }
+}
+.dock.unread .knob { animation:dockhop 2.6s var(--ease) infinite; }
+.dock.unread .knob img { box-shadow:0 6px 20px rgba(0,0,0,.18),
+  0 0 0 2px var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .dock.unread .knob { animation:none; }
+}
+/* Measured from the knob rather than a number that has to be kept in step
+   with its height. */
+.panel { position:absolute; right:0; bottom:calc(100% + 12px); width:320px;
   max-height:min(70vh, 460px); display:none; flex-direction:column;
   background:var(--raise); border:1px solid var(--line);
   border-radius:var(--r-box); box-shadow:0 14px 44px rgba(0,0,0,.22);
@@ -1112,6 +1133,11 @@ DOCK_JS = """
   function mark(n) {
     badge.textContent = n > 99 ? '99+' : n;
     badge.classList.toggle('on', n > 0);
+    // The bubble hops while something is unread, and stops the moment it is
+    // opened - a thing that keeps moving after you have dealt with it is what
+    // makes people stop looking at it.
+    var d = document.getElementById('dock');
+    if (d) d.classList.toggle('unread', n > 0 && !open);
   }
   async function get(url) {
     var r = await fetch(url);
@@ -1892,7 +1918,10 @@ RAIN_CSS = """
    tables of numbers people came here to read. */
 .rain { position:fixed; inset:0; width:100%; height:100%; display:block;
   pointer-events:none; z-index:0; }
-main, .dock { position:relative; z-index:1; }
+/* Only main. The dock is already fixed with a z-index of its own, and naming
+   it here quietly turned it into position:relative - which took it out of the
+   corner and dropped it at the foot of the document, on the left. */
+main { position:relative; z-index:1; }
 @media (prefers-reduced-motion: reduce) { .rain { display:none; } }
 /* The picture, large, with the page behind it pushed back. Nothing here is a
    dialog: there is nothing to fill in and nothing to lose, so a click anywhere
