@@ -1912,12 +1912,55 @@ BIG_JS = """
 """
 
 
+# Lines in the register of the things people here actually watch: teasing,
+# flustered, charged. They are here to be hovered rather than read at a glance,
+# so they are short, spoken, and full of what WaniKani never teaches -
+# contractions, sentence-final particles, and the vocabulary of being
+# embarrassed.
+PHRASES = [
+    "ちょっと、どこ見てるの", "そんなに見つめないで", "顔が近いってば",
+    "心臓の音、聞こえちゃうよ", "もう、いじわる", "抱きしめてもいい",
+    "目を閉じて", "恥ずかしいから電気消して", "誰かに見られたらどうするの",
+    "キスしてほしいの", "服、乱れてるよ", "二人きりだね",
+    "今夜は帰さないから", "耳まで赤くなってる", "触れてもいい",
+    "我慢できないみたい", "バカ、こっち見ないで", "どきどきが止まらない",
+    "顔が熱い", "近すぎるって", "そんな目で見ないでよ",
+]
+
+
 RAIN_CSS = """
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
    tables of numbers people came here to read. */
 .rain { position:fixed; inset:0; width:100%; height:100%; display:block;
   pointer-events:none; z-index:0; }
+/* The sentences are elements, not paint. Yomitan reads text nodes under the
+   cursor, and a canvas has none - so anything meant to be looked up has to be
+   real text in the document, whatever the kanji beside it are doing. */
+.strands { position:fixed; inset:0; z-index:0; pointer-events:none;
+  overflow:hidden; }
+.strand { position:absolute; top:0; writing-mode:vertical-rl;
+  font:17px/1.5 "Hiragino Sans","Noto Sans JP",var(--sans);
+  color:var(--accent); opacity:.34; white-space:nowrap;
+  pointer-events:auto; cursor:text;
+  /* Never user-select:none. Being able to take the text is the point. */
+  animation-name:strandfall; animation-timing-function:linear;
+  animation-iteration-count:1; }
+@keyframes strandfall {
+  from { transform:translateY(-100%); }
+  to   { transform:translateY(100vh); }
+}
+/* Under the cursor it stops and comes forward, so a dictionary has something
+   still to read. */
+.strand:hover { animation-play-state:paused; opacity:1; z-index:2;
+  text-shadow:0 0 12px var(--bg), 0 0 4px var(--bg); }
+@media (prefers-reduced-motion: reduce) { .strands { display:none; } }
+/* Not on a phone. The whole point is to hold the pointer still on a line and
+   let a dictionary read it, and a finger has no pointer to hold still - so all
+   they would do there is catch taps meant for the page, since a narrow screen
+   has no margins to fall down and they land straight on top of it. */
+@media (max-width:700px) { .strands { display:none; } }
+
 /* Only main. The dock is already fixed with a z-index of its own, and naming
    it here quietly turned it into position:relative - which took it out of the
    corner and dropped it at the foot of the document, on the left. */
@@ -2178,6 +2221,50 @@ RAIN_JS = """
     paintFaces();
   }
 
+
+  // The sentences. Not on the canvas: Yomitan reads text nodes under the
+  // pointer, and a canvas has none - so these are elements, and they carry
+  // their own pointer-events so a hover can land on them at all.
+  let layer = null, strandTimer = 0;
+  const LINES = [];
+
+  function newStrand(){
+    if (!layer || off() || calm.matches) return;
+    // A ceiling, not just a gap between them. A gap assumes every strand has
+    // finished falling before the next is due, which stops being true the
+    // moment a tab is left open for a while - and a margin with eight
+    // sentences in it is a wall of text, not weather.
+    if (layer.children.length >= (mode() === 'lots' ? 3 : 2)) return;
+    const el = document.createElement('span');
+    el.className = 'strand';
+    el.textContent = LINES[(Math.random() * LINES.length) | 0];
+    el.style.left = Math.round(dropX(strandSide++)) + 'px';
+    el.style.animationDuration = (16 + Math.random() * 12) + 's';
+    el.addEventListener('animationend', () => el.remove());
+    layer.appendChild(el);
+  }
+  let strandSide = 0;
+  function strandsOn(){
+    if (off() || calm.matches) return;
+    if (matchMedia('(max-width: 700px)').matches) return;
+    if (!layer){
+      layer = document.createElement('div');
+      layer.className = 'strands';
+      layer.setAttribute('aria-hidden', 'true');
+      document.body.insertBefore(layer, document.body.firstChild);
+    }
+    clearInterval(strandTimer);
+    // Rarely. A sentence is a thing you read, and something to read arriving
+    // every second is a different feature altogether.
+    const gap = mode() === 'lots' ? 5200 : 9000;
+    strandTimer = setInterval(newStrand, gap);
+    if (!layer.children.length) newStrand();
+  }
+  function strandsOff(){
+    clearInterval(strandTimer);
+    if (layer){ layer.remove(); layer = null; }
+  }
+
   function start(){
     if (running || off() || calm.matches) return;
     if (!cv){
@@ -2190,10 +2277,12 @@ RAIN_JS = """
     }
     size(); running = true;
     timer = setInterval(paint, STEP);
+    strandsOn();
   }
   function stop(){
     running = false; clearInterval(timer);
     if (cv) ctx.clearRect(0, 0, w, h);
+    strandsOff();
   }
   // Clicking a face. The canvas is pointer-events:none so that the page under
   // it stays usable, which means the click never lands on it - so the hit test
@@ -2286,6 +2375,7 @@ RAIN_JS = """
       if (m !== 'off') last = m;
       try { localStorage.setItem(KEY, m); } catch(e){}
       if (m === 'off'){ stop(); if (cv){ cv.remove(); cv = null; } return; }
+      strandsOn();
       // Already running: re-size rather than restart, so changing density does
       // not blank the screen and start every column over from the top.
       if (running) size(); else start();
@@ -2323,6 +2413,12 @@ RAIN_JS = """
     }).catch(() => {});
 })();
 """
+
+# The phrases go in here rather than being written twice: one list, in Python,
+# and the script gets it as data.
+RAIN_JS = RAIN_JS.replace(
+    "const LINES = [];",
+    "const LINES = " + json.dumps(PHRASES, ensure_ascii=False) + ";")
 
 
 RACE_CSS = """
