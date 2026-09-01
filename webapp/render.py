@@ -1841,6 +1841,51 @@ RACE_JS = """
 """
 
 
+BIG_JS = """
+(function(){
+  // One lightbox, two callers: a face caught falling, and a picture on the
+  // Together page. It lives out here rather than inside the rain because the
+  // rain is not the only thing with a picture worth a closer look.
+  function shutAll(){
+    for (const b of document.querySelectorAll('.facebox')){
+      b.classList.remove('on');
+      setTimeout(() => b.remove(), 200);
+    }
+    document.documentElement.classList.remove('facedim');
+  }
+  window.wkBig = function(src, caption, round){
+    if (!src || document.querySelector('.facebox')) return;
+    const box = document.createElement('div');
+    box.className = 'facebox' + (round ? ' round' : '');
+    box.innerHTML = '<figure><img alt=""><figcaption></figcaption></figure>';
+    box.querySelector('img').src = src;
+    const cap = box.querySelector('figcaption');
+    if (caption) cap.textContent = caption; else cap.remove();
+    document.body.appendChild(box);
+    document.documentElement.classList.add('facedim');
+    // A timer, not requestAnimationFrame: rAF does not run in a background
+    // tab, and a picture that opens invisibly is worse than one that does not
+    // open at all.
+    setTimeout(() => box.classList.add('on'), 16);
+    box.addEventListener('click', shutAll);
+  };
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') shutAll();
+  });
+  // Anything on the page that says it has a bigger version of itself. The
+  // banner is a background-image on a div, so it carries the URL rather than
+  // being read off an <img> that is not there.
+  addEventListener('click', (e) => {
+    const el = e.target.closest && e.target.closest('[data-big]');
+    if (!el) return;
+    e.preventDefault();
+    window.wkBig(el.dataset.big, el.dataset.cap || '',
+                 el.dataset.round === '1');
+  });
+})();
+"""
+
+
 RAIN_CSS = """
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
@@ -1861,10 +1906,17 @@ main, .dock { position:relative; z-index:1; }
 .facebox.on figure { transform:scale(1); }
 /* A cap as well as the two proportions: on a tall screen 56vh is a wall of
    face rather than a picture of one. */
-.facebox img { display:block; width:min(52vh, 78vw, 440px);
-  height:min(52vh, 78vw, 440px);
-  object-fit:cover; border-radius:50%; border:3px solid var(--raise);
-  box-shadow:0 24px 70px rgba(0,0,0,.5); }
+/* A face opens round, because that is the shape it is worn in everywhere
+   else. A cover opens as it was taken. */
+.facebox img { display:block; max-width:min(86vw, 900px);
+  max-height:78vh; width:auto; height:auto; border-radius:var(--r-box);
+  border:3px solid var(--raise); box-shadow:0 24px 70px rgba(0,0,0,.5); }
+.facebox.round img { width:min(52vh, 78vw, 440px);
+  height:min(52vh, 78vw, 440px); object-fit:cover; border-radius:50%; }
+/* Anything that opens bigger says so on the way past. */
+.big { cursor:zoom-in; }
+img.avatar.big:hover { filter:brightness(1.08); }
+.banner.big:hover::after { opacity:.75; }
 .facebox figcaption { margin-top:16px; font-size:17px; font-weight:600;
   color:#fff; text-shadow:0 2px 8px rgba(0,0,0,.6); }
 /* Everything except the enlarged picture. The blur is on the page, not on the
@@ -2129,29 +2181,7 @@ RAIN_JS = """
     }
     return null;
   }
-  function big(d){
-    const box = document.createElement('div');
-    box.className = 'facebox';
-    box.innerHTML = '<figure><img alt=""><figcaption></figcaption></figure>';
-    box.querySelector('img').src = d.img.src;
-    const cap = box.querySelector('figcaption');
-    if (d.img.who) cap.textContent = d.img.who; else cap.remove();
-    document.body.appendChild(box);
-    document.documentElement.classList.add('facedim');
-    // A timer, not requestAnimationFrame: rAF does not run in a background
-    // tab, and a picture that opens invisibly is worse than one that does not
-    // open at all.
-    setTimeout(() => box.classList.add('on'), 16);
-    const shut = () => {
-      box.classList.remove('on');
-      document.documentElement.classList.remove('facedim');
-      setTimeout(() => box.remove(), 200);
-      removeEventListener('keydown', key);
-    };
-    const key = (e) => { if (e.key === 'Escape') shut(); };
-    box.addEventListener('click', shut);
-    addEventListener('keydown', key);
-  }
+
   // Only where the face can actually be seen. The rain is behind the page, so a
   // face passing under a card is invisible there and a click on that card
   // belongs to the card. These are the things the rain shows through: the page
@@ -2175,7 +2205,7 @@ RAIN_JS = """
     if (!d) return;
     e.preventDefault();
     e.stopPropagation();
-    big(d);
+    window.wkBig(d.img.src, d.img.who, true);
   }, true);
 
   // A hidden tab paints nothing. setInterval keeps firing in the background on
@@ -3159,10 +3189,21 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
         seen = (p.get("seen") or "")[:10]
         top = ""
         if p.get("has_banner"):
-            top = (f'<div class="banner" style="background-image:url(/media/banner/'
+            top = (f'<div class="banner big" data-big="/media/banner/{p["id"]}"'
+                   f' data-cap="{esc(p["username"])}"'
+                   f' title="See it whole"'
+                   f' style="background-image:url(/media/banner/'
                    f'{p["id"]})"></div>')
+        # The picture opens round, the cover opens as it is.
+        face = avatar_tag(p["id"], p.get("has_avatar"), p["username"])
+        if p.get("has_avatar"):
+            face = face.replace('<img class="avatar"',
+                                f'<img class="avatar big" data-round="1"'
+                                f' data-big="/media/avatar/{p["id"]}"'
+                                f' data-cap="{esc(p["username"])}"'
+                                f' title="See it bigger"')
         idbar = (f'<div class="idbar{" pulled" if top else ""}">'
-                 f'{avatar_tag(p["id"], p.get("has_avatar"), p["username"])}'
+                 f'{face}'
                  f'<div><h3>{esc(p["username"])}'
                  f'{" (you)" if p["id"] == user["id"] else ""}</h3>'
                  f'<div class="meta">{p["titles"]} titles &middot; {esc(seen)}</div>'
@@ -4107,7 +4148,7 @@ CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     RAIN_CSS, w.THEME_CSS, w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.
-CORE_JS = _bundle(LOAD_JS, THEME_JS, MOBILE_JS, RAIN_JS, w.SORT_JS, DOCK_JS)
+CORE_JS = _bundle(LOAD_JS, THEME_JS, MOBILE_JS, BIG_JS, RAIN_JS, w.SORT_JS, DOCK_JS)
 DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
                   w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS,
                   TIER_JS, CARD_JS)
