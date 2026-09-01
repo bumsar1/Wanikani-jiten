@@ -122,9 +122,10 @@ AUTH_CSS = """
 .burned h3 { margin:0; font-size:18px; letter-spacing:-.01em; }
 .burned .sub { margin:2px 0 0; }
 .burned .newly { display:flex; flex-wrap:wrap; gap:4px; margin-top:10px; }
-.burned #dnplay2 { font-size:15px; opacity:.5; }
-.burned #dnplay2:hover, .burned #dnplay2.done { opacity:1; }
-.burned .dnbox { flex:1 1 100%; }
+/* Shown, not offered. Burning something is the one permanent thing WaniKani
+   does, and a reward you have to click for is not a reward. */
+.burned .cheer { width:84px; height:84px; object-fit:cover; flex:none;
+  border-radius:var(--r-box); border:1px solid var(--line); }
 
 /* A year of days. Squares rather than a chart, because the question is not
    how many but how often. */
@@ -504,7 +505,9 @@ DN_JS = """
 (function(){
   // Two of these now: the one under the burn list, and the one beside what was
   // struck out while you were away.
-  for (const [b, x] of [['dnplay', 'dnbox'], ['dnplay2', 'dnbox2']]) wire(b, x);
+  // Only the level-up keeps its clip. The burned card shows a picture instead
+  // - it was not worth a 212kB video and a click to get at it.
+  for (const [b, x] of [['dnplay', 'dnbox']]) wire(b, x);
 
   function wire(bid, xid){
   const btn = document.getElementById(bid), box = document.getElementById(xid);
@@ -1745,6 +1748,63 @@ def news_card(items) -> str:
     </div>"""
 
 
+RACE_JS = """
+(function(){
+  const grid = document.querySelector('.racegrid');
+  if (!grid) return;
+  const cells = [...grid.querySelectorAll('[data-r]')];
+  if (!cells.length) return;
+
+  // The three cells of one runner are siblings in the grid rather than a row,
+  // so the grouping happens here: light the ones that share an index, quiet
+  // the rest, and let go on the way out.
+  function light(which){
+    for (const c of cells){
+      const mine = which !== null && c.dataset.r === which;
+      c.classList.toggle('lit', mine);
+      c.classList.toggle('dim', which !== null && !mine);
+    }
+    if (which === null) return;
+    // Above the runner when there is room above, below when there is not. The
+    // top lane has the section's own description over it, and a card that
+    // covers the sentence explaining the thing reads as a mistake.
+    const pk = grid.querySelector(`.track[data-r="${which}"] .peek`);
+    if (!pk) return;
+    pk.classList.remove('down');
+    const box = grid.getBoundingClientRect();
+    if (pk.getBoundingClientRect().top < box.top) pk.classList.add('down');
+  }
+  const of = (e) => e.target.closest ? e.target.closest('[data-r]') : null;
+  grid.addEventListener('pointerover', e => {
+    const c = of(e);
+    if (c) light(c.dataset.r);
+  });
+  grid.addEventListener('pointerleave', () => light(null));
+  // Keyboard reaches it through the track, which is the focusable one.
+  grid.addEventListener('focusin', e => { const c = of(e);
+                                          if (c) light(c.dataset.r); });
+  grid.addEventListener('focusout', () => light(null));
+
+  // A finger has no hover. Tapping a lane opens its card and taps elsewhere
+  // shut it, which is the same gesture the burn list uses to reveal a reading.
+  grid.addEventListener('click', e => {
+    const c = of(e);
+    const track = c && c.classList.contains('track') ? c
+                  : (c ? grid.querySelector(`.track[data-r="${c.dataset.r}"]`)
+                       : null);
+    for (const t of grid.querySelectorAll('.track.open'))
+      if (t !== track) t.classList.remove('open');
+    if (track) track.classList.toggle('open');
+  });
+  document.addEventListener('click', e => {
+    if (!grid.contains(e.target))
+      for (const t of grid.querySelectorAll('.track.open'))
+        t.classList.remove('open');
+  });
+})();
+"""
+
+
 RAIN_CSS = """
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
@@ -2188,6 +2248,39 @@ RACE_CSS = """
 .gap2 .chars a:hover { border-color:var(--accent); color:var(--accent); }
 .gap2 .chars em { font-style:normal; font-size:12px; color:var(--faint);
   margin-left:4px; }
+/* Pointing at any part of a runner lights all three of their cells and quiets
+   everyone else. The grouping is done in JS because the cells are siblings,
+   not a row - see the note where they are built. */
+.racegrid .dim { opacity:.4; }
+.racegrid .lit .nm { color:var(--fg); }
+.racegrid .lit .pip .avatar { transform:scale(1.22); }
+.racegrid .lit .run { filter:brightness(1.25); }
+.pip .avatar { transition:transform var(--t-fast) var(--ease); }
+.racegrid .dim, .racegrid .lit { transition:opacity var(--t-fast) var(--ease); }
+
+/* The card. Anchored over the runner, above the track, and never in the way of
+   a click - there is nothing in it to click. */
+.peek { position:absolute; bottom:calc(100% - 2px); transform:translateX(-50%);
+  min-width:150px; max-width:250px; padding:9px 12px 8px; z-index:5;
+  background:var(--raise); border:1px solid var(--line);
+  border-radius:var(--r-box); box-shadow:var(--lift);
+  opacity:0; visibility:hidden; pointer-events:none;
+  transition:opacity var(--t-fast) var(--ease),
+             transform var(--t-fast) var(--ease);
+  text-align:left; }
+.track.lit .peek, .track.open .peek { opacity:1; visibility:visible;
+  transform:translateX(-50%) translateY(-3px); }
+.peek.down { bottom:auto; top:calc(100% - 2px); }
+.track.lit .peek.down, .track.open .peek.down {
+  transform:translateX(-50%) translateY(3px); }
+.peek b { display:block; font-size:13px; margin-bottom:3px; }
+.peek .pk { display:flex; flex-direction:column; gap:1px; }
+.peek .pk span { font-size:12px; color:var(--muted);
+  font-variant-numeric:tabular-nums; }
+.peek .wnow { margin-top:4px; font-size:12px; color:var(--fg);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.peek .pkwhen { margin-top:5px; padding-top:5px; font-size:11px;
+  color:var(--faint); border-top:1px solid var(--line); }
 .quiet { margin:12px 0 0; font-size:12.5px; color:var(--faint); }
 .warn { margin:10px 0 0; font-size:12.5px; color:var(--fg);
   background:var(--sunk); border:1px solid var(--line); border-left:3px solid
@@ -2677,6 +2770,53 @@ def kanji_gap(race, share_kanji: bool) -> str:
     </div>"""
 
 
+def _when(ts) -> str:
+    """A review time as a wait, counted from now."""
+    if not ts:
+        return ""
+    left = ts - time.time()
+    if left <= 0:
+        return "some ready now"
+    if left < 3600:
+        return f"next in {max(1, int(left // 60))} min"
+    if left < 86400:
+        return f"next in {left / 3600:.0f} h"
+    return f"next in {left / 86400:.0f} days"
+
+
+def peek(r, anchor: float) -> str:
+    """The card that appears when you point at somebody on the track.
+
+    Deliberately not a second copy of the table underneath. What goes in here
+    is what the table has no column for: when their next review lands, how many
+    days they have strung together, and what they are in the middle of
+    watching. If none of that is known, there is no card.
+    """
+    bits = []
+    if r.get("waiting"):
+        bits.append(f'{r["waiting"]:,} waiting')
+    nxt = _when(r.get("next_at"))
+    if nxt:
+        bits.append(nxt)
+    if (r.get("streak") or 0) >= 2:
+        bits.append(f'{r["streak"]}-day run')
+    if r.get("pace"):
+        bits.append(f'{r["pace"]:.0f} days a level')
+    now = r.get("now") or {}
+    watching = (f'<div class="wnow">watching {esc(now["title"])}</div>'
+                if now.get("title") else "")
+    if not bits and not watching:
+        return ""
+    age = r.get("age")
+    when = ("just refreshed" if age is not None and age < 1 else
+            f"from {age:.0f} h ago" if age is not None and age < 48 else
+            f"from {age / 24:.0f} days ago" if age is not None else "")
+    rows = "".join(f"<span>{b}</span>" for b in bits)
+    return (f'<div class="peek" style="left:{anchor:.1f}%">'
+            f'<b>{esc(r["username"])}</b><div class="pk">{rows}</div>'
+            f'{watching}<div class="pkwhen">{when}</div></div>')
+
+
 def race_track(race, quiet) -> str:
     """Everyone's place on the climb, on one track.
 
@@ -2690,14 +2830,20 @@ def race_track(race, quiet) -> str:
              '<div class="bands">'
              + "".join(f"<span>{b}</span>" for b in TIER_BANDS)
              + '</div>', '<div></div>']
-    for r in race:
+    for i, r in enumerate(race):
         # 0 at the start of level 1, 1.0 at the end of level 60.
         at = min(1.0, max(0.0, (r["level"] - 1 + r["frac"]) / 60))
         pct = f"{at * 100:.2f}%"
         m = " mine" if r["me"] else ""
         through = (f'{r["frac"] * 100:.0f}% through' if r["needed"]
                    else "not started")
-        cells.append(f'<div class="who{m}"><span class="nm">{esc(r["username"])}'
+        # Each of the three cells carries the runner's index. They cannot be
+        # wrapped in a row: the grid rules address them as direct children of
+        # .racegrid, and a wrapper - even a display:contents one - would put
+        # every one of those selectors out of reach.
+        tag = f'data-r="{i}"'
+        cells.append(f'<div class="who{m}" {tag}><span class="nm">'
+                     f'{esc(r["username"])}'
                      f'{" (you)" if r["me"] else ""}</span>{pile(r)}</div>')
         gap = ""
         if not r["me"] or len(race) > 1:
@@ -2708,13 +2854,17 @@ def race_track(race, quiet) -> str:
         # Name, then standing, then the lane. The grid places each of the three
         # by column, so this order is what lets a phone lift the first two onto
         # one row above a full-width lane without moving anything on desktop.
-        cells.append(f'<div class="lv{m}"><b>lv {r["level"]} &middot; {through}</b>'
-                     f'{gap}</div>')
+        cells.append(f'<div class="lv{m}" {tag}><b>lv {r["level"]} &middot; '
+                     f'{through}</b>{gap}</div>')
+        # Kept off the ends, or somebody up in Reality has half their card
+        # hanging off the edge of the page.
+        anchor = min(max(at * 100, 15), 85)
         cells.append(
-            f'<div class="track">'
+            f'<div class="track" {tag} tabindex="0">'
             f'<i class="run{m}" style="width:{pct}"></i>'
             f'<span class="pip{m}" style="left:{pct}">'
             f'{avatar_tag(r["id"], r["has_avatar"], r["username"])}</span>'
+            f'{peek(r, anchor)}'
             f'</div>')
 
     rows = []
@@ -2850,7 +3000,8 @@ def together_page(user, visibility, token, base_url, people, by_user, overlap,
     if not people:
         body = (f'<h1>Together</h1><p class="sub">Nobody is sharing their lists yet.'
                 f'</p>{head}{missing}')
-    return shell("Together", body, user=user, scripts=SHARE_JS + ADD_JS)
+    return shell("Together", body, user=user,
+                 scripts=SHARE_JS + ADD_JS + f"<script>{RACE_JS}</script>")
 
 
 ADD_JS = """
@@ -3231,9 +3382,8 @@ def burned_banner(extras) -> str:
             f'<div class="say"><h3>{n:,} name{"" if n == 1 else "s"} struck out</h3>'
             f'<p class="sub">Burned since your last refresh. They do not come '
             f'back.</p><div class="newly">{chips}{more}</div></div>'
-            f'<button type="button" id="dnplay2" title="the list">&#9760;</button>'
-            f'<div class="dnbox" id="dnbox2" hidden>'
-            f'<video muted loop playsinline preload="none"></video></div></div>')
+            f'<img class="cheer" src="/cheer/glad-thumbs-up.jpg" alt=""'
+            f' width="96" height="96" loading="lazy"></div>')
 
 
 def levelup_banner(extras, level: int) -> str:

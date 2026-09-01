@@ -691,6 +691,11 @@ def _runner(user_id: int, username: str, has_avatar, is_me: bool,
         # The list of characters, not a count of them - so it only travels for
         # someone who has said yes to that separately.
         "kanji": w.known_kanji(snap) if with_kanji else None,
+        # For the card that appears when you point at somebody. Computed from
+        # the whole record rather than the trimmed copy above, so a run longer
+        # than eight weeks is not cut off at eight weeks.
+        "streak": w.day_streak(snap.get("passed_by_day") or {}),
+        "now": store.currently_of(user_id),
     }
 
 
@@ -949,7 +954,8 @@ def save_profile():
 
 # An allow-list rather than a path: the name arrives from the URL, and
 # "../../etc/passwd" is a name too.
-CHEER = {"balloons.png": "image/png", "thumbs-up.jpg": "image/jpeg"}
+CHEER = {"balloons.png": "image/png", "thumbs-up.jpg": "image/jpeg",
+         "glad-thumbs-up.jpg": "image/jpeg"}
 
 
 @app.get("/cheer/<name>")
