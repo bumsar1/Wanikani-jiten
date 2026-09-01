@@ -1912,11 +1912,15 @@ RAIN_JS = """
   // thread that happens to fall past now and then.
   const rest = () => 14 + Math.floor(Math.random() * 90);
 
-  // Faces fall too, but rarely: one run in six starts with somebody's picture
-  // at its head instead of a character. Often enough to be a surprise, seldom
-  // enough to stay one.
+  // Faces fall on their own. They used to ride at the head of a character
+  // column, which meant they were stuck to the 24px column grid, tied to a
+  // column's speed, and could be no wider than one - three reasons a picture
+  // looked like a character that had gone wrong. They have their own drops
+  // now: their own x anywhere across the width, their own speed, their own
+  // size, and no relation to the columns they fall past.
   const FACES = [];
-  const FACE = 26, FACE_ODDS = 0.16;
+  const FACE = 46;
+  let drops = [];
   try {
     const kept = JSON.parse(localStorage.getItem('wk-rain-faces') || '[]');
     if (Array.isArray(kept)) setTimeout(() => loadFaces(kept), 0);
@@ -1925,17 +1929,7 @@ RAIN_JS = """
     for (const u of urls || []){
       const img = new Image();
       img.decoding = 'async';
-      img.onload = () => {
-        FACES.push(img);
-        // Deal one straight away to a column that is resting, so the first
-        // face does not have to wait for a full lap of the screen.
-        for (const c of cols || []){
-          if (!c.face && c.wait > 0 && Math.random() < FACE_ODDS){
-            c.face = img;
-            break;
-          }
-        }
-      };
+      img.onload = () => { FACES.push(img); seedDrops(); };
       img.src = u;
     }
   }
@@ -1950,7 +1944,9 @@ RAIN_JS = """
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.font = FONT + 'px "Hiragino Sans","Noto Sans JP",sans-serif';
     ctx.textBaseline = 'top';
+    setTimeout(seedDrops, 0);
     const n = Math.ceil(w / GAP);
+    drops = [];
     cols = Array.from({length: n}, (_, i) => ({
       // Not on a strict grid - a column nudged a few pixels off its slot stops
       // the whole thing reading as a table of falling text.
@@ -1963,13 +1959,47 @@ RAIN_JS = """
       // Some start already resting, so the first frame is not every column
       // setting off together.
       wait: Math.random() < 0.4 ? rest() : 0,
-      // Faces are handed out on restart too, but a column set up before the
-      // pictures arrived would have waited a whole lap for its first one.
-      face: null,
       chars: Array.from({length: TRAIL}, () => pick()),
     }));
   }
   const pick = () => CHARS[(Math.random() * CHARS.length) | 0];
+
+  // One or two at a time on a wide screen, one on a phone. More than that and
+  // the background stops being a background.
+  function seedDrops(){
+    if (!FACES.length || !w) return;
+    const want = Math.max(1, Math.round(w / 760));
+    while (drops.length < want) drops.push(newDrop(true));
+  }
+  function newDrop(scatter){
+    return {
+      img: FACES[(Math.random() * FACES.length) | 0],
+      x: FACE / 2 + Math.random() * Math.max(1, w - FACE),
+      y: scatter ? Math.random() * h : -FACE,
+      speed: 0.5 + Math.random() * 0.7,      // px a frame, slower than a column
+      // A drop placed on the screen already is falling; only one waiting its
+      // turn above the top waits. Both waited to begin with, so the first ten
+      // seconds of every page had no faces in it at all.
+      wait: scatter ? 0 : Math.floor(Math.random() * 140),
+    };
+  }
+  function paintFaces(){
+    for (let i = 0; i < drops.length; i++){
+      const d = drops[i];
+      if (d.wait > 0){ d.wait--; continue; }
+      d.y += d.speed;
+      if (d.y > h + FACE){ drops[i] = newDrop(false); continue; }
+      if (!d.img.complete) continue;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y + FACE / 2, FACE / 2, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(d.img, d.x - FACE / 2, d.y, FACE, FACE);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
 
   function paint(){
     ctx.clearRect(0, 0, w, h);
@@ -1982,29 +2012,12 @@ RAIN_JS = """
         c.y = -TRAIL;
         c.speed = 0.22 + Math.random() * 0.33;
         c.wait = rest();
-        c.face = (FACES.length && Math.random() < FACE_ODDS)
-                 ? FACES[(Math.random() * FACES.length) | 0] : null;
         continue;
       }
       // One character swapped per column per frame: the flicker that makes it
       // read as falling text rather than a moving picture of text.
       c.chars[(Math.random() * TRAIL) | 0] = pick();
-      // The head first, when it is a face: clipped round, like every other
-      // avatar on the site, and a shade stronger than the characters because a
-      // photograph at a character's alpha is a smudge rather than a person.
-      if (c.face && c.face.complete){
-        const y = c.y * FONT;
-        if (y > -FACE && y < h){
-          ctx.save();
-          ctx.globalAlpha = 0.5;
-          ctx.beginPath();
-          ctx.arc(c.x + FONT / 2, y + FACE / 2, FACE / 2, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.drawImage(c.face, c.x + FONT / 2 - FACE / 2, y, FACE, FACE);
-          ctx.restore();
-        }
-      }
-      for (let i = c.face ? 1 : 0; i < TRAIL; i++){
+      for (let i = 0; i < TRAIL; i++){
         const y = (c.y - i) * FONT;
         if (y < -FONT || y > h) continue;
         // The head is brightest and the tail fades out. It can afford this
@@ -2016,6 +2029,7 @@ RAIN_JS = """
       }
     }
     ctx.globalAlpha = 1;
+    paintFaces();
   }
 
   function start(){
