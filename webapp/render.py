@@ -1824,6 +1824,34 @@ RAIN_JS = """
   // thread that happens to fall past now and then.
   const rest = () => 14 + Math.floor(Math.random() * 90);
 
+  // Faces fall too, but rarely: one run in six starts with somebody's picture
+  // at its head instead of a character. Often enough to be a surprise, seldom
+  // enough to stay one.
+  const FACES = [];
+  const FACE = 26, FACE_ODDS = 0.16;
+  try {
+    const kept = JSON.parse(localStorage.getItem('wk-rain-faces') || '[]');
+    if (Array.isArray(kept)) setTimeout(() => loadFaces(kept), 0);
+  } catch(e){}
+  function loadFaces(urls){
+    for (const u of urls || []){
+      const img = new Image();
+      img.decoding = 'async';
+      img.onload = () => {
+        FACES.push(img);
+        // Deal one straight away to a column that is resting, so the first
+        // face does not have to wait for a full lap of the screen.
+        for (const c of cols || []){
+          if (!c.face && c.wait > 0 && Math.random() < FACE_ODDS){
+            c.face = img;
+            break;
+          }
+        }
+      };
+      img.src = u;
+    }
+  }
+
   function size(){
     const d = DENSITY[mode()] || DENSITY.few;
     GAP = d.gap; TRAIL = d.trail;
@@ -1847,6 +1875,9 @@ RAIN_JS = """
       // Some start already resting, so the first frame is not every column
       // setting off together.
       wait: Math.random() < 0.4 ? rest() : 0,
+      // Faces are handed out on restart too, but a column set up before the
+      // pictures arrived would have waited a whole lap for its first one.
+      face: null,
       chars: Array.from({length: TRAIL}, () => pick()),
     }));
   }
@@ -1863,12 +1894,29 @@ RAIN_JS = """
         c.y = -TRAIL;
         c.speed = 0.22 + Math.random() * 0.33;
         c.wait = rest();
+        c.face = (FACES.length && Math.random() < FACE_ODDS)
+                 ? FACES[(Math.random() * FACES.length) | 0] : null;
         continue;
       }
       // One character swapped per column per frame: the flicker that makes it
       // read as falling text rather than a moving picture of text.
       c.chars[(Math.random() * TRAIL) | 0] = pick();
-      for (let i = 0; i < TRAIL; i++){
+      // The head first, when it is a face: clipped round, like every other
+      // avatar on the site, and a shade stronger than the characters because a
+      // photograph at a character's alpha is a smudge rather than a person.
+      if (c.face && c.face.complete){
+        const y = c.y * FONT;
+        if (y > -FACE && y < h){
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.arc(c.x + FONT / 2, y + FACE / 2, FACE / 2, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(c.face, c.x + FONT / 2 - FACE / 2, y, FACE, FACE);
+          ctx.restore();
+        }
+      }
+      for (let i = c.face ? 1 : 0; i < TRAIL; i++){
         const y = (c.y - i) * FONT;
         if (y < -FONT || y > h) continue;
         // The head is brightest and the tail fades out. It can afford this
@@ -1934,20 +1982,27 @@ RAIN_JS = """
   // Swap in the account's own kanji, then remember them for a day. The set
   // grows by a handful a level, so asking on every page load would be one
   // request per view for an answer that has not changed.
+  // The stamp is versioned, so a browser holding yesterday's answer - which had
+  // no faces in it - asks again once rather than never.
   const fresh = () => {
     try {
-      const at = +localStorage.getItem('wk-rain-at') || 0;
+      const at = +localStorage.getItem('wk-rain-at2') || 0;
       return Date.now() - at < 86400000;
     } catch(e){ return false; }
   };
   if (!off() && !fresh()) fetch('/api/rain')
     .then(r => r.ok ? r.json() : null)
     .then(d => {
+      if (d && d.faces){
+        loadFaces(d.faces);
+        try { localStorage.setItem('wk-rain-faces',
+                                   JSON.stringify(d.faces)); } catch(e){}
+      }
       if (d && d.chars && d.chars.length > 20){
         CHARS = d.chars;
         try {
           localStorage.setItem('wk-rain-chars', d.chars);
-          localStorage.setItem('wk-rain-at', String(Date.now()));
+          localStorage.setItem('wk-rain-at2', String(Date.now()));
         } catch(e){}
       }
     }).catch(() => {});

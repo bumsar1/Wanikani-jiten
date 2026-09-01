@@ -1157,9 +1157,13 @@ def rain_glyphs():
     user = require_login()
     snap = store.get_snapshot(user["id"])
     chars = w.known_kanji(snap) if snap else []
+    # The faces of everyone who has put one up, yours included. Only the URLs -
+    # the pictures themselves are already served, cached and access-checked by
+    # /media/avatar, and there is no reason for this to be a second way in.
+    faces = [f"/media/avatar/{u['id']}" for u in store.everyone_with_avatar()]
     # Enough for the columns never to repeat visibly, not so many that the
     # response is a page in itself.
-    return jsonify({"chars": "".join(sorted(set(chars))[:400])})
+    return jsonify({"chars": "".join(sorted(set(chars))[:400]), "faces": faces})
 
 
 @app.get("/api/kanji/<ch>")

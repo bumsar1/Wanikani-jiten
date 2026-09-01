@@ -525,6 +525,19 @@ def dm_read(me: int, other: int) -> None:
                     (now(), me, other))
 
 
+def everyone_with_avatar() -> list[dict]:
+    """Everybody here who has put up a picture.
+
+    No sharing setting gates this: a profile picture is already shown beside
+    that person's name on every page they appear on, so it is the one thing
+    here that was never private in the first place.
+    """
+    with db() as con:
+        rows = con.execute("SELECT id, username FROM users"
+                           " WHERE avatar IS NOT NULL ORDER BY id").fetchall()
+    return [dict(r) for r in rows]
+
+
 def forum_seen(user_id: int) -> None:
     """Mark the forum read, as of now."""
     with db() as con:
