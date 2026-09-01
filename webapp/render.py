@@ -1481,11 +1481,39 @@ TOGETHER_CSS = """
 .statsbox { display:flex; align-items:center; gap:7px; font-size:14px;
   color:var(--muted); cursor:pointer; }
 .statsbox input { width:16px; height:16px; accent-color:var(--accent); }
-.banner { height:120px; border-radius:14px 14px 0 0; background-size:cover;
+/* A ratio rather than a fixed height. 120px in a card 430px wide is a 3.6:1
+   slot, and most of what people put up is 16:9 or 3:2 - so half the picture
+   was being thrown away before anyone saw it. At 9:4 the same card shows about
+   four fifths of a 16:9 shot, and the banner now grows and shrinks with the
+   card instead of staying a strip on a wide screen and a letterbox on a phone.
+   The cap stops it becoming a poster on a very wide card. */
+.banner { position:relative; aspect-ratio:9/4; max-height:240px;
+  min-height:110px; border-radius:14px 14px 0 0; background-size:cover;
   background-position:center; border-bottom:1px solid var(--line); }
+/* The name block is pulled up onto the bottom of the picture, so the bottom of
+   the picture has to be something a name can be read against. Whatever anybody
+   puts up, the last 70px fade into the card's own colour - without this, a
+   photo that happens to be pale at the bottom swallows the name whole. */
+/* A short fade at the foot of the picture, so it settles into the card rather
+   than stopping at a hard line. Nothing is read on top of it now, so it can be
+   gentle. */
+.banner::after { content:""; position:absolute; left:0; right:0; bottom:0;
+  height:44px; border-radius:0 0 14px 14px;
+  background:linear-gradient(to bottom, transparent, rgba(0,0,0,.28)); }
+
 .person .idbar { display:flex; gap:12px; align-items:center; padding:14px 18px 12px;
   border-bottom:1px solid var(--line); }
-.person .idbar.pulled { margin-top:-34px; border-bottom:0; padding-bottom:6px; }
+/* Only the picture climbs onto the banner. The name used to come with it, and
+   a name laid over a photograph is readable or not depending on the
+   photograph - which is not a thing to leave to chance, or to tune with a
+   gradient until it looks right against the two pictures you happen to have.
+   The avatar can do it because it carries its own border in the card's colour.
+   It also means the banner is covered by 52px of circle instead of a 34px band
+   across the whole of it. */
+.person .idbar.pulled { border-bottom:0; padding-top:8px; padding-bottom:6px;
+  align-items:flex-start; }
+.person .idbar.pulled .avatar { margin-top:-40px; width:60px; height:60px;
+  box-shadow:0 2px 10px rgba(0,0,0,.28); }
 .avatar { width:52px; height:52px; border-radius:50%; object-fit:cover; flex:none;
   border:2px solid var(--raise); background:var(--sunk); }
 .avatar.blank { display:grid; place-items:center; font:600 20px/1 var(--sans, sans-serif);
