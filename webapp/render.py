@@ -374,14 +374,13 @@ MOBILE_CSS = """
   .rowcards td.num:empty { display:none; }
   .rowcards td.wide, .rowcards td.acts { grid-column:1 / -1; text-align:left; }
 
-  /* The header row still sorts, so it stays - as a strip of chips above the
-     cards rather than a row of columns that no longer exist. */
-  .rowcards tr.hrow { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none;
-    background:none; border:none; border-radius:0; padding:0 0 4px;
-    margin:0 0 2px; }
-  .rowcards tr.hrow::-webkit-scrollbar { display:none; }
-  .rowcards tr.hrow th { border:1px solid var(--line); border-radius:var(--r-pill);
-    padding:5px 11px; font-size:12px; white-space:nowrap; background:var(--bg); }
+  /* The header row stays in the document - every value in a card is labelled
+     from it - but it is not shown. As a strip of chips it was the column names
+     a second time, above cards that already carry each one beside its number,
+     and a row of words scrolling sideways above the thing you came to read.
+     The cost is that a carded table cannot be re-sorted on a phone; its
+     default order is the useful one, and the labels are what earn the space. */
+  .rowcards tr.hrow { display:none; }
   .wrap.flat { overflow-x:visible; background:none; border:none;
     box-shadow:none; border-radius:0; }
 }
@@ -2623,9 +2622,15 @@ RACE_CSS = """
   background:var(--raise); border:1px solid var(--line);
   border-radius:var(--r-box); box-shadow:var(--lift);
   opacity:0; visibility:hidden; pointer-events:none;
-  transition:opacity var(--t-fast) var(--ease),
-             transform var(--t-fast) var(--ease);
   text-align:left; }
+/* Fading in is worth 140ms; fading out is not. Moving from one runner to the
+   next used to cross-fade the two cards through each other - both at half
+   strength, in nearly the same place, for a fifth of a second, which is
+   exactly long enough to read as one card glitching rather than two swapping.
+   The one being left goes at once. */
+.track.lit .peek, .track.open .peek {
+  transition:opacity var(--t-fast) var(--ease),
+             transform var(--t-fast) var(--ease); }
 .track.lit .peek, .track.open .peek { opacity:1; visibility:visible;
   transform:translateX(-50%) translateY(-3px); }
 .peek.down { bottom:auto; top:calc(100% - 2px); }
