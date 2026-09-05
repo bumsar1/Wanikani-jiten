@@ -1370,7 +1370,8 @@ def _skeleton_head(title: str, user=None, page: str = "") -> str:
             f'<title>{esc(title)}</title>{w.favicon_link(ICON)}'
             f'<link rel="stylesheet" href="{CSS_URL}">'
             f'{w.THEME_BOOT}{BACKDROP_BOOT}'
-            f'</head><body><main>{bar}')
+            f'</head><body><div class="backdrop" aria-hidden="true"></div>'
+            f'<main>{bar}')
 
 
 def login_page(error: str = "", note: str = "") -> str:
@@ -2191,21 +2192,42 @@ html.hasbg .splash { background:var(--panel); }
     background-size:100% 100%, auto 100vh;
     background-size:100% 100%, auto 100lvh;
     background-position:center, center top;
-    /* Fixed, like the desktop: the painting is the room the page is in, and
-       scrolling out of the room was worse than the band ever was. It inherits
-       that from the rule above, so there is nothing to say here - the line
-       that said "scroll" is gone.
-       Whether a phone honours it is the phone's business. Safari has treated
-       a fixed root background as scrolling for years, on and off by version,
-       so this may still read as a header on an iPhone. If it does, the fix is
-       a fixed element rather than a fixed background, and that has to be kept
-       out of the view transition snapshots or the flash between pages comes
-       back - which is why it is not the first thing tried. What it cannot do
-       any more is come apart: the size is written out, so even a phone that
-       measures it against the document gets one screenful and not a picture
-       scaled to the height of the page. */
   }
 }
+
+/* Safari does not honour a fixed root background - it reads it as scrolling,
+   and has for years - so on a phone the painting moves off the root and onto
+   a fixed element of its own, which every browser does honour. The root keeps
+   only its colour there, or the picture would be painted twice.
+   Nothing on a desktop: this element does not exist as far as that rule is
+   concerned, and the root background above is untouched. */
+.backdrop { display:none; }
+@media (max-width:700px) {
+  html.hasbg { background-image:none; }
+  html.hasbg .backdrop {
+    display:block; position:fixed; top:0; left:0; right:0; z-index:-1;
+    /* The largest viewport height, not the current one: an element pinned to
+       inset:0 grows and shrinks as the toolbars come and go, and the picture
+       would resize under the reader every time. 100lvh always covers. */
+    height:100vh; height:100lvh;
+    background-image:linear-gradient(var(--scrim), var(--scrim)),
+                     var(--backdrop-tall);
+    background-size:100% 100%, auto 100%;
+    background-position:center, center top;
+    background-repeat:no-repeat;
+    /* Its own snapshot, and one that holds still. A fixed layer inside body
+       is otherwise captured in the root's snapshot, and the moment when
+       neither page is opaque shows the flat page colour through it - which is
+       the black flash this whole arrangement was moved to the root to avoid.
+       Naming it takes it out of the root's group, and the two rules below
+       tell that group not to animate, so it stays where it is while the pages
+       cross over it. */
+    view-transition-name:wkbackdrop;
+  }
+}
+::view-transition-group(wkbackdrop) { animation:none; }
+::view-transition-old(wkbackdrop), ::view-transition-new(wkbackdrop) {
+  animation:none; mix-blend-mode:normal; }
 
 /* What falls, and in what colour. Two properties rather than one shared ink:
    a petal is pink in either theme, but snow that is white on a white page is
