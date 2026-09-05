@@ -688,7 +688,10 @@ def _runner(user_id: int, username: str, has_avatar, is_me: bool,
     total = right + wrong
     needed = prog.get("needed") or 0
     passed = prog.get("passed") or 0
-    month = time.strftime("%Y-%m")
+    # WaniKani stamps passed_at in UTC and the table is keyed on those
+    # stamps, so the month asked for has to be the UTC one too. Reading it
+    # locally put an evening at the turn of a month in the wrong bucket.
+    month = time.strftime("%Y-%m", time.gmtime())
     return {
         "id": user_id, "username": username, "has_avatar": has_avatar,
         "me": is_me,
@@ -963,17 +966,23 @@ def dm_favourite():
 def save_profile():
     user = require_login()
     store.set_bio(user["id"], request.form.get("bio", ""))
-    store.set_currently(user["id"], request.form.get("currently") or None)
+    # Through _int like every other field that arrives from outside: the
+    # select only ever holds deck ids, but "whatever the caller sent" is the
+    # rule here, and an unparseable one used to come back as a 500.
+    store.set_currently(user["id"], _int(request.form.get("currently")) or None)
     problems = []
     for kind in ("avatar", "banner"):
-        if request.form.get(f"clear_{kind}") == "1":
-            store.set_image(user["id"], kind, None)
-            continue
         upload = request.files.get(kind)
+        # Ticking remove and choosing a picture in the same submit is not a
+        # contradiction to be settled by whichever the code reaches first.
+        # Choosing one is the later thought and the one that was being thrown
+        # away without a word.
         if upload and upload.filename:
             err = store.set_image(user["id"], kind, upload.read())
             if err:
                 problems.append(f"{kind}: {err}")
+        elif request.form.get(f"clear_{kind}") == "1":
+            store.set_image(user["id"], kind, None)
     note = "; ".join(problems) if problems else "Profile saved."
     return redirect(url_for("together", note=note))
 
@@ -1372,6 +1381,14 @@ def make_invite():
 
 @app.get("/healthz")
 def healthz():
+    """Enough for a container to see that the process is answering.
+
+    The numbers are worth having, but how many people are on an instance is
+    the kind of thing that should cost an account to find out, and the
+    HEALTHCHECK only ever looks at the status.
+    """
+    if not current_user():
+        return {"ok": True}
     return {"ok": True, "users": store.user_count(),
             "cached_decks": store.deck_cache_size()}
 

@@ -560,8 +560,10 @@ def month_totals(cache: dict) -> dict | None:
     """
     if "lessons_by_month" not in cache:
         return None            # fetched before any of this was collected
-    month = time.strftime("%Y-%m")
-    year = time.strftime("%Y")
+    # Both tables are keyed on WaniKani's own stamps, which are UTC, so the
+    # month and year being counted have to be UTC as well.
+    month = time.strftime("%Y-%m", time.gmtime())
+    year = time.strftime("%Y", time.gmtime())
     lessons = cache.get("lessons_by_month") or {}
     passes = cache.get("passed_by_month") or {}
 
