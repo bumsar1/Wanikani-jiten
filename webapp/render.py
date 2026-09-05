@@ -1445,6 +1445,7 @@ def settings_page(user, creds, note: str = "", error: str = "",
         <select id="fallsw">
           <option value="kanji">Kanji you can read</option>
           <option value="sakura">Sakura petals</option>
+          <option value="rain">Rain</option>
           <option value="snow">Snow</option>
         </select></label>
       <label class="rainbox"><span>How much of it</span>
@@ -1453,9 +1454,16 @@ def settings_page(user, creds, note: str = "", error: str = "",
           <option value="few">A few</option>
           <option value="lots">More of them</option>
         </select></label>
-      <p class="sub" style="margin-top:6px">All three are remembered in this
-      browser, so you can have a painting and snow on the big screen and
-      nothing at all on your phone. The sentences fall whichever you pick.</p>
+      <label class="rainbox"><span>Sentences in the margins</span>
+        <select id="linesw">
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select></label>
+      <p class="sub" style="margin-top:6px">All four are remembered in this
+      browser, so you can have a painting and rain on the big screen and
+      nothing at all on your phone. The <b>sentences</b> are the lines you can
+      hold the pointer on to look a word up; they fall whichever of the others
+      you pick, and they need a pointer, so they never appear on a phone.</p>
 
       <h2>Data</h2>
       <p class="sub">{fetched} The counters on the dashboard compare that
@@ -2075,11 +2083,12 @@ html.hasbg .splash { background:var(--panel); }
 /* What falls, and in what colour. Two properties rather than one shared ink:
    a petal is pink in either theme, but snow that is white on a white page is
    not snow, it is nothing. */
-:root { --petal:#e79ab6; --flake:#8ca3c4; }
+:root { --petal:#e79ab6; --flake:#8ca3c4; --drop:#6f89ab; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --petal:#f7bcd2; --flake:#e8eef7; }
+  :root:not([data-theme="light"]) { --petal:#f7bcd2; --flake:#e8eef7;
+    --drop:#a9c0e0; }
 }
-:root[data-theme="dark"] { --petal:#f7bcd2; --flake:#e8eef7; }
+:root[data-theme="dark"] { --petal:#f7bcd2; --flake:#e8eef7; --drop:#a9c0e0; }
 
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
@@ -2210,11 +2219,18 @@ RAIN_JS = """
   // value reads as kanji, which is what a browser holding the old single
   // setting has.
   const SKEY = 'wk-fall';
-  const STYLES = {kanji: 1, sakura: 1, snow: 1};
+  const STYLES = {kanji: 1, sakura: 1, rain: 1, snow: 1};
   const style = () => { try { const v = localStorage.getItem(SKEY);
                               return STYLES[v] ? v : 'kanji'; }
                         catch(e){ return 'kanji'; } };
   const weather = () => style() !== 'kanji';
+  // The sentences are not the rain and never were: they are elements, they are
+  // there to be looked up, and somebody can want the falling kanji without
+  // wanting something to read in the margin. Their own switch, on by default,
+  // so nobody loses them by upgrading.
+  const LKEY = 'wk-lines';
+  const lines = () => { try { return localStorage.getItem(LKEY) !== 'off'; }
+                        catch(e){ return true; } };
   // What it was before it was turned off, so switching back does not quietly
   // reset somebody's choice of density.
   let last = mode() === 'off' ? 'few' : mode();
@@ -2369,9 +2385,29 @@ RAIN_JS = """
   // machine. Each one carries its own drift, its own turn and its own speed,
   // and goes back to the top when it leaves the bottom.
   const BITS = {few: 40000, lots: 18000};   // one for every this many px2
+  // Rain is not weather anybody notices one drop of, so there are more of
+  // them for the same setting - and the ceiling rises with them.
+  const DENSER = {rain: 0.42};
+  // One slant for all of them. Wind blows on the whole street at once, and
+  // drops going their own separate ways read as sparks, not rain.
+  const WIND = 0.16;
   let bits = [];
   function newBit(scatter){
-    const snow = style() === 'snow';
+    const kind = style();
+    if (kind === 'rain'){
+      // A drop is its own streak, so it carries a length and a thickness
+      // instead of a radius, and it neither sways nor turns.
+      const vy = 6 + Math.random() * 5;
+      return {
+        x: Math.random() * (w + 160) - 120,
+        y: scatter ? Math.random() * h : -20,
+        r: 0.6 + Math.random() * 0.7, len: 8 + Math.random() * 14,
+        vy: vy, vx: vy * WIND,
+        sway: 0, dsway: 0, amp: 0, spin: 0, dspin: 0,
+        a: 0.16 + Math.random() * 0.24,
+      };
+    }
+    const snow = kind === 'snow';
     return {
       x: Math.random() * w,
       y: scatter ? Math.random() * h : -10,
@@ -2392,23 +2428,45 @@ RAIN_JS = """
   function seedBits(){
     // A ceiling as well as a rate: a very wide screen should not be a blizzard
     // just because it has the room for one.
-    const want = Math.min(170,
-      Math.round(w * h / (BITS[mode()] || BITS.few)));
+    const dense = DENSER[style()] || 1;
+    const want = Math.min(Math.round(170 / dense),
+      Math.round(w * h / ((BITS[mode()] || BITS.few) * dense)));
     return Array.from({length: want}, () => newBit(true));
   }
+  const INK = {sakura: ['--petal', '#e79ab6'], snow: ['--flake', '#e8eef7'],
+               rain: ['--drop', '#6f89ab']};
   function paintBits(){
-    const snow = style() === 'snow';
+    const kind = style();
     const cs = getComputedStyle(document.documentElement);
-    const ink = (cs.getPropertyValue(snow ? '--flake' : '--petal') || '').trim()
-                || (snow ? '#e8eef7' : '#e79ab6');
+    const pick = INK[kind] || INK.sakura;
+    const ink = (cs.getPropertyValue(pick[0]) || '').trim() || pick[1];
     ctx.fillStyle = ink;
+    ctx.strokeStyle = ink;
+    ctx.lineCap = 'round';
     for (const b of bits){
       b.y += b.vy;
+      if (kind === 'rain'){
+        b.x += b.vx;
+        // Off the bottom, or carried off the side by the wind.
+        if (b.y - b.len > h || b.x - b.len > w){
+          Object.assign(b, newBit(false)); continue;
+        }
+        // Drawn back along the way it came, so the streak lies on its own
+        // path and leans with the wind rather than beside it.
+        const k = b.len / b.vy;
+        ctx.globalAlpha = b.a;
+        ctx.lineWidth = b.r;
+        ctx.beginPath();
+        ctx.moveTo(b.x - b.vx * k, b.y - b.len);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        continue;
+      }
       b.sway += b.dsway;
       b.x += Math.sin(b.sway) * b.amp;
       if (b.y - b.r > h){ Object.assign(b, newBit(false)); continue; }
       ctx.globalAlpha = b.a;
-      if (snow){
+      if (kind === 'snow'){
         ctx.beginPath();
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
         ctx.fill();
@@ -2496,7 +2554,7 @@ RAIN_JS = """
   }
   let strandSide = 0;
   function strandsOn(){
-    if (off() || calm.matches) return;
+    if (off() || calm.matches || !lines()) return;
     if (matchMedia('(max-width: 700px)').matches) return;
     if (!layer){
       layer = document.createElement('div');
@@ -2592,6 +2650,7 @@ RAIN_JS = """
   // say so, and the three-way choice can stay where the taste lives.
   const FALLNAME = {kanji: ['\u2604', 'The falling kanji'],
                     sakura: ['\u273f', 'The falling petals'],
+                    rain: ['\u2602', 'The rain'],
                     snow: ['\u2744', 'The falling snow']};
   // Hoisted, because changing what falls has to redraw this button too and
   // the settings select is wired somewhere else entirely.
@@ -2628,6 +2687,15 @@ RAIN_JS = """
         fs.addEventListener('change', () => window.wkRain.setStyle(fs.value));
       }
     }
+    const ls = document.getElementById('linesw');
+    if (ls){
+      if (calm.matches) ls.disabled = true;
+      else {
+        ls.value = lines() ? 'on' : 'off';
+        ls.addEventListener('change',
+          function(){ window.wkRain.setLines(ls.value === 'on'); });
+      }
+    }
     const sw = document.getElementById('rainsw');
     if (!sw) return;
     if (calm.matches){
@@ -2659,8 +2727,16 @@ RAIN_JS = """
       if (off() || calm.matches) return;
       stop(); start();
     },
+    // The sentences come and go on their own, without restarting anything:
+    // they are elements in a layer of their own and know nothing about what
+    // is being painted on the canvas.
+    setLines: (on) => {
+      try { localStorage.setItem(LKEY, on ? 'on' : 'off'); } catch(e){}
+      if (on) strandsOn(); else strandsOff();
+    },
     mode,
     style,
+    lines,
   };
   start();
 
