@@ -1985,15 +1985,18 @@ PHRASES = [
 # The paintings that can sit behind the page. Adding the next tier is a word
 # here and two files in assets/ - the settings control, the routes that serve
 # them and the boot script all read this.
-BACKDROPS = ("pleasant",)
-BACKDROP_NAMES = {"pleasant": "Pleasant"}
+# In WaniKani's own order, so the list reads as the climb rather than as six
+# pictures. The keys are the tier keys, which is what keeps this and TIERS
+# talking about the same thing - the painting for level 41-50 is filed under
+# paradise even though the sign in it says heaven.
+BACKDROPS = ("pleasant", "painful", "death", "hell", "paradise", "reality")
+BACKDROP_NAMES = {b: b.title() for b in BACKDROPS}
 
 
 RAIN_CSS = """
-/* A painting behind the page, on a fixed layer of its own. Not on the body,
-   whose own background is opaque and would cover it, and not scrolling with
-   the page, which would make it read as a very long banner rather than a
-   view the page sits in front of.
+/* A painting behind the page, fixed to the viewport so it does not scroll -
+   a background that scrolls reads as a very long banner rather than a view
+   the page stands in front of.
    Two washes, not one. The cards paint their own background and were never
    in danger, but a heading and a grey line of explanation sit straight on the
    page - and --muted has only 5.12:1 on the plain background to begin with,
@@ -2010,7 +2013,34 @@ RAIN_CSS = """
 :root[data-theme="dark"] { --scrim:rgba(20,19,18,.62);
   --panel:rgba(20,19,18,.92); }
 
-html.hasbg { background:var(--bg); }
+/* On the root, not on a layer of body's own. The root's background is painted
+   behind everything the browser draws, view transition snapshots included -
+   and a fixed layer inside body is captured *in* those snapshots, so while one
+   page was fading out and the next fading in there was a moment when neither
+   was fully opaque and the flat page colour showed through. On a dark theme
+   that reads as the screen going black between every click.
+   Fitted to the width rather than cropped to fill. A browser window is around
+   1.6:1 and these are 2.5:1, so "cover" scaled them to the height and threw
+   away a third of each side - which is exactly where the crocodile stands.
+   Fitting the width shows all of it and leaves a band, and the band would
+   have two hard horizontal edges, so it is faded into the page colour at the
+   top and bottom. That fade can be placed exactly because all six files are
+   cut to the same 2.5:1: the band is always 40vw tall, so its edges are
+   always 20vw either side of the middle. */
+html.hasbg {
+  background-color:var(--bg);
+  background-image:
+    linear-gradient(var(--scrim), var(--scrim)),
+    linear-gradient(var(--bg) calc(50% - 20vw),
+                    transparent calc(50% - 13vw),
+                    transparent calc(50% + 13vw),
+                    var(--bg) calc(50% + 20vw)),
+    var(--backdrop);
+  background-size:100% 100%, 100% 100%, 100% auto;
+  background-position:center;
+  background-repeat:no-repeat;
+  background-attachment:fixed;
+}
 html.hasbg body { background:transparent; }
 /* The fade lands exactly on main's own 22px padding, so no word is ever over
    the soft edge of its own backing. */
@@ -2018,15 +2048,16 @@ html.hasbg main {
   background:linear-gradient(to right, transparent 0, var(--panel) 22px,
                              var(--panel) calc(100% - 22px), transparent 100%);
 }
-html.hasbg body::before {
-  content:""; position:fixed; inset:0; z-index:-1;
-  background-image:linear-gradient(var(--scrim), var(--scrim)), var(--backdrop);
-  background-size:cover; background-position:center; background-repeat:no-repeat;
-}
-/* A phone gets the small one. A 2.8:1 painting cropped to a tall screen is
-   mostly sky either way, so it is not worth 120kB of it. */
+/* The waiting screen is a please-wait, not a lid: there is nothing behind it
+   yet but the top bar. Opaque, it dropped a slab of flat colour over the
+   painting and took it away again a second later, which looked like a fault.
+   The panel colour instead - the same 92% the column uses, so the sentence on
+   it keeps the contrast the column's own text has. */
+html.hasbg .splash { background:var(--panel); }
+/* A phone gets the small one: at 375px wide the big file is 120kB to draw a
+   band 135px tall. */
 @media (max-width:700px) {
-  html.hasbg body::before {
+  html.hasbg {
     background-image:linear-gradient(var(--scrim), var(--scrim)),
                      var(--backdrop-sm);
   }
