@@ -1120,11 +1120,14 @@ def dock() -> str:
 # is worse than not having one - the same reason the theme is set here.
 # The value is checked against a pattern rather than trusted: it ends up in a
 # url(), and localStorage is not a place to take a URL from.
-BACKDROP_BOOT = """<script>try{var b=localStorage.getItem('wk-bg');
-if(b&&/^[a-z]+$/.test(b)){var r=document.documentElement;
+BACKDROP_BOOT = """<script>try{var r=document.documentElement,
+b=localStorage.getItem('wk-bg');
+if(b&&/^[a-z]+$/.test(b)){
 r.style.setProperty('--backdrop',"url('/asset/bg-"+b+".webp')");
 r.style.setProperty('--backdrop-sm',"url('/asset/bg-"+b+"-sm.webp')");
-r.classList.add('hasbg');}}catch(e){}</script>"""
+r.classList.add('hasbg');}
+if(localStorage.getItem('wk-glass')==='glass')r.classList.add('seethru');
+}catch(e){}</script>"""
 
 
 BACKDROP_JS = """
@@ -1145,7 +1148,19 @@ BACKDROP_JS = """
     root.style.setProperty('--backdrop-sm', "url('/asset/bg-" + v + "-sm.webp')");
     root.classList.add('hasbg');
   }
+  // See-through is a second class on the root, set by the same boot script,
+  // so it goes on and off without a reload and without touching the painting.
+  const GKEY = 'wk-glass';
   addEventListener('DOMContentLoaded', function(){
+    const gl = document.getElementById('glasssw');
+    if (gl){
+      try { gl.value = localStorage.getItem(GKEY) === 'glass' ? 'glass' : 'solid'; }
+      catch(e){}
+      gl.addEventListener('change', function(){
+        try { localStorage.setItem(GKEY, gl.value); } catch(e){}
+        root.classList.toggle('seethru', gl.value === 'glass');
+      });
+    }
     const sel = document.getElementById('bgsw');
     if (!sel) return;
     try { sel.value = localStorage.getItem(KEY) || ''; } catch(e){}
@@ -1441,6 +1456,11 @@ def settings_page(user, creds, note: str = "", error: str = "",
       motion.</p>
       <label class="rainbox"><span>Behind the page</span>
         <select id="bgsw">{backdrops}</select></label>
+      <label class="rainbox"><span>The page itself</span>
+        <select id="glasssw">
+          <option value="solid">Solid</option>
+          <option value="glass">See-through</option>
+        </select></label>
       <label class="rainbox"><span>What falls</span>
         <select id="fallsw">
           <option value="kanji">Kanji you can read</option>
@@ -1459,11 +1479,14 @@ def settings_page(user, creds, note: str = "", error: str = "",
           <option value="on">On</option>
           <option value="off">Off</option>
         </select></label>
-      <p class="sub" style="margin-top:6px">All four are remembered in this
+      <p class="sub" style="margin-top:6px">All five are remembered in this
       browser, so you can have a painting and rain on the big screen and
-      nothing at all on your phone. The <b>sentences</b> are the lines you can
-      hold the pointer on to look a word up; they fall whichever of the others
-      you pick, and they need a pointer, so they never appear on a phone.</p>
+      nothing at all on your phone. <b>See-through</b> gives up most of the
+      page's opacity so the painting reads through the cards as well as past
+      them; it needs a painting behind it to show. The <b>sentences</b> are
+      the lines you can hold the pointer on to look a word up; they fall
+      whichever of the others you pick, and they need a pointer, so they never
+      appear on a phone.</p>
 
       <h2>Data</h2>
       <p class="sub">{fetched} The counters on the dashboard compare that
@@ -2030,6 +2053,36 @@ RAIN_CSS = """
 :root[data-theme="dark"] { --scrim:rgba(20,19,18,.62);
   --panel:rgba(20,19,18,.92); }
 
+/* See-through. The page keeps its shape, its lines and its type and gives up
+   most of its opacity, so the painting reads through the column instead of
+   only past it. Three translucent layers stack up - the wash in the margins,
+   the column's panel, the card on top of it - and together they still leave
+   83% page colour behind a line of text, which is the difference between a
+   page you can see through and a poster with words on.
+   The blur is what makes that safe: a card sits on a blurred painting rather
+   than on a painting, so no single dark pixel ever ends up under a letter.
+   And --muted moves towards the foreground, because grey on busy is the one
+   thing that stops working - at these alphas it measured 3.6:1 where it was,
+   and 5.25:1 where it is now. The heavier weights never needed help: body
+   text is 11.9:1 light and 8.6:1 dark against the worst the paintings hold.
+   Selectors carry the theme with them, because ":root[data-theme]" outranks
+   "html.seethru" and would otherwise put the solid values back. */
+html.seethru { --scrim:rgba(250,248,245,.34); --panel:rgba(250,248,245,.34);
+  --raise:rgba(255,255,255,.62); --muted:#57514a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]).seethru { --scrim:rgba(20,19,18,.38);
+    --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4; }
+}
+:root[data-theme="dark"].seethru { --scrim:rgba(20,19,18,.38);
+  --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4; }
+/* One blur for the whole column rather than one per card: they are all
+   translucent over the same painting, and one compositing layer is cheaper
+   than twenty. */
+html.seethru main {
+  -webkit-backdrop-filter:blur(14px) saturate(1.08);
+  backdrop-filter:blur(14px) saturate(1.08);
+}
+
 /* On the root, not on a layer of body's own. The root's background is painted
    behind everything the browser draws, view transition snapshots included -
    and a fixed layer inside body is captured *in* those snapshots, so while one
@@ -2072,11 +2125,21 @@ html.hasbg main {
    it keeps the contrast the column's own text has. */
 html.hasbg .splash { background:var(--panel); }
 /* A phone gets the small one: at 375px wide the big file is 120kB to draw a
-   band 135px tall. */
+   band 150px tall.
+   All three layers repeated, not just two. background-size is still the three
+   values above, and a rule that leaves out the middle layer does not drop the
+   middle size with it - the painting was picking up the "100% 100%" meant for
+   the fade and being stretched to the whole screen. Which is what it looked
+   like on a phone. */
 @media (max-width:700px) {
   html.hasbg {
-    background-image:linear-gradient(var(--scrim), var(--scrim)),
-                     var(--backdrop-sm);
+    background-image:
+      linear-gradient(var(--scrim), var(--scrim)),
+      linear-gradient(var(--bg) calc(50% - 20vw),
+                      transparent calc(50% - 13vw),
+                      transparent calc(50% + 13vw),
+                      var(--bg) calc(50% + 20vw)),
+      var(--backdrop-sm);
   }
 }
 
@@ -2274,9 +2337,15 @@ RAIN_JS = """
   const FACES = [];
   const FACE = 46;
   let drops = [];
+  // The faces belong to accounts, and the login screen has none. Asking there
+  // meant a row of 404s in the console for pictures that page is not allowed
+  // to have, and a call to /api/rain that only ever redirected back to the
+  // login form. The top bar is the tell: it is only drawn for a signed-in
+  // page, and the script is deferred, so it is already there to be found.
+  const signedIn = () => !!document.querySelector('.topbar');
   try {
     const kept = JSON.parse(localStorage.getItem('wk-rain-faces') || '[]');
-    if (Array.isArray(kept)) setTimeout(() => loadFaces(kept), 0);
+    if (Array.isArray(kept) && signedIn()) setTimeout(() => loadFaces(kept), 0);
   } catch(e){}
   function loadFaces(list){
     for (const f of list || []){
@@ -2800,7 +2869,7 @@ RAIN_JS = """
       return Date.now() - at < 86400000;
     } catch(e){ return false; }
   };
-  if (!off() && !fresh()) fetch('/api/rain')
+  if (!off() && !fresh() && signedIn()) fetch('/api/rain')
     .then(r => r.ok ? r.json() : null)
     .then(d => {
       if (d && d.faces){
