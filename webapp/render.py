@@ -1430,18 +1430,25 @@ def settings_page(user, creds, note: str = "", error: str = "",
         <button class="go" type="submit">Save</button>
       </form>
       <h2>This screen</h2>
-      <p class="sub">Kanji you can read, falling behind the page. It never
-      draws over a card, so nothing you are reading sits on top of it &mdash;
-      but it is a matter of taste, and it stays off if your system asks for
-      reduced motion.</p>
-      <label class="rainbox"><span>Kanji rain in the background</span>
+      <p class="sub">Something falling behind the page. It never draws over a
+      card, so nothing you are reading sits on top of it &mdash; but it is a
+      matter of taste, and it stays off if your system asks for reduced
+      motion.</p>
+      <label class="rainbox"><span>What falls</span>
+        <select id="fallsw">
+          <option value="kanji">Kanji you can read</option>
+          <option value="sakura">Sakura petals</option>
+          <option value="snow">Snow</option>
+        </select></label>
+      <label class="rainbox"><span>How much of it</span>
         <select id="rainsw">
           <option value="off">Off</option>
           <option value="few">A few</option>
           <option value="lots">More of them</option>
         </select></label>
-      <p class="sub" style="margin-top:6px">Remembered in this browser, so you
-      can have it on the big screen and off on your phone.</p>
+      <p class="sub" style="margin-top:6px">Both are remembered in this
+      browser, so you can have snow on the big screen and nothing at all on
+      your phone. The sentences fall whichever you pick.</p>
 
       <h2>Data</h2>
       <p class="sub">{fetched} The counters on the dashboard compare that
@@ -1928,6 +1935,15 @@ PHRASES = [
 
 
 RAIN_CSS = """
+/* What falls, and in what colour. Two properties rather than one shared ink:
+   a petal is pink in either theme, but snow that is white on a white page is
+   not snow, it is nothing. */
+:root { --petal:#e79ab6; --flake:#8ca3c4; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --petal:#f7bcd2; --flake:#e8eef7; }
+}
+:root[data-theme="dark"] { --petal:#f7bcd2; --flake:#e8eef7; }
+
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
    tables of numbers people came here to read. */
@@ -2001,6 +2017,10 @@ html.facedim body > canvas.rain { filter:blur(6px);
 }
 .rainbox { display:flex; align-items:center; gap:10px; margin:10px 0 0;
   font-size:14px; }
+/* Two of these now, one above the other, so their selects want to start in
+   the same place. Only where there is room: on a phone the label takes the
+   line and the select sits under it. */
+@media (min-width:701px) { .rainbox > span { min-width:11.5em; } }
 /* There is no site-wide select rule - every one is dressed where it is used -
    so this one is dressed like the sharing control, its nearest neighbour. */
 .rainbox select { font:inherit; font-size:13.5px; padding:6px 11px;
@@ -2048,6 +2068,16 @@ RAIN_JS = """
   const mode = () => { try { return localStorage.getItem(KEY) || 'few'; }
                        catch(e){ return 'few'; } };
   const off = () => mode() === 'off';
+  // How much falls is one question; what falls is another, and they are kept
+  // apart so picking snow does not throw away somebody's density. An unknown
+  // value reads as kanji, which is what a browser holding the old single
+  // setting has.
+  const SKEY = 'wk-fall';
+  const STYLES = {kanji: 1, sakura: 1, snow: 1};
+  const style = () => { try { const v = localStorage.getItem(SKEY);
+                              return STYLES[v] ? v : 'kanji'; }
+                        catch(e){ return 'kanji'; } };
+  const weather = () => style() !== 'kanji';
   // What it was before it was turned off, so switching back does not quietly
   // reset somebody's choice of density.
   let last = mode() === 'off' ? 'few' : mode();
@@ -2067,7 +2097,14 @@ RAIN_JS = """
   // distracts is not the characters, it is how much is moving at once: at one
   // column every 24px with nine-glyph tails, five hundred things were sliding
   // about behind a page of numbers.
-  const FONT = 18, STEP = 70;
+  // The kanji step in discrete jumps and can afford fourteen frames a second;
+  // a petal drifting at that rate judders. So the two run on different beats,
+  // and anything shared between them - the faces - moves per 70ms tick and is
+  // scaled to whichever beat is current, so a face falls at one speed under
+  // all three.
+  const FONT = 18, STEP = 70, WEATHER_STEP = 33;
+  let beatMs = STEP;
+  const beat = () => beatMs / STEP;
   const DENSITY = {few: {gap: 68, trail: 6}, lots: {gap: 30, trail: 9}};
   let TRAIL = 6, GAP = 68;
   // Frames of stillness after a column finishes, at ~14 a second. A column
@@ -2115,7 +2152,8 @@ RAIN_JS = """
     setTimeout(seedDrops, 0);
     const n = Math.ceil(w / GAP);
     drops = [];
-    cols = Array.from({length: n}, (_, i) => ({
+    bits = weather() ? seedBits() : [];
+    cols = weather() ? [] : Array.from({length: n}, (_, i) => ({
       // Not on a strict grid - a column nudged a few pixels off its slot stops
       // the whole thing reading as a table of falling text.
       x: i * GAP + 4 + Math.random() * (GAP - FONT - 8),
@@ -2174,8 +2212,8 @@ RAIN_JS = """
   function paintFaces(){
     for (let i = 0; i < drops.length; i++){
       const d = drops[i];
-      if (d.wait > 0){ d.wait--; continue; }
-      d.y += d.speed;
+      if (d.wait > 0){ d.wait -= beat(); continue; }
+      d.y += d.speed * beat();
       if (d.y > h + FACE){ drops[i] = newDrop(false, d.side); continue; }
       if (!d.img.complete) continue;
       ctx.save();
@@ -2189,7 +2227,79 @@ RAIN_JS = """
     ctx.globalAlpha = 1;
   }
 
+  // Petals and flakes. The kanji fall in columns because that is what the
+  // film did; these must not - anything on a grid reads as confetti out of a
+  // machine. Each one carries its own drift, its own turn and its own speed,
+  // and goes back to the top when it leaves the bottom.
+  const BITS = {few: 40000, lots: 18000};   // one for every this many px2
+  let bits = [];
+  function newBit(scatter){
+    const snow = style() === 'snow';
+    return {
+      x: Math.random() * w,
+      y: scatter ? Math.random() * h : -10,
+      r: snow ? 1.2 + Math.random() * 2.4 : 3.5 + Math.random() * 3.5,
+      // Snow falls straight and slowly; a petal is lighter than it looks and
+      // spends longer going sideways than down.
+      vy: snow ? 0.5 + Math.random() * 1.1 : 0.9 + Math.random() * 1.3,
+      sway: Math.random() * Math.PI * 2,
+      dsway: snow ? 0.006 + Math.random() * 0.012
+                  : 0.012 + Math.random() * 0.02,
+      amp: snow ? 0.25 + Math.random() * 0.45 : 0.5 + Math.random() * 0.9,
+      spin: Math.random() * Math.PI,
+      // A flake is round and turning it would show nothing. A petal turns.
+      dspin: snow ? 0 : (Math.random() - 0.5) * 0.07,
+      a: snow ? 0.3 + Math.random() * 0.4 : 0.28 + Math.random() * 0.32,
+    };
+  }
+  function seedBits(){
+    // A ceiling as well as a rate: a very wide screen should not be a blizzard
+    // just because it has the room for one.
+    const want = Math.min(170,
+      Math.round(w * h / (BITS[mode()] || BITS.few)));
+    return Array.from({length: want}, () => newBit(true));
+  }
+  function paintBits(){
+    const snow = style() === 'snow';
+    const cs = getComputedStyle(document.documentElement);
+    const ink = (cs.getPropertyValue(snow ? '--flake' : '--petal') || '').trim()
+                || (snow ? '#e8eef7' : '#e79ab6');
+    ctx.fillStyle = ink;
+    for (const b of bits){
+      b.y += b.vy;
+      b.sway += b.dsway;
+      b.x += Math.sin(b.sway) * b.amp;
+      if (b.y - b.r > h){ Object.assign(b, newBit(false)); continue; }
+      ctx.globalAlpha = b.a;
+      if (snow){
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+      // The turn is a squash, not a rotating picture of a petal: seen edge on
+      // a petal is a line, and scaling x by the cosine of the angle is that
+      // for nothing. The tilt on top of it stops them all flipping in step.
+      b.spin += b.dspin;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.spin * 0.6);
+      ctx.scale(Math.max(0.16, Math.abs(Math.cos(b.spin))), 1);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, b.r, b.r * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function paint(){
+    if (weather()){
+      ctx.clearRect(0, 0, w, h);
+      paintBits();
+      paintFaces();
+      return;
+    }
     ctx.clearRect(0, 0, w, h);
     const ink = getComputedStyle(document.documentElement)
                   .getPropertyValue('--accent').trim() || '#c2410c';
@@ -2282,7 +2392,8 @@ RAIN_JS = """
       addEventListener('resize', () => { if (running) size(); });
     }
     size(); running = true;
-    timer = setInterval(paint, STEP);
+    beatMs = weather() ? WEATHER_STEP : STEP;
+    timer = setInterval(paint, beatMs);
     strandsOn();
   }
   function stop(){
@@ -2342,16 +2453,24 @@ RAIN_JS = """
   // The one in the top bar: off and on, nothing else. Somebody who has decided
   // the rain is a nuisance should not have to go and find a settings page to
   // say so, and the three-way choice can stay where the taste lives.
+  const FALLNAME = {kanji: ['\u2604', 'The falling kanji'],
+                    sakura: ['\u273f', 'The falling petals'],
+                    snow: ['\u2744', 'The falling snow']};
+  // Hoisted, because changing what falls has to redraw this button too and
+  // the settings select is wired somewhere else entirely.
+  let drawTop = () => {};
   function wireTop(){
     const b = document.getElementById('rainsw2');
     if (!b) return;
     const draw = () => {
       const on = !off() && !calm.matches;
-      b.textContent = on ? '\u2604' : '\u2604';
+      const [glyph, name] = FALLNAME[style()] || FALLNAME.kanji;
+      b.textContent = glyph;
       b.classList.toggle('off', !on);
-      b.title = on ? 'The falling kanji \u2014 click to stop it'
-                   : 'The falling kanji \u2014 click to bring it back';
+      b.title = name + (on ? ' \u2014 click to stop it'
+                           : ' \u2014 click to bring it back');
     };
+    drawTop = draw;
     if (calm.matches){ b.disabled = true; draw(); return; }
     b.addEventListener('click', () => {
       // Back to whatever density was last chosen, not always the default.
@@ -2364,6 +2483,14 @@ RAIN_JS = """
   }
   addEventListener('DOMContentLoaded', () => {
     wireTop();
+    const fs = document.getElementById('fallsw');
+    if (fs){
+      if (calm.matches) fs.disabled = true;
+      else {
+        fs.value = style();
+        fs.addEventListener('change', () => window.wkRain.setStyle(fs.value));
+      }
+    }
     const sw = document.getElementById('rainsw');
     if (!sw) return;
     if (calm.matches){
@@ -2386,7 +2513,17 @@ RAIN_JS = """
       // not blank the screen and start every column over from the top.
       if (running) size(); else start();
     },
+    // Stopped and started rather than re-sized: the two styles do not tick at
+    // the same rate, and the beat is set when the timer is made.
+    setStyle: (v) => {
+      if (!STYLES[v]) return;
+      try { localStorage.setItem(SKEY, v); } catch(e){}
+      drawTop();
+      if (off() || calm.matches) return;
+      stop(); start();
+    },
     mode,
+    style,
   };
   start();
 
