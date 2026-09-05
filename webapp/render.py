@@ -1126,7 +1126,9 @@ if(b&&/^[a-z]+$/.test(b)){
 r.style.setProperty('--backdrop',"url('/asset/bg-"+b+".webp')");
 r.style.setProperty('--backdrop-sm',"url('/asset/bg-"+b+"-sm.webp')");
 r.classList.add('hasbg');}
-if(localStorage.getItem('wk-glass')==='glass')r.classList.add('seethru');
+var g=localStorage.getItem('wk-glass');
+if(g==='glass')r.classList.add('glass');
+else if(g==='frosted')r.classList.add('seethru');
 }catch(e){}</script>"""
 
 
@@ -1151,14 +1153,21 @@ BACKDROP_JS = """
   // See-through is a second class on the root, set by the same boot script,
   // so it goes on and off without a reload and without touching the painting.
   const GKEY = 'wk-glass';
+  // Two kinds of see-through and a solid. The class names say what the page
+  // does, the stored value says what was picked; keeping them apart is what
+  // lets "glass" mean the clear one without renaming the CSS.
+  const PANES = {solid: '', glass: 'glass', frosted: 'seethru'};
   addEventListener('DOMContentLoaded', function(){
     const gl = document.getElementById('glasssw');
     if (gl){
-      try { gl.value = localStorage.getItem(GKEY) === 'glass' ? 'glass' : 'solid'; }
-      catch(e){}
+      try {
+        const v = localStorage.getItem(GKEY);
+        gl.value = (v in PANES) ? v : 'solid';
+      } catch(e){}
       gl.addEventListener('change', function(){
         try { localStorage.setItem(GKEY, gl.value); } catch(e){}
-        root.classList.toggle('seethru', gl.value === 'glass');
+        root.classList.toggle('glass', gl.value === 'glass');
+        root.classList.toggle('seethru', gl.value === 'frosted');
       });
     }
     const sel = document.getElementById('bgsw');
@@ -1459,7 +1468,8 @@ def settings_page(user, creds, note: str = "", error: str = "",
       <label class="rainbox"><span>The page itself</span>
         <select id="glasssw">
           <option value="solid">Solid</option>
-          <option value="glass">See-through</option>
+          <option value="glass">Glass</option>
+          <option value="frosted">Frosted glass</option>
         </select></label>
       <label class="rainbox"><span>What falls</span>
         <select id="fallsw">
@@ -1481,9 +1491,12 @@ def settings_page(user, creds, note: str = "", error: str = "",
         </select></label>
       <p class="sub" style="margin-top:6px">All five are remembered in this
       browser, so you can have a painting and rain on the big screen and
-      nothing at all on your phone. <b>See-through</b> gives up most of the
-      page's opacity so the painting reads through the cards as well as past
-      them; it needs a painting behind it to show. The <b>sentences</b> are
+      nothing at all on your phone. <b>Glass</b> and <b>frosted glass</b> both give up
+      most of the page's opacity, so the painting reads through the cards as
+      well as past them; either needs a painting behind it to show. Frosted
+      blurs what comes through, so the painting arrives as colour; glass does
+      not, so it arrives as itself and you can pick out the temple through the
+      page. The <b>sentences</b> are
       the lines you can hold the pointer on to look a word up; they fall
       whichever of the others you pick, and they need a pointer, so they never
       appear on a phone.</p>
@@ -2053,35 +2066,65 @@ RAIN_CSS = """
 :root[data-theme="dark"] { --scrim:rgba(20,19,18,.62);
   --panel:rgba(20,19,18,.92); }
 
-/* See-through. The page keeps its shape, its lines and its type and gives up
-   most of its opacity, so the painting reads through the column instead of
-   only past it. Three translucent layers stack up - the wash in the margins,
-   the column's panel, the card on top of it - and together they still leave
-   83% page colour behind a line of text, which is the difference between a
-   page you can see through and a poster with words on.
-   The blur is what makes that safe: a card sits on a blurred painting rather
-   than on a painting, so no single dark pixel ever ends up under a letter.
-   And --muted moves towards the foreground, because grey on busy is the one
-   thing that stops working - at these alphas it measured 3.6:1 where it was,
-   and 5.25:1 where it is now. The heavier weights never needed help: body
-   text is 11.9:1 light and 8.6:1 dark against the worst the paintings hold.
-   Selectors carry the theme with them, because ":root[data-theme]" outranks
-   "html.seethru" and would otherwise put the solid values back. */
-html.seethru { --scrim:rgba(250,248,245,.34); --panel:rgba(250,248,245,.34);
+/* See-through, in two kinds. The page keeps its shape, its lines and its type
+   and gives up most of its opacity, so the painting reads through the column
+   instead of only past it. Three translucent layers stack up - the wash in the
+   margins, the column's panel, the card on top of it - and together they still
+   leave 83% page colour behind a line of text, which is the difference between
+   a page you can see through and a poster with words on.
+   Both kinds are that same 83%; what differs is what the pane does to the
+   light coming through it. Frosted blurs, so the painting arrives as colour.
+   Glass does not, so the painting arrives as itself and you can make out the
+   temple through the page.
+   --muted moves towards the foreground either way, because grey on busy is
+   the one thing that stops working: at these alphas it measured 3.64:1 where
+   it was and 5.25:1 where it is now, with the dark theme at 4.68:1. That was
+   worked out against pure black and pure white - the worst the paintings hold
+   - and with no blur in the sum at all, which is what makes it safe to take
+   the blur away. The heavier weights never needed help: body text measures
+   11.9:1 light and 8.6:1 dark.
+   Selectors carry the theme with them, because ":root[data-theme]" outranks a
+   plain class and would otherwise put the solid values back. */
+html.seethru, html.glass {
+  --scrim:rgba(250,248,245,.34); --panel:rgba(250,248,245,.34);
   --raise:rgba(255,255,255,.62); --muted:#57514a; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]).seethru { --scrim:rgba(20,19,18,.38);
+  :root:not([data-theme="light"]).seethru,
+  :root:not([data-theme="light"]).glass { --scrim:rgba(20,19,18,.38);
     --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4; }
 }
-:root[data-theme="dark"].seethru { --scrim:rgba(20,19,18,.38);
+:root[data-theme="dark"].seethru, :root[data-theme="dark"].glass {
+  --scrim:rgba(20,19,18,.38);
   --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4; }
-/* One blur for the whole column rather than one per card: they are all
+/* One filter for the whole column rather than one per card: they are all
    translucent over the same painting, and one compositing layer is cheaper
    than twenty. */
 html.seethru main {
   -webkit-backdrop-filter:blur(14px) saturate(1.08);
   backdrop-filter:blur(14px) saturate(1.08);
 }
+/* Glass. No blur - that is the whole point of it - so the light is worked on
+   rather than scattered: a little more colour in what comes through, and a
+   touch more light, which is what a pane does. */
+html.glass main {
+  -webkit-backdrop-filter:saturate(1.3) brightness(1.03);
+  backdrop-filter:saturate(1.3) brightness(1.03);
+  background:
+    linear-gradient(104deg, rgba(255,255,255,.17) 0,
+                    rgba(255,255,255,0) 30%, rgba(255,255,255,0) 66%,
+                    rgba(255,255,255,.11) 100%),
+    linear-gradient(to right, transparent 0, var(--panel) 22px,
+                    var(--panel) calc(100% - 22px), transparent 100%);
+}
+/* The edges catch the light. Without this the cards are outlines drawn on a
+   picture; with it they are panes lying on one. */
+html.glass { --line:rgba(255,255,255,.72); --line-soft:rgba(255,255,255,.5); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]).glass { --line:rgba(255,255,255,.17);
+    --line-soft:rgba(255,255,255,.1); }
+}
+:root[data-theme="dark"].glass { --line:rgba(255,255,255,.17);
+  --line-soft:rgba(255,255,255,.1); }
 
 /* On the root, not on a layer of body's own. The root's background is painted
    behind everything the browser draws, view transition snapshots included -
