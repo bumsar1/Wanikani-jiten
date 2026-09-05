@@ -1036,6 +1036,12 @@ ASSETS = {
 for _t in ("pleasant", "painful", "death", "hell", "paradise", "reality"):
     ASSETS[f"tier-{_t}.webp"] = "image/webp"
     ASSETS[f"tier-{_t}-sm.webp"] = "image/webp"
+# The paintings that can go behind the page, one tier at a time as they are
+# drawn. Same split as the tier art: the wide one for a screen, the small one
+# for a phone, and the full-size source stays out of the repository.
+for _b in render.BACKDROPS:
+    ASSETS[f"bg-{_b}.webp"] = "image/webp"
+    ASSETS[f"bg-{_b}-sm.webp"] = "image/webp"
 
 
 @app.get("/tier/<name>")

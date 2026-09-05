@@ -1115,6 +1115,49 @@ def dock() -> str:
     </div>"""
 
 
+# Applied in the head, before anything is painted. A background that arrives
+# after the first frame is a page changing colour while you look at it, which
+# is worse than not having one - the same reason the theme is set here.
+# The value is checked against a pattern rather than trusted: it ends up in a
+# url(), and localStorage is not a place to take a URL from.
+BACKDROP_BOOT = """<script>try{var b=localStorage.getItem('wk-bg');
+if(b&&/^[a-z]+$/.test(b)){var r=document.documentElement;
+r.style.setProperty('--backdrop',"url('/asset/bg-"+b+".webp')");
+r.style.setProperty('--backdrop-sm',"url('/asset/bg-"+b+"-sm.webp')");
+r.classList.add('hasbg');}}catch(e){}</script>"""
+
+
+BACKDROP_JS = """
+(function(){
+  // Only the switch. The boot script in the head has already put the picture
+  // up, so nothing here runs on an ordinary page load and there is no moment
+  // where the page is briefly the wrong colour.
+  const KEY = 'wk-bg';
+  const root = document.documentElement;
+  function apply(v){
+    if (!v){
+      root.classList.remove('hasbg');
+      root.style.removeProperty('--backdrop');
+      root.style.removeProperty('--backdrop-sm');
+      return;
+    }
+    root.style.setProperty('--backdrop', "url('/asset/bg-" + v + ".webp')");
+    root.style.setProperty('--backdrop-sm', "url('/asset/bg-" + v + "-sm.webp')");
+    root.classList.add('hasbg');
+  }
+  addEventListener('DOMContentLoaded', function(){
+    const sel = document.getElementById('bgsw');
+    if (!sel) return;
+    try { sel.value = localStorage.getItem(KEY) || ''; } catch(e){}
+    sel.addEventListener('change', function(){
+      try { localStorage.setItem(KEY, sel.value); } catch(e){}
+      apply(sel.value);
+    });
+  });
+})();
+"""
+
+
 DOCK_JS = """
 (function () {
   var knob = document.getElementById('dmknob');
@@ -1299,7 +1342,7 @@ def _skeleton_head(title: str, user=None, page: str = "") -> str:
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title>{w.favicon_link(ICON)}'
             f'<link rel="stylesheet" href="{CSS_URL}">'
-            f'{w.THEME_BOOT}'
+            f'{w.THEME_BOOT}{BACKDROP_BOOT}'
             f'</head><body><main>{bar}')
 
 
@@ -1339,6 +1382,9 @@ def register_page(code: str, error: str = "") -> str:
 
 def settings_page(user, creds, note: str = "", error: str = "",
                   age_hours: float | None = None, push: dict | None = None) -> str:
+    backdrops = '<option value="">Nothing, just the colour</option>' + "".join(
+        f'<option value="{b}">{esc(BACKDROP_NAMES.get(b, b.title()))}</option>'
+        for b in BACKDROPS)
     msg = f'<div class="err">{esc(error)}</div>' if error else ""
     if note:
         msg += f'<div class="ok">{esc(note)}</div>'
@@ -1434,6 +1480,8 @@ def settings_page(user, creds, note: str = "", error: str = "",
       card, so nothing you are reading sits on top of it &mdash; but it is a
       matter of taste, and it stays off if your system asks for reduced
       motion.</p>
+      <label class="rainbox"><span>Behind the page</span>
+        <select id="bgsw">{backdrops}</select></label>
       <label class="rainbox"><span>What falls</span>
         <select id="fallsw">
           <option value="kanji">Kanji you can read</option>
@@ -1934,7 +1982,56 @@ PHRASES = [
 ]
 
 
+# The paintings that can sit behind the page. Adding the next tier is a word
+# here and two files in assets/ - the settings control, the routes that serve
+# them and the boot script all read this.
+BACKDROPS = ("pleasant",)
+BACKDROP_NAMES = {"pleasant": "Pleasant"}
+
+
 RAIN_CSS = """
+/* A painting behind the page, on a fixed layer of its own. Not on the body,
+   whose own background is opaque and would cover it, and not scrolling with
+   the page, which would make it read as a very long banner rather than a
+   view the page sits in front of.
+   Two washes, not one. The cards paint their own background and were never
+   in danger, but a heading and a grey line of explanation sit straight on the
+   page - and --muted has only 5.12:1 on the plain background to begin with,
+   so a picture underneath took it to 2.7:1 and no amount of scrim brought it
+   back: at nine tenths it was still 4.08:1 and the painting was gone. So the
+   column gets a panel of the page colour and keeps the contrast it always
+   had, and the margins - where the temple and the pagoda are anyway - get a
+   much lighter wash and actually show the picture. */
+:root { --scrim:rgba(250,248,245,.55); --panel:rgba(250,248,245,.92); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --scrim:rgba(20,19,18,.62);
+    --panel:rgba(20,19,18,.92); }
+}
+:root[data-theme="dark"] { --scrim:rgba(20,19,18,.62);
+  --panel:rgba(20,19,18,.92); }
+
+html.hasbg { background:var(--bg); }
+html.hasbg body { background:transparent; }
+/* The fade lands exactly on main's own 22px padding, so no word is ever over
+   the soft edge of its own backing. */
+html.hasbg main {
+  background:linear-gradient(to right, transparent 0, var(--panel) 22px,
+                             var(--panel) calc(100% - 22px), transparent 100%);
+}
+html.hasbg body::before {
+  content:""; position:fixed; inset:0; z-index:-1;
+  background-image:linear-gradient(var(--scrim), var(--scrim)), var(--backdrop);
+  background-size:cover; background-position:center; background-repeat:no-repeat;
+}
+/* A phone gets the small one. A 2.8:1 painting cropped to a tall screen is
+   mostly sky either way, so it is not worth 120kB of it. */
+@media (max-width:700px) {
+  html.hasbg body::before {
+    background-image:linear-gradient(var(--scrim), var(--scrim)),
+                     var(--backdrop-sm);
+  }
+}
+
 /* What falls, and in what colour. Two properties rather than one shared ink:
    a petal is pink in either theme, but snow that is white on a white page is
    not snow, it is nothing. */
@@ -4422,7 +4519,8 @@ CSS_BUNDLE = w.check_css("CSS_BUNDLE", _bundle(
     RAIN_CSS, w.THEME_CSS, w.PHONE_CSS, MOBILE_CSS))
 
 # Every page needs these three; only the dashboard needs the rest.
-CORE_JS = _bundle(LOAD_JS, THEME_JS, MOBILE_JS, BIG_JS, RAIN_JS, w.SORT_JS, DOCK_JS)
+CORE_JS = _bundle(LOAD_JS, THEME_JS, MOBILE_JS, BIG_JS, RAIN_JS, BACKDROP_JS,
+                  w.SORT_JS, DOCK_JS)
 DASH_JS = _bundle(w.SLIDER_JS, w.CHART_JS, w.GRID_JS, w.REACH_JS, w.BROWSE_JS,
                   w.READ_JS, w.GAP_JS, w.SUBS_JS, w.STATUS_JS, BURN_JS, DN_JS,
                   TIER_JS, CARD_JS)

@@ -20,7 +20,9 @@ nihongo_key.txt
 Sprite set.png
 death-note-light-yagami.gif
 # The tier art at full size. Only the webp derivatives are served, and six
-# 1.5MB files is most of what a clone would download.
+# 1.5MB files is most of what a clone would download. The background paintings
+# go the same way - assets/bg-*.webp is what the pages ask for.
+assets/*Background*.png
 assets/Pleasant.png
 assets/Painful.png
 assets/Death.png
