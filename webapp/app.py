@@ -43,6 +43,10 @@ if os.environ.get("WKJITEN_HTTPS", "").lower() in ("1", "true", "yes"):
 STALE_HOURS = float(os.environ.get("WKJITEN_STALE_HOURS", "18"))
 _refreshing: set[int] = set()
 _lock = threading.Lock()
+# Why the last fetch for an account failed. A refusal and a timeout look the
+# same from the dashboard - it has no snapshot either way - and only one of
+# them is worth reloading for.
+_last_error: dict[int, str] = {}
 
 # Third-party answers worth a second look now and then, but not on every page
 # load. The word lists are already cached in the database; what was left was
@@ -117,8 +121,10 @@ def refresh_wanikani(user_id: int, token: str,
         payload = w.wk_fetch(token)
         was = store.save_snapshot(user_id, payload)
         note_levelup(user_id, was, payload)
+        _last_error.pop(user_id, None)
     except SystemExit as e:
         app.logger.warning("wanikani refresh failed for %s: %s", user_id, e)
+        _last_error[user_id] = str(e)
         return
     finally:
         with _lock:
@@ -440,11 +446,7 @@ def _page(which: str):
         refresh_wanikani(user["id"], creds["wk_token"])
         cache = store.get_snapshot(user["id"]) or await_snapshot(user["id"])
         if not cache:
-            return redirect(url_for(
-                "settings",
-                note="WaniKani did not answer in time. If the terminal is still "
-                     "listing pages, give it a moment and reload; otherwise "
-                     "check the token."))
+            return redirect(url_for("settings", note=no_snapshot_note(user["id"])))
     # From here the work takes long enough to be worth saying something about,
     # so the head goes out now and the rest follows when it is ready. The
     # browser paints the top bar immediately, and if the wait passes 400ms it
@@ -452,6 +454,30 @@ def _page(which: str):
     title = f'{user["username"]} - {render.PAGES[which][0].lower()}'
     return Response(stream_with_context(_page_body(user, creds, cache, which, title)),
                     mimetype="text/html")
+
+
+def no_snapshot_note(user_id: int) -> str:
+    """What to say when the dashboard has nothing to draw yet.
+
+    The fetch knows why it failed and used to keep it to the log, so the one
+    failure that will never come right on its own - a token WaniKani will not
+    accept - was reported as one that might, and the advice was to wait and
+    reload. Someone doing that is waiting for a page that is not coming.
+    """
+    err = _last_error.get(user_id, "")
+    code = 0
+    if err.startswith("HTTP "):
+        head = err.split(" ", 2)
+        if len(head) > 1 and head[1].isdigit():
+            code = int(head[1])
+    if code in (401, 403):
+        return ("WaniKani would not accept that token. Check it is copied whole "
+                "from wanikani.com/settings/personal_access_tokens, and that it "
+                "has not been revoked there.")
+    if err:
+        return "WaniKani could not be read: " + err.splitlines()[0][:160]
+    return ("WaniKani did not answer in time. If the terminal is still listing "
+            "pages, give it a moment and reload; otherwise check the token.")
 
 
 def needs_refresh(age_hours: float | None, cache: dict | None) -> bool:
@@ -1048,11 +1074,17 @@ def tier(name):
 
 @app.get("/s/<name>")
 def bundle(name):
-    """The stylesheet and the shared scripts. The name carries a hash of the
-    contents, so this can be cached for a year without ever going stale."""
+    """The stylesheet and the shared scripts - or, failing those, a shared page.
+
+    Both live under /s/, and a route matches on the shape of a path rather
+    than on the name of its variable, so two rules here were one rule written
+    twice and the second never ran: every secret link answered 404. The bundle
+    names are known up front and carry a hash of their contents, which is what
+    lets them be cached for a year; anything else under /s/ is a share token.
+    """
     hit = render.BUNDLES.get(name)
     if not hit:
-        abort(404)
+        return shared_link(name)
     body, mime = hit
     return Response(body, mimetype=mime, headers={
         "Cache-Control": "public, max-age=31536000, immutable"})
@@ -1075,7 +1107,17 @@ def asset(name):
 @app.get("/media/<kind>/<int:user_id>")
 def media(kind, user_id):
     """User-supplied images, served with the type read from their own bytes and
-    sniffing switched off, so nothing here can be coaxed into running."""
+    sniffing switched off, so nothing here can be coaxed into running.
+
+    Signed in, everybody here can see everybody's picture - the Together page
+    lists them all anyway. Signed out, only the accounts that have said their
+    page may be read from outside, because those pages have to draw
+    themselves. Without this, a picture on an account set to "Just me" was
+    reachable by anyone who could count.
+    """
+    if (not current_user()
+            and store.get_visibility(user_id) not in ("link", "public")):
+        abort(404)
     data, mime = store.get_image(user_id, kind)
     if not data:
         abort(404)
@@ -1111,9 +1153,12 @@ def _public_view(owner):
                                  viewer=current_user())
 
 
-@app.get("/s/<token>")
 def shared_link(token):
-    """Deliberately open: the whole point is that it works without an account."""
+    """Deliberately open: the whole point is that it works without an account.
+
+    Reached through `bundle` above rather than through a route of its own,
+    because /s/ can only be claimed once.
+    """
     owner = store.user_by_token(token)
     if not owner:
         return Response("This link is not active.", status=404,
