@@ -2191,12 +2191,19 @@ html.hasbg .splash { background:var(--panel); }
     background-size:100% 100%, auto 100vh;
     background-size:100% 100%, auto 100lvh;
     background-position:center, center top;
-    /* And it travels with the page rather than staying put. Partly because
-       that is what was asked for, and partly because iOS has never really
-       honoured a fixed root background: it would have been a wallpaper on one
-       phone and a header on another. Scrolling, it is a header on both. The
-       wash above it still covers the whole document. */
-    background-attachment:scroll;
+    /* Fixed, like the desktop: the painting is the room the page is in, and
+       scrolling out of the room was worse than the band ever was. It inherits
+       that from the rule above, so there is nothing to say here - the line
+       that said "scroll" is gone.
+       Whether a phone honours it is the phone's business. Safari has treated
+       a fixed root background as scrolling for years, on and off by version,
+       so this may still read as a header on an iPhone. If it does, the fix is
+       a fixed element rather than a fixed background, and that has to be kept
+       out of the view transition snapshots or the flash between pages comes
+       back - which is why it is not the first thing tried. What it cannot do
+       any more is come apart: the size is written out, so even a phone that
+       measures it against the document gets one screenful and not a picture
+       scaled to the height of the page. */
   }
 }
 
