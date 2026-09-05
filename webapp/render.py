@@ -1388,6 +1388,14 @@ def settings_page(user, creds, note: str = "", error: str = "",
     msg = f'<div class="err">{esc(error)}</div>' if error else ""
     if note:
         msg += f'<div class="ok">{esc(note)}</div>'
+    # The keys are at the foot of the page, because they are a thing you do
+    # once and the rest of this screen is a thing you come back to. The one
+    # person that costs is the one who has not done it yet, and who is sent
+    # here to do exactly that - so they get pointed at it.
+    if not creds.get("wk_token"):
+        msg += ('<p class="sub" style="margin:-8px 0 18px">The fields are at '
+                'the foot of this page &mdash; <a href="#keys">jump to the '
+                'keys</a>.</p>')
     has_wk = "stored" if creds.get("wk_token") else "not set"
     has_jt = "stored" if creds.get("jiten_key") else "not set"
     has_jm = "stored" if creds.get("jimaku_key") else "not set"
@@ -1426,7 +1434,50 @@ def settings_page(user, creds, note: str = "", error: str = "",
                 f'<span class="code">{esc(push["note"][:120])}</span>')
     return shell("Settings", f"""
       <h1>Settings</h1>{msg}
-      <h2>API keys</h2>
+      <h2>This screen</h2>
+      <p class="sub">Something falling behind the page. It never draws over a
+      card, so nothing you are reading sits on top of it &mdash; but it is a
+      matter of taste, and it stays off if your system asks for reduced
+      motion.</p>
+      <label class="rainbox"><span>Behind the page</span>
+        <select id="bgsw">{backdrops}</select></label>
+      <label class="rainbox"><span>What falls</span>
+        <select id="fallsw">
+          <option value="kanji">Kanji you can read</option>
+          <option value="sakura">Sakura petals</option>
+          <option value="snow">Snow</option>
+        </select></label>
+      <label class="rainbox"><span>How much of it</span>
+        <select id="rainsw">
+          <option value="off">Off</option>
+          <option value="few">A few</option>
+          <option value="lots">More of them</option>
+        </select></label>
+      <p class="sub" style="margin-top:6px">All three are remembered in this
+      browser, so you can have a painting and snow on the big screen and
+      nothing at all on your phone. The sentences fall whichever you pick.</p>
+
+      <h2>Data</h2>
+      <p class="sub">{fetched} The counters on the dashboard compare that
+      against the fetch before it. {sent}</p>
+      <form method="post" action="/refresh" class="inline">
+        <button>Refresh stats</button></form>
+      <form method="post" action="/settings/baseline" class="inline">
+        <button>Count changes from now</button></form>
+      <form method="post" action="/settings/drop-jiten" class="inline">
+        <button>Forget my Jiten key</button></form>
+      <form method="post" action="/settings/delete" class="inline"
+            onsubmit="return confirm('Delete your account and all of its data?')">
+        <button>Delete my account</button></form>
+      <p class="sub" style="margin-top:10px"><b>Refresh stats</b> pulls your
+      WaniKani data and then sends your known words on to jiten.moe, which is
+      what its coverage column is worked out from. It adds to that list and
+      never replaces it, so anything you know from elsewhere stays.
+      <b>Count changes from now</b> moves
+      that comparison point to this moment, so a session you are about to do
+      shows up on its own. Press it before you study, then refresh afterwards.</p>
+
+      <h2 id="keys">API keys</h2>
       <p class="sub">All of them are encrypted before they touch the database.
       Leave a field blank to keep what is already stored.</p>
       <form method="post" class="authbox" style="margin:0 0 24px;max-width:560px">
@@ -1475,48 +1526,6 @@ def settings_page(user, creds, note: str = "", error: str = "",
         </div>
         <button class="go" type="submit">Save</button>
       </form>
-      <h2>This screen</h2>
-      <p class="sub">Something falling behind the page. It never draws over a
-      card, so nothing you are reading sits on top of it &mdash; but it is a
-      matter of taste, and it stays off if your system asks for reduced
-      motion.</p>
-      <label class="rainbox"><span>Behind the page</span>
-        <select id="bgsw">{backdrops}</select></label>
-      <label class="rainbox"><span>What falls</span>
-        <select id="fallsw">
-          <option value="kanji">Kanji you can read</option>
-          <option value="sakura">Sakura petals</option>
-          <option value="snow">Snow</option>
-        </select></label>
-      <label class="rainbox"><span>How much of it</span>
-        <select id="rainsw">
-          <option value="off">Off</option>
-          <option value="few">A few</option>
-          <option value="lots">More of them</option>
-        </select></label>
-      <p class="sub" style="margin-top:6px">Both are remembered in this
-      browser, so you can have snow on the big screen and nothing at all on
-      your phone. The sentences fall whichever you pick.</p>
-
-      <h2>Data</h2>
-      <p class="sub">{fetched} The counters on the dashboard compare that
-      against the fetch before it. {sent}</p>
-      <form method="post" action="/refresh" class="inline">
-        <button>Refresh stats</button></form>
-      <form method="post" action="/settings/baseline" class="inline">
-        <button>Count changes from now</button></form>
-      <form method="post" action="/settings/drop-jiten" class="inline">
-        <button>Forget my Jiten key</button></form>
-      <form method="post" action="/settings/delete" class="inline"
-            onsubmit="return confirm('Delete your account and all of its data?')">
-        <button>Delete my account</button></form>
-      <p class="sub" style="margin-top:10px"><b>Refresh stats</b> pulls your
-      WaniKani data and then sends your known words on to jiten.moe, which is
-      what its coverage column is worked out from. It adds to that list and
-      never replaces it, so anything you know from elsewhere stays.
-      <b>Count changes from now</b> moves
-      that comparison point to this moment, so a session you are about to do
-      shows up on its own. Press it before you study, then refresh afterwards.</p>
       """, user=user)
 
 
