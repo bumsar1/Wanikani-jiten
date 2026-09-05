@@ -2287,6 +2287,9 @@ RAIN_JS = """
       const img = new Image();
       img.decoding = 'async';
       img.who = (typeof f === 'string') ? '' : (f.n || '');
+      // Absent for anybody who has not said their stats may be seen, and for
+      // anybody the server has never fetched. No badge then, just the face.
+      img.lvl = (typeof f === 'string') ? 0 : (f.l || 0);
       img.onload = () => { FACES.push(img); seedDrops(); };
       img.src = url;
     }
@@ -2362,7 +2365,32 @@ RAIN_JS = """
       wait: scatter ? 0 : Math.floor(Math.random() * 140),
     };
   }
+  // The level under the face. Four faint pixels of number over whatever the
+  // page happens to be showing would be unreadable, so it sits on a filled
+  // pill, which also gives the face an edge where it passes a card.
+  function drawLevel(x, y, lvl, ink, paper){
+    const label = String(lvl);
+    ctx.save();
+    ctx.font = '600 10px ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const pw = Math.max(20, ctx.measureText(label).width + 13), ph = 15;
+    ctx.globalAlpha = 0.62;
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x - pw / 2, y - ph / 2, pw, ph, ph / 2);
+    else ctx.rect(x - pw / 2, y - ph / 2, pw, ph);
+    ctx.fill();
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = paper;
+    ctx.fillText(label, x, y);
+    ctx.restore();
+  }
+
   function paintFaces(){
+    const cs = getComputedStyle(document.documentElement);
+    const ink = (cs.getPropertyValue('--accent') || '').trim() || '#c2410c';
+    const paper = (cs.getPropertyValue('--bg') || '').trim() || '#faf8f5';
     for (let i = 0; i < drops.length; i++){
       const d = drops[i];
       if (d.wait > 0){ d.wait -= beat(); continue; }
@@ -2376,6 +2404,9 @@ RAIN_JS = """
       ctx.clip();
       ctx.drawImage(d.img, d.x - FACE / 2, d.y, FACE, FACE);
       ctx.restore();
+      // Straddling the bottom of the circle, so it reads as pinned to the
+      // face rather than floating under it.
+      if (d.img.lvl) drawLevel(d.x, d.y + FACE, d.img.lvl, ink, paper);
     }
     ctx.globalAlpha = 1;
   }
@@ -2388,9 +2419,22 @@ RAIN_JS = """
   // Rain is not weather anybody notices one drop of, so there are more of
   // them for the same setting - and the ceiling rises with them.
   const DENSER = {rain: 0.42};
-  // One slant for all of them. Wind blows on the whole street at once, and
-  // drops going their own separate ways read as sparks, not rain.
-  const WIND = 0.16;
+  // One slant for all of them, because wind blows on a whole street at once
+  // and drops going their own separate ways read as sparks. But not one fixed
+  // slant: rain that leans the same way for ever is a hatch pattern, so the
+  // wind wanders between a lean one way and a lean the other over about half
+  // a minute. Two waves of different lengths, since a single one is a
+  // metronome and you start to feel the beat.
+  const gust = () => {
+    const t = Date.now() / 1000;
+    return 0.34 * Math.sin(t / 17) + 0.16 * Math.sin(t / 6.3);
+  };
+  // A painting with weather of its own gets a say. The rain in Painful leans
+  // left, and rain leaning right in front of it is two different days at once.
+  const BIAS = {painful: -0.3};
+  const backdrop = () => { try { return localStorage.getItem('wk-bg') || ''; }
+                           catch(e){ return ''; } };
+  const wind = () => gust() + (BIAS[backdrop()] || 0);
   let bits = [];
   function newBit(scatter){
     const kind = style();
@@ -2402,7 +2446,8 @@ RAIN_JS = """
         x: Math.random() * (w + 160) - 120,
         y: scatter ? Math.random() * h : -20,
         r: 0.6 + Math.random() * 0.7, len: 8 + Math.random() * 14,
-        vy: vy, vx: vy * WIND,
+        // vx is worked out from the wind every frame; this is only its first.
+        vy: vy, vx: vy * wind(),
         sway: 0, dsway: 0, amp: 0, spin: 0, dspin: 0,
         a: 0.16 + Math.random() * 0.24,
       };
@@ -2443,12 +2488,16 @@ RAIN_JS = """
     ctx.fillStyle = ink;
     ctx.strokeStyle = ink;
     ctx.lineCap = 'round';
+    // Once for the frame, not once per drop: they are all in the same weather.
+    const lean = kind === 'rain' ? wind() : 0;
     for (const b of bits){
       b.y += b.vy;
       if (kind === 'rain'){
+        b.vx = b.vy * lean;
         b.x += b.vx;
-        // Off the bottom, or carried off the side by the wind.
-        if (b.y - b.len > h || b.x - b.len > w){
+        // Off the bottom, or carried off either side - the wind goes both
+        // ways now, so leaving on the left counts too.
+        if (b.y - b.len > h || b.x < -80 || b.x > w + 80){
           Object.assign(b, newBit(false)); continue;
         }
         // Drawn back along the way it came, so the streak lies on its own
@@ -2747,7 +2796,7 @@ RAIN_JS = """
   // no faces in it - asks again once rather than never.
   const fresh = () => {
     try {
-      const at = +localStorage.getItem('wk-rain-at2') || 0;
+      const at = +localStorage.getItem('wk-rain-at3') || 0;
       return Date.now() - at < 86400000;
     } catch(e){ return false; }
   };
@@ -2763,7 +2812,7 @@ RAIN_JS = """
         CHARS = d.chars;
         try {
           localStorage.setItem('wk-rain-chars', d.chars);
-          localStorage.setItem('wk-rain-at2', String(Date.now()));
+          localStorage.setItem('wk-rain-at3', String(Date.now()));
         } catch(e){}
       }
     }).catch(() => {});
