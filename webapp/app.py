@@ -1042,6 +1042,9 @@ for _t in ("pleasant", "painful", "death", "hell", "paradise", "reality"):
 for _b in render.BACKDROPS:
     ASSETS[f"bg-{_b}.webp"] = "image/webp"
     ASSETS[f"bg-{_b}-sm.webp"] = "image/webp"
+    # The phone gets its own cut rather than a slice of the wide one - see
+    # the media query in render.RAIN_CSS for why a panorama cannot be one.
+    ASSETS[f"bg-{_b}-tall.webp"] = "image/webp"
 
 
 @app.get("/tier/<name>")

@@ -1125,6 +1125,7 @@ b=localStorage.getItem('wk-bg');
 if(b&&/^[a-z]+$/.test(b)){
 r.style.setProperty('--backdrop',"url('/asset/bg-"+b+".webp')");
 r.style.setProperty('--backdrop-sm',"url('/asset/bg-"+b+"-sm.webp')");
+r.style.setProperty('--backdrop-tall',"url('/asset/bg-"+b+"-tall.webp')");
 r.classList.add('hasbg');}
 var g=localStorage.getItem('wk-glass');
 if(g==='glass')r.classList.add('glass');
@@ -1144,10 +1145,12 @@ BACKDROP_JS = """
       root.classList.remove('hasbg');
       root.style.removeProperty('--backdrop');
       root.style.removeProperty('--backdrop-sm');
+      root.style.removeProperty('--backdrop-tall');
       return;
     }
     root.style.setProperty('--backdrop', "url('/asset/bg-" + v + ".webp')");
     root.style.setProperty('--backdrop-sm', "url('/asset/bg-" + v + "-sm.webp')");
+    root.style.setProperty('--backdrop-tall', "url('/asset/bg-" + v + "-tall.webp')");
     root.classList.add('hasbg');
   }
   // See-through is a second class on the root, set by the same boot script,
@@ -2167,22 +2170,33 @@ html.hasbg main {
    The panel colour instead - the same 92% the column uses, so the sentence on
    it keeps the contrast the column's own text has. */
 html.hasbg .splash { background:var(--panel); }
-/* A phone gets the small one: at 375px wide the big file is 120kB to draw a
-   band 150px tall.
-   All three layers repeated, not just two. background-size is still the three
-   values above, and a rule that leaves out the middle layer does not drop the
-   middle size with it - the painting was picking up the "100% 100%" meant for
-   the fade and being stretched to the whole screen. Which is what it looked
-   like on a phone. */
+/* A phone gets a different painting, not a smaller one. Fitting a 2.5:1
+   panorama to a 0.46:1 screen leaves a band 150px tall floating in the middle
+   of it, and no amount of fading its edges makes that look like anything but
+   an accident - which is what it looked like. So each painting has a portrait
+   cut as well, 1:2, taken from its left edge, where all six of them happen to
+   put the crocodile and its sign. That is a phone wallpaper rather than a
+   slice of a landscape.
+   The size is written out rather than left to "cover", because the root's
+   background positioning area is the whole document, not the window: "cover"
+   would scale the picture to the height of the page. "auto 100lvh" is one
+   screenful however long the page is and whatever the toolbars are doing, and
+   it cannot run away. Two layers here, so exactly two sizes - a size list
+   that outruns its images is what stretched the painting the first time. */
 @media (max-width:700px) {
   html.hasbg {
     background-image:
       linear-gradient(var(--scrim), var(--scrim)),
-      linear-gradient(var(--bg) calc(50% - 20vw),
-                      transparent calc(50% - 13vw),
-                      transparent calc(50% + 13vw),
-                      var(--bg) calc(50% + 20vw)),
-      var(--backdrop-sm);
+      var(--backdrop-tall);
+    background-size:100% 100%, auto 100vh;
+    background-size:100% 100%, auto 100lvh;
+    background-position:center, center top;
+    /* And it travels with the page rather than staying put. Partly because
+       that is what was asked for, and partly because iOS has never really
+       honoured a fixed root background: it would have been a wallpaper on one
+       phone and a header on another. Scrolling, it is a header on both. The
+       wash above it still covers the whole document. */
+    background-attachment:scroll;
   }
 }
 
