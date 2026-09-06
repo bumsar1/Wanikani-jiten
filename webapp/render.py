@@ -2616,12 +2616,20 @@ RAIN_JS = """
       const k = WET_SET[kind] || WET_SET.rain;
       const roll = (p) => p[0] + Math.random() * p[1];
       const vy = roll(k.vy);
+      const lean = wind() * k.gust;
+      // How far sideways a drop travels on its way down. In a strong wind
+      // that is wider than the window, so a drop meant to reach the bottom of
+      // the upwind side has to start well outside it. Starting them all on
+      // screen left the upwind corner empty and the rain looked like it was
+      // pouring out of one edge rather than falling past the window.
+      const reach = Math.abs(h * lean) + 120;
       return {
-        x: Math.random() * (w + 160) - 120,
+        x: lean > 0 ? Math.random() * (w + reach) - reach
+                    : Math.random() * (w + reach),
         y: scatter ? Math.random() * h : -20,
         r: roll(k.r), len: roll(k.len),
         // vx is worked out from the wind every frame; this is only its first.
-        vy: vy, vx: vy * wind() * k.gust,
+        vy: vy, vx: vy * lean,
         sway: 0, dsway: 0, amp: 0, spin: 0, dspin: 0,
         a: roll(k.a),
       };
@@ -2672,15 +2680,30 @@ RAIN_JS = """
     }
     return p;
   }
+  // All the way down, however tall the window is. A bolt that stops in the air
+  // is a scratch on the screen - the whole point of one is that it lands, and
+  // it was stopping short on anything taller than about 560px.
+  function boltDown(x, spread){
+    const p = [[x, -12]];
+    let y = -12;
+    while (y < h){
+      y += 22 + Math.random() * 34;
+      x += (Math.random() - 0.5) * spread;
+      p.push([x, y]);
+    }
+    return p;
+  }
   function newStrike(){
-    const main = fork(w * (0.12 + Math.random() * 0.76), -12,
-                      8 + ((Math.random() * 6) | 0), 40);
+    const main = boltDown(w * (0.12 + Math.random() * 0.76), 46);
     const arms = [];
-    // One branch off a joint somewhere in the middle. A single unbranched
+    // A branch or two off joints in the upper half, and they peter out rather
+    // than landing - only the channel reaches the ground. A single unbranched
     // line is a crack in the screen, not a bolt.
-    if (main.length > 4){
-      const j = 2 + ((Math.random() * (main.length - 3)) | 0);
-      arms.push(fork(main[j][0], main[j][1], 2 + ((Math.random() * 3) | 0), 58));
+    const n = 1 + ((Math.random() * 2) | 0);
+    for (let i = 0; i < n && main.length > 5; i++){
+      const j = 2 + ((Math.random() * (main.length * 0.6)) | 0);
+      if (!main[j]) continue;
+      arms.push(fork(main[j][0], main[j][1], 2 + ((Math.random() * 3) | 0), 62));
     }
     return {main: main, arms: arms, t: 0};
   }
@@ -2719,6 +2742,15 @@ RAIN_JS = """
         trace(p, 7, k * 0.5, bolt);
         trace(p, 1.7, Math.min(1, k * 2.2), bolt);
       }
+      // Where it lands. A bolt that arrives without lighting the ground under
+      // it has not really arrived.
+      const end = strike.main[strike.main.length - 1];
+      const glow = ctx.createRadialGradient(end[0], h, 0, end[0], h, 180);
+      glow.addColorStop(0, bolt);
+      glow.addColorStop(1, 'transparent');
+      ctx.globalAlpha = Math.min(1, k * 1.3);
+      ctx.fillStyle = glow;
+      ctx.fillRect(end[0] - 190, h - 190, 380, 200);
     }
     ctx.restore();
   }
@@ -2734,6 +2766,11 @@ RAIN_JS = """
     // Once for the frame, not once per drop: they are all in the same weather.
     const lean = WET[kind]
       ? wind() * ((WET_SET[kind] || WET_SET.rain).gust) : 0;
+    // The band a drop is allowed to live in widens with the wind, for the same
+    // reason it is allowed to start outside the window: cull it at the old
+    // fixed margin and every drop blowing in gets thrown away before it
+    // arrives.
+    const edge = Math.abs(h * lean) + 200;
     if (kind === 'storm') lightning(cs);
     for (const b of bits){
       b.y += b.vy;
@@ -2742,7 +2779,7 @@ RAIN_JS = """
         b.x += b.vx;
         // Off the bottom, or carried off either side - the wind goes both
         // ways now, so leaving on the left counts too.
-        if (b.y - b.len > h || b.x < -80 || b.x > w + 80){
+        if (b.y - b.len > h || b.x < -edge || b.x > w + edge){
           Object.assign(b, newBit(false)); continue;
         }
         // Drawn back along the way it came, so the streak lies on its own
