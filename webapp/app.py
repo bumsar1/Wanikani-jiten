@@ -779,18 +779,36 @@ def together():
                                  daemon=True).start()
     race.sort(key=lambda r: (r["level"] + r["frac"]), reverse=True)
 
-    vis = store.get_visibility(user["id"])
-    token = store.share_token(user["id"]) if vis in ("link", "public") else ""
-    return render.together_page(user, vis, token, request.url_root.rstrip("/"),
-                                people, by_user, overlap, absent,
-                                store.shares_stats(user["id"]),
-                                profile,
+    return render.together_page(user, people, by_user, overlap, absent,
                                 bool(creds_of(user).get("jiten_key")),
                                 request.args.get("note", ""),
                                 {p["id"]: store.currently_of(p["id"])
                                  for p in people},
                                 race, quiet,
                                 store.shares_kanji(user["id"]))
+
+
+@app.get("/profile")
+def profile():
+    """How you appear: who may see your lists, and what is under your name.
+
+    Both panels used to head the Together page. They are settings - read once,
+    scrolled past every time after - and they stood between the reader and the
+    thing that page is for.
+    """
+    user = require_login()
+    vis = store.get_visibility(user["id"])
+    # The "currently" menu offers what you are on, which is the same list the
+    # shared page draws from.
+    choices = [r for r in store.lists_of(user["id"])
+               if r["status"] == "ongoing"]
+    return render.profile_page(
+        user, vis,
+        store.share_token(user["id"]) if vis in ("link", "public") else "",
+        request.url_root.rstrip("/"),
+        store.shares_stats(user["id"]), store.shares_kanji(user["id"]),
+        store.get_profile(user["id"]), choices,
+        request.args.get("note", ""))
 
 
 @app.post("/together/share")
@@ -807,7 +825,7 @@ def set_sharing():
             _ids, _status, everything, _raw = user_decks(key, user["id"])
             if everything:
                 store.put_shared_lists(user["id"], everything)
-    return redirect(url_for("together"))
+    return redirect(url_for("profile"))
 
 
 # --------------------------------------------------------------------- forum
@@ -984,7 +1002,7 @@ def save_profile():
         elif request.form.get(f"clear_{kind}") == "1":
             store.set_image(user["id"], kind, None)
     note = "; ".join(problems) if problems else "Profile saved."
-    return redirect(url_for("together", note=note))
+    return redirect(url_for("profile", note=note))
 
 
 # An allow-list rather than a path: the name arrives from the URL, and
@@ -1149,7 +1167,7 @@ def media(kind, user_id):
 def new_share_link():
     user = require_login()
     store.share_token(user["id"], regenerate=True)
-    return redirect(url_for("together"))
+    return redirect(url_for("profile"))
 
 
 def _public_view(owner):

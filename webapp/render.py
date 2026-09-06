@@ -1348,7 +1348,8 @@ def _skeleton_head(title: str, user=None, page: str = "") -> str:
         tabs = [("/", "today", "today"), ("/levels", "levels", "levels"),
                 ("/kanji", "kanji", "kanji"), ("/browse", "browse", "browse"),
                 ("/together", "together", ""),
-                ("/forum", "forum", "forum"), ("/settings", "settings", "")]
+                ("/forum", "forum", "forum"), ("/profile", "profile", ""),
+                ("/settings", "settings", "")]
         if user.get("is_admin"):
             tabs.append(("/invites", "invites", ""))
         bar = ('<div class="topbar"><nav>'
@@ -4024,21 +4025,20 @@ def race_track(race, quiet) -> str:
     </div>"""
 
 
-def together_page(user, visibility, token, base_url, people, by_user, overlap,
-                  absent, share_stats=False, profile=None, can_add=False,
+def together_page(user, people, by_user, overlap, absent, can_add=False,
                   note="", featured=None, race=None, quiet=None,
                   share_kanji=False) -> str:
+    """What everybody is on. The two panels that used to head this page - who
+    may see your lists, and what your own looks like - are on /profile now:
+    they are settings, they were read once and scrolled past every time after,
+    and they stood between you and the thing you came for."""
     featured = featured or {}
-    head = share_panel(visibility, token, base_url, user["username"],
-                       share_stats, share_kanji)
     race = race or []
-    head += race_track(race, quiet or [])
+    head = race_track(race, quiet or [])
     head += climb_chart(race)
     head += showed_up(race)
     head += shelf_card(race)
     head += kanji_gap(race, share_kanji)
-    head += profile_panel(profile or {}, user,
-                          by_user.get(user["id"], {}).get("ongoing", []))
     if note:
         head = f'<div class="ok">{esc(note)}</div>' + head
     mine = {r["deck_id"]: r for st in by_user.get(user["id"], {}).values()
@@ -4153,6 +4153,41 @@ document.querySelectorAll('[data-add]').forEach(function (btn) {
 });
 </script>
 """
+
+
+def profile_page(user, visibility, token, base_url, share_stats, share_kanji,
+                 profile, choices, note="") -> str:
+    """Everything about how you appear, in one place.
+
+    Who may see your lists, what goes on the shared pages, and the picture and
+    the line under your name. It is the same two panels that used to sit at the
+    top of Together - they are settings, and Together is a place you go to look
+    at other people.
+    """
+    msg = f'<div class="ok">{esc(note)}</div>' if note else ""
+    # Where it can actually be read, if anywhere. Saying "here is your public
+    # page" to somebody who has shared nothing is worse than saying nothing.
+    if visibility == "public":
+        seen = (f'<p class="sub">Anybody can read it at '
+                f'<a href="/u/{esc(user["username"])}" target="_blank"'
+                f' rel="noopener">{esc(base_url)}/u/{esc(user["username"])}</a>'
+                f' &mdash; open it to see exactly what they get.</p>')
+    elif visibility == "link":
+        seen = (f'<p class="sub">Whoever you send the secret link to reads it at '
+                f'<a href="/s/{esc(token)}" target="_blank" rel="noopener">that '
+                f'address</a> &mdash; open it to see exactly what they get.</p>')
+    elif visibility == "instance":
+        seen = ('<p class="sub">The others here see this on '
+                '<a href="/together">Together</a>. Nobody outside can.</p>')
+    else:
+        seen = ('<p class="sub">Nothing of this is shared yet, and nothing is '
+                'stored. Pick who can see your lists above and it starts.</p>')
+    body = (f'<h1>Profile</h1>{msg}'
+            + share_panel(visibility, token, base_url, user["username"],
+                          share_stats, share_kanji)
+            + profile_panel(profile or {}, user, choices)
+            + f'<h2>How it reads</h2>{seen}')
+    return shell("Profile", body, user=user, scripts=SHARE_JS)
 
 
 def avatar_tag(user_id: int, has: bool, name: str, cls: str = "avatar") -> str:
