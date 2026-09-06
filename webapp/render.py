@@ -838,7 +838,15 @@ html[data-dir="back"]::view-transition-new(root) { animation:inleft 320ms var(--
    that it reads as the page settling rather than as a performance. */
 /* One movement per page, and a short one. Everything used to arrive twice:
    the section rose, and then the four hundred squares inside it rose too. */
-main > *:not(.topbar):not(nav) { animation:settle 260ms var(--ease) both; }
+/* backwards, not both. "both" keeps the animation filling after it has
+   finished, and an animation that is still in effect on opacity or transform
+   keeps its element a stacking context - permanently. Every section of every
+   page was one, so a later section painted over an earlier one whatever was
+   inside it, and the tag menu on browse went under the paragraph and the
+   textarea below it however high its own z-index was. "backwards" holds the
+   from-state through the delay, which is all the stagger ever needed, and
+   stops applying once the run is over. */
+main > *:not(.topbar):not(nav) { animation:settle 260ms var(--ease) backwards; }
 main > *:nth-child(2)  { animation-delay:15ms; }
 main > *:nth-child(3)  { animation-delay:30ms; }
 main > *:nth-child(4)  { animation-delay:45ms; }

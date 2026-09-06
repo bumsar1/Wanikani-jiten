@@ -798,10 +798,11 @@ def profile():
     """
     user = require_login()
     vis = store.get_visibility(user["id"])
-    # The "currently" menu offers what you are on, which is the same list the
-    # shared page draws from.
-    choices = [r for r in store.lists_of(user["id"])
-               if r["status"] == "ongoing"]
+    # The "currently" menu offers what you are on. lists_of returns a dict
+    # keyed by status, not a list of rows - iterating it walks the status
+    # names, and an empty account has none of those, which is why this looked
+    # fine until it met a real one.
+    choices = store.lists_of(user["id"]).get("ongoing", [])
     return render.profile_page(
         user, vis,
         store.share_token(user["id"]) if vis in ("link", "public") else "",
