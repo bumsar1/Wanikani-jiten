@@ -1480,6 +1480,7 @@ def settings_page(user, creds, note: str = "", error: str = "",
           <option value="kanji">Kanji you can read</option>
           <option value="sakura">Sakura petals</option>
           <option value="rain">Rain</option>
+          <option value="storm">Thunderstorm</option>
           <option value="snow">Snow</option>
         </select></label>
       <label class="rainbox"><span>How much of it</span>
@@ -2232,12 +2233,18 @@ html.hasbg .splash { background:var(--panel); }
 /* What falls, and in what colour. Two properties rather than one shared ink:
    a petal is pink in either theme, but snow that is white on a white page is
    not snow, it is nothing. */
-:root { --petal:#e79ab6; --flake:#8ca3c4; --drop:#6f89ab; }
+:root { --petal:#e79ab6; --flake:#8ca3c4; --drop:#6f89ab;
+  /* A white bolt on a white page is nothing, so on the light theme the fork
+     is a deep blue read as a silhouette and the sky goes blue rather than
+     bright. On the dark theme both are near-white, the way lightning
+     actually looks. */
+  --bolt:#3f558a; --flash:#8aa6dd; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --petal:#f7bcd2; --flake:#e8eef7;
-    --drop:#a9c0e0; }
+    --drop:#a9c0e0; --bolt:#e7efff; --flash:#c9d8f5; }
 }
-:root[data-theme="dark"] { --petal:#f7bcd2; --flake:#e8eef7; --drop:#a9c0e0; }
+:root[data-theme="dark"] { --petal:#f7bcd2; --flake:#e8eef7; --drop:#a9c0e0;
+  --bolt:#e7efff; --flash:#c9d8f5; }
 
 /* Behind everything, in front of nothing. The canvas is transparent and the
    glyphs are painted at a tenth of full strength, because this sits under
@@ -2368,7 +2375,10 @@ RAIN_JS = """
   // value reads as kanji, which is what a browser holding the old single
   // setting has.
   const SKEY = 'wk-fall';
-  const STYLES = {kanji: 1, sakura: 1, rain: 1, snow: 1};
+  const STYLES = {kanji: 1, sakura: 1, rain: 1, storm: 1, snow: 1};
+  // Rain and storm are the same animal at different weights, so most of the
+  // code asks this rather than naming them one at a time.
+  const WET = {rain: 1, storm: 1};
   const style = () => { try { const v = localStorage.getItem(SKEY);
                               return STYLES[v] ? v : 'kanji'; }
                         catch(e){ return 'kanji'; } };
@@ -2573,7 +2583,14 @@ RAIN_JS = """
   const BITS = {few: 40000, lots: 18000};   // one for every this many px2
   // Rain is not weather anybody notices one drop of, so there are more of
   // them for the same setting - and the ceiling rises with them.
-  const DENSER = {rain: 0.42};
+  const DENSER = {rain: 0.42, storm: 0.22};
+  // How hard it is coming down. Storm is not rain with more drops in it: they
+  // are longer, faster, thicker and harder to see through, which is what makes
+  // it read as weather to stay indoors for.
+  const WET_SET = {
+    rain:  {vy: [6, 5],  len: [8, 14],  r: [0.6, 0.7], a: [0.16, 0.24], gust: 1},
+    storm: {vy: [9, 7],  len: [14, 20], r: [0.7, 0.9], a: [0.2, 0.28],  gust: 1.7},
+  };
   // One slant for all of them, because wind blows on a whole street at once
   // and drops going their own separate ways read as sparks. But not one fixed
   // slant: rain that leans the same way for ever is a hatch pattern, so the
@@ -2593,18 +2610,20 @@ RAIN_JS = """
   let bits = [];
   function newBit(scatter){
     const kind = style();
-    if (kind === 'rain'){
+    if (WET[kind]){
       // A drop is its own streak, so it carries a length and a thickness
       // instead of a radius, and it neither sways nor turns.
-      const vy = 6 + Math.random() * 5;
+      const k = WET_SET[kind] || WET_SET.rain;
+      const roll = (p) => p[0] + Math.random() * p[1];
+      const vy = roll(k.vy);
       return {
         x: Math.random() * (w + 160) - 120,
         y: scatter ? Math.random() * h : -20,
-        r: 0.6 + Math.random() * 0.7, len: 8 + Math.random() * 14,
+        r: roll(k.r), len: roll(k.len),
         // vx is worked out from the wind every frame; this is only its first.
-        vy: vy, vx: vy * wind(),
+        vy: vy, vx: vy * wind() * k.gust,
         sway: 0, dsway: 0, amp: 0, spin: 0, dspin: 0,
-        a: 0.16 + Math.random() * 0.24,
+        a: roll(k.a),
       };
     }
     const snow = kind === 'snow';
@@ -2634,7 +2653,76 @@ RAIN_JS = """
     return Array.from({length: want}, () => newBit(true));
   }
   const INK = {sakura: ['--petal', '#e79ab6'], snow: ['--flake', '#e8eef7'],
-               rain: ['--drop', '#6f89ab']};
+               rain: ['--drop', '#6f89ab'], storm: ['--drop', '#6f89ab']};
+  // The storm's lightning. Rare enough to be an event rather than a texture -
+  // seven to twenty seconds apart - and deliberately not a strobe: one pale
+  // wash at well under half strength, over in a fifth of a second. It is also
+  // painted on the canvas, which sits behind the page, so it lights the
+  // margins and whatever the page is letting through and never a card.
+  let strike = null, nextBolt = 0;
+  // Bright, nearly out, bright again, gone. Lightning flickers; one clean fade
+  // reads as somebody switching a lamp off.
+  const FLASH = [0.42, 0.10, 0.34, 0.18, 0.10, 0.05, 0.02];
+  function fork(x, y, steps, spread){
+    const p = [[x, y]];
+    for (let i = 0; i < steps; i++){
+      x += (Math.random() - 0.5) * spread;
+      y += 14 + Math.random() * 26;
+      p.push([x, y]);
+    }
+    return p;
+  }
+  function newStrike(){
+    const main = fork(w * (0.12 + Math.random() * 0.76), -12,
+                      8 + ((Math.random() * 6) | 0), 40);
+    const arms = [];
+    // One branch off a joint somewhere in the middle. A single unbranched
+    // line is a crack in the screen, not a bolt.
+    if (main.length > 4){
+      const j = 2 + ((Math.random() * (main.length - 3)) | 0);
+      arms.push(fork(main[j][0], main[j][1], 2 + ((Math.random() * 3) | 0), 58));
+    }
+    return {main: main, arms: arms, t: 0};
+  }
+  function trace(p, width, alpha, ink){
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(p[0][0], p[0][1]);
+    for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1]);
+    ctx.stroke();
+  }
+  function lightning(cs){
+    const now = Date.now();
+    if (!strike && now > nextBolt){
+      // Nothing on the very first tick: a page should not open with a bang.
+      if (nextBolt) strike = newStrike();
+      nextBolt = now + 7000 + Math.random() * 13000;
+    }
+    if (!strike) return;
+    const k = FLASH[strike.t];
+    if (k === undefined){ strike = null; return; }
+    strike.t++;
+    const bolt = (cs.getPropertyValue('--bolt') || '').trim() || '#e7efff';
+    const sky = (cs.getPropertyValue('--flash') || '').trim() || '#c9d8f5';
+    ctx.save();
+    ctx.globalAlpha = k;
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+    // The fork only while the sky is still lit, and drawn twice: a wide soft
+    // pass for the glow around the channel, a thin bright one for the channel.
+    if (k > 0.08){
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const p of [strike.main].concat(strike.arms)){
+        trace(p, 7, k * 0.5, bolt);
+        trace(p, 1.7, Math.min(1, k * 2.2), bolt);
+      }
+    }
+    ctx.restore();
+  }
+
   function paintBits(){
     const kind = style();
     const cs = getComputedStyle(document.documentElement);
@@ -2644,10 +2732,12 @@ RAIN_JS = """
     ctx.strokeStyle = ink;
     ctx.lineCap = 'round';
     // Once for the frame, not once per drop: they are all in the same weather.
-    const lean = kind === 'rain' ? wind() : 0;
+    const lean = WET[kind]
+      ? wind() * ((WET_SET[kind] || WET_SET.rain).gust) : 0;
+    if (kind === 'storm') lightning(cs);
     for (const b of bits){
       b.y += b.vy;
-      if (kind === 'rain'){
+      if (WET[kind]){
         b.vx = b.vy * lean;
         b.x += b.vx;
         // Off the bottom, or carried off either side - the wind goes both
@@ -2855,6 +2945,7 @@ RAIN_JS = """
   const FALLNAME = {kanji: ['\u2604', 'The falling kanji'],
                     sakura: ['\u273f', 'The falling petals'],
                     rain: ['\u2602', 'The rain'],
+                    storm: ['\u26a1', 'The storm'],
                     snow: ['\u2744', 'The falling snow']};
   // Hoisted, because changing what falls has to redraw this button too and
   // the settings select is wired somewhere else entirely.
