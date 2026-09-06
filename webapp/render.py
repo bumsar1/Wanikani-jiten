@@ -3483,7 +3483,14 @@ FORUM_CSS = """
 .cheer span { font-size:13.5px; color:var(--muted); }
 .cheer .lv { color:var(--accent); font-weight:600; }
 
-.acts { display:flex; align-items:center; gap:14px; margin-top:11px;
+/* Scoped to a post. Unqualified, this also caught the browse table's
+   <td class="acts">, which holds the "when?" button and the "add to..." menu:
+   display:flex stopped it being a table cell, so it no longer filled the row,
+   and the margin and border-top gave it a rule of its own eleven pixels below
+   the row's - which is the line that looked shifted when a search came in.
+   Measured: five cells 71px tall from the row's top, and that one 57px tall
+   starting 11px down. */
+.post .acts { display:flex; align-items:center; gap:14px; margin-top:11px;
   padding-top:10px; border-top:1px solid var(--line); }
 .like { display:inline-flex; align-items:center; gap:6px; font:inherit;
   font-size:13px; border:1px solid var(--line); background:var(--bg);
@@ -3492,7 +3499,7 @@ FORUM_CSS = """
 .like:hover { color:var(--fg); }
 .like.on { background:var(--accent); border-color:transparent; color:#fff; }
 .like b { font-weight:600; font-variant-numeric:tabular-nums; }
-.acts .ccount { font-size:12.5px; color:var(--faint); }
+.post .acts .ccount { font-size:12.5px; color:var(--faint); }
 .comments { margin-top:11px; }
 .cmt { display:grid; grid-template-columns:24px 1fr max-content; gap:8px;
   align-items:start; padding:6px 0; }
