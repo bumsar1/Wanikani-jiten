@@ -4187,10 +4187,10 @@ what level it stops fighting you at.</p>
   <select id="sort">
     <option value="coverage">best coverage first</option>
     <option value="difficulty">easiest first</option>
-    <option value="wordCount">longest first</option>
+    <option value="charCount:0">shortest first</option>
+    <option value="charCount:1">longest first</option>
     <option value="communityVotes">most popular</option>
   </select>
-  <input id="minchars" type="number" placeholder="min chars" min="0" step="10000">
 </div>
 <div id="results" class="wrap"></div>
 <div id="detail"></div>
@@ -4279,19 +4279,22 @@ const picked = kind => [...chosen].filter(k => k[0] === kind)
 
 async function search(){
   const q = $('#q').value.trim();
-  const type = $('#type').value, sort = $('#sort').value;
-  const min = $('#minchars').value;
+  const type = $('#type').value;
+  // The direction travels with the field now. It was pinned to descending,
+  // which is why the menu could offer "longest first" and had no way at all to
+  // ask for something short - and short is what somebody looking for a visual
+  // novel to actually finish is after.
+  const [sort, order = '1'] = $('#sort').value.split(':');
   const genres = picked('g'), tags = picked('t');
-  if (!q && !type && !min && !genres && !tags){ $('#results').innerHTML =
+  if (!q && !type && !genres && !tags){ $('#results').innerHTML =
     '<p class="empty">Type a title and press Enter, or pick a filter.</p>'; return; }
   // A shape where the rows will be, rather than a word where they will not.
   $('#results').innerHTML = '<div class="skel"><i></i><i></i><i></i><i></i></div>';
-  let url = `/api/media-deck/get-media-decks?sortBy=${sort}&sortOrder=1`;
+  let url = `/api/media-deck/get-media-decks?sortBy=${sort}&sortOrder=${order}`;
   if (q) url += `&titleFilter=${encodeURIComponent(q)}`;
   if (type) url += `&mediaType=${type}`;
   if (genres) url += `&genres=${genres}`;
   if (tags) url += `&tags=${tags}`;
-  if (min) url += `&charCountMin=${min}`;
   lastUrl = url;
   fetched = new Map();
   page = 0;
@@ -4505,9 +4508,9 @@ if ($('#q')){
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); search(); }
   });
   $('#go').addEventListener('click', search);
-  for (const id of ['#type', '#sort', '#minchars'])
+  for (const id of ['#type', '#sort'])
     $(id).addEventListener('change', () => { if ($('#q').value.trim() ||
-      $('#type').value || $('#minchars').value || chosen.size) search(); });
+      $('#type').value || chosen.size) search(); });
 }
 """
 
@@ -4525,7 +4528,6 @@ tr.rowin { animation:rowin 300ms var(--ease) both; }
 /* Basis, not width: six controls have to share one row at the 876px the
    page gives them, and the search box absorbs whatever is left over. */
 .controls #q { flex:1 1 200px; }
-.controls #minchars { width:120px; }
 
 /* tag picker: a <details> pretending to be a multi-select */
 .tagpick { position:relative; }
