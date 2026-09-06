@@ -2120,15 +2120,29 @@ RAIN_CSS = """
    plain class and would otherwise put the solid values back. */
 html.seethru, html.glass {
   --scrim:rgba(250,248,245,.34); --panel:rgba(250,248,245,.34);
-  --raise:rgba(255,255,255,.62); --muted:#57514a; }
+  --raise:rgba(255,255,255,.62); --muted:#57514a; --float:#fff; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]).seethru,
   :root:not([data-theme="light"]).glass { --scrim:rgba(20,19,18,.38);
-    --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4; }
+    --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4;
+    --float:#1e1c1a; }
 }
 :root[data-theme="dark"].seethru, :root[data-theme="dark"].glass {
   --scrim:rgba(20,19,18,.38);
-  --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4; }
+  --panel:rgba(20,19,18,.34); --raise:rgba(30,28,26,.62); --muted:#b4ada4;
+  --float:#1e1c1a; }
+
+/* A thing that floats over the page stays solid. Making the page see-through
+   made --raise translucent, which is right for a card lying in the flow and
+   wrong for anything hovering above it: the tag menu on browse had the page
+   showing straight through its own list, which reads as the menu having gone
+   behind everything. It had not - it hit-tests on top, at z-index 30 - it had
+   gone see-through along with the rest.
+   --float is --raise everywhere else, so outside these two modes this changes
+   nothing at all. This block sits after the stylesheets that dress each of
+   these panels, so it is the last word on their background. */
+.tagmenu, .panel, .peek, .facebox .sheet, .dock .knob .badge {
+  background:var(--float); }
 /* One filter for the whole column rather than one per card: they are all
    translucent over the same painting, and one compositing layer is cheaper
    than twenty. */
@@ -2261,7 +2275,8 @@ html.hasbg .splash { background:var(--panel); }
 /* What falls, and in what colour. Two properties rather than one shared ink:
    a petal is pink in either theme, but snow that is white on a white page is
    not snow, it is nothing. */
-:root { --petal:#e79ab6; --flake:#8ca3c4; --drop:#6f89ab;
+:root { --float:var(--raise);
+  --petal:#e79ab6; --flake:#8ca3c4; --drop:#6f89ab;
   /* A white bolt on a white page is nothing, so on the light theme the fork
      is a deep blue read as a silhouette and the sky goes blue rather than
      bright. On the dark theme both are near-white, the way lightning
