@@ -575,21 +575,19 @@ CARD_JS = """
     heat.addEventListener('pointerleave', clear);
   }
 
-  // The chips are already on the page; this only decides whether they are
-  // shown, and staggers them so a wall of thirty becomes a run of thirty.
+  // The chips are already on the page, hidden, and this hands them to the
+  // overlay. They used to be un-hidden where they stood, which grew the card
+  // they were in - and the cards are one row, so all five grew with it and the
+  // page under them moved. A list you open to glance at should not rearrange
+  // the screen behind it.
   for (const btn of document.querySelectorAll('.card button.d')){
     const box = btn.nextElementSibling;
     if (!box) continue;
+    const card = btn.closest('.card');
+    const label = card && card.querySelector('.l');
     btn.addEventListener('click', () => {
-      const opening = box.hidden;
-      box.hidden = !opening;
-      btn.setAttribute('aria-expanded', String(opening));
-      if (opening)
-        [...box.children].forEach((c, i) => {
-          c.style.animation = 'none';
-          void c.offsetWidth;
-          c.style.animation = `tilein 260ms var(--ease) ${Math.round(i * 12)}ms both`;
-        });
+      window.wkChips(btn.textContent.trim(),
+                     label ? label.textContent.trim() : '', box.innerHTML);
     });
   }
 })();
@@ -2007,6 +2005,36 @@ BIG_JS = """
     setTimeout(() => box.classList.add('on'), 16);
     box.addEventListener('click', shutAll);
   };
+  // A list in the same overlay a picture gets: middle of the screen, page
+  // blurred behind it, Escape and a click outside to close. Everything below
+  // this - the dimming, the shutting, the key handler - is already here.
+  window.wkChips = function(title, note, html){
+    if (document.querySelector('.facebox')) return;
+    const box = document.createElement('div');
+    box.className = 'facebox chips';
+    box.innerHTML = '<div class="sheet" role="dialog" aria-modal="true">'
+      + '<header><h3></h3><span class="who"></span>'
+      + '<button class="shut" type="button" aria-label="Close">&times;</button>'
+      + '</header><div class="newly"></div></div>';
+    box.querySelector('h3').textContent = title;
+    box.querySelector('.who').textContent = note || '';
+    box.querySelector('.newly').innerHTML = html;
+    document.body.appendChild(box);
+    document.documentElement.classList.add('facedim');
+    setTimeout(() => box.classList.add('on'), 16);
+    // The same run of chips it had in the card, so it still reads as a list
+    // arriving rather than a block appearing.
+    [...box.querySelectorAll('.ni')].forEach((c, i) => {
+      c.style.animation =
+        `tilein 260ms var(--ease) ${Math.round(i * 10)}ms both`;
+    });
+    // Clicking the sheet is not asking to leave: the words in it are there to
+    // be read, and some of them to be copied.
+    box.addEventListener('click', (e) => {
+      if (!e.target.closest('.sheet') || e.target.closest('.shut')) shutAll();
+    });
+    box.querySelector('.shut').focus();
+  };
   addEventListener('keydown', (e) => {
     if (e.key === 'Escape') shutAll();
   });
@@ -2302,6 +2330,28 @@ main { position:relative; z-index:1; }
   border:3px solid var(--raise); box-shadow:0 24px 70px rgba(0,0,0,.5); }
 .facebox.round img { width:min(52vh, 78vw, 440px);
   height:min(52vh, 78vw, 440px); object-fit:cover; border-radius:50%; }
+/* The same overlay holding a list instead of a picture. It exists because the
+   list used to open inside its own card, and a card that grows takes the whole
+   row of cards with it: four columns stretched to the height of a hundred and
+   twenty words, for a thing you glance at and close. */
+.facebox.chips { cursor:default; }
+.facebox .sheet { background:var(--raise); border:1px solid var(--line);
+  border-radius:var(--r-panel); box-shadow:0 24px 70px rgba(0,0,0,.5);
+  padding:20px 22px 22px; width:min(92vw, 560px); max-height:78vh;
+  overflow:auto; cursor:default; transform:scale(.94);
+  transition:transform 220ms var(--ease); }
+.facebox.on .sheet { transform:scale(1); }
+.facebox .sheet header { display:flex; align-items:baseline; gap:10px;
+  margin:0 0 14px; }
+.facebox .sheet h3 { margin:0; font-size:16px; letter-spacing:-.01em; }
+.facebox .sheet .who { color:var(--muted); font-size:13px; }
+.facebox .sheet .shut { margin-left:auto; font:inherit; font-size:20px;
+  line-height:1; color:var(--muted); background:none; border:0; padding:0 2px;
+  cursor:pointer; }
+.facebox .sheet .shut:hover { color:var(--fg); }
+.facebox .sheet .newly { display:flex; flex-wrap:wrap; gap:5px; }
+@media (prefers-reduced-motion: reduce) { .facebox .sheet { transition:none; } }
+
 /* Anything that opens bigger says so on the way past. */
 .big { cursor:zoom-in; }
 img.avatar.big:hover { filter:brightness(1.08); }
@@ -4578,7 +4628,7 @@ def dashboard(user, cache, known, decks, history, extras, page: str = "today",
             chips = "".join(f'<span class="ni">{esc(c)}</span>' for c in items[:120])
             more = (f'<span class="ni more">+{len(items) - 120}</span>'
                     if len(items) > 120 else "")
-            d = (f'<button class="d" type="button" aria-expanded="false">'
+            d = (f'<button class="d" type="button" aria-haspopup="dialog">'
                  f'{delta:+d} since last refresh</button>'
                  f'<div class="newly" hidden>{chips}{more}</div>')
         return (f'<div class="card"><div class="n">{n}</div>'
